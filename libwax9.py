@@ -8,7 +8,6 @@ AUTHOR
 
 import bluetooth
 import select
-import time
 import sys
 import struct
 
@@ -39,7 +38,7 @@ def recvAll(socket, timeout):
     return response
 
 
-def connect(target_address, channel):
+def connect(target_address):
     """
     Connect to a WAX9 IMU sensor over bluetooth
 
@@ -50,15 +49,17 @@ def connect(target_address, channel):
     Returns:
     --------
       socket: Client connection to the sensor (bluetooth socket)
+      name (str): Sensor ID
     """
 
+    # I think the WAX9 sensors can only connect on channel 1
+    channel = 1
+
     name = bluetooth.lookup_name(target_address)
-    print("Connecting to {} at {} on channel {}...".format(name, target_address, channel))
     socket = bluetooth.BluetoothSocket(bluetooth.RFCOMM)
     socket.connect((target_address, channel))
-    print("Connected")
 
-    return socket
+    return (socket, name)
 
 
 def getSettings(socket):
@@ -74,7 +75,6 @@ def getSettings(socket):
       settings (str): WAX9 sensor settings
     """
 
-    print("Reading settings...")
     socket.sendall("settings\r\n")
     settings = recvAll(socket, 1)
 
@@ -94,62 +94,63 @@ def sample(socket):
       sample (str): Strings of IMU samples
     """
 
-    print("Reading a sample...")
     socket.sendall("sample\r\n")
     sample = recvAll(socket, 1)
 
     return sample
 
 
-def stream(socket, duration, q):
+def stream(socket):
     """
-    Stream data from WAX9 device for `duration` seconds
+    Stream data from WAX9 device until user inputs a newline
 
     Args:
     -----
       socket: WAX9 bluetooth socket
-      duration (float): Amount of time (in seconds) to stream
 
     Returns:
     --------
       sample (str): Strings of IMU samples
     """
 
-    print("Streaming...")
     # Tell the device to start streaming
     socket.sendall("stream\r\n")
 
     # Read data for two seconds
     stream = []
     prev_frame = ''
-    start_time = time.time()
-    while time.time() - start_time < duration:
+    stop = False
+    while True:
         # Wait 1 second before timing out
-        read_ready, write_ready, exept_ready = select.select([socket], [], [], 1)
+        read_ready, wr, er = select.select([socket], [], [], 1)
         if len(read_ready) == 0:
             break
         frame = socket.recv(36)
+        # The WAX9 device transmits SLIP-encoded data: packets begin and end
+        # with 0xC0. So if the frame doesn't end in 0xC0, we haven't received
+        # the entire packet yet.
         if not frame[-1] == '\xc0':
             frame = prev_frame + frame
             prev_frame = frame
+        # Make sure the packet we're about to write begins with 0xC0. Else we
+        # lost part of it somewhere. Only decode complete packets.
+        # FIXME: Warn or something when we lose a packet
         if frame[-1] == '\xc0' and len(frame) > 1:
             prev_frame = ''
-            #print('{}'.format(repr(frame)))
-            #print('')
             if frame[0] == '\xc0':
                 # Convert data from hex representation (see p. 7, 'WAX9 application
                 # developer's guide')
-                data = list(struct.unpack("<hIhhhhhhhhh", frame[3:27]))
-                data.append(time.time())
-                stream.append(data)
-            #    sys.stdout.write(str(time.time()) + '\t' + str(data))
+                line = list(struct.unpack("<hIhhhhhhhhh", frame[3:27]))
+                stream.append(line)
 
-    #print('')
+        # Abort if user has entered a blank line
+        if sys.stdin.read() == "\n":
+            break
 
     # Tell the device to stop streaming
     socket.sendall("\r\n")
 
-    q.put(stream)
+    return stream
 
 
 def setDataMode(socket, datamode):
