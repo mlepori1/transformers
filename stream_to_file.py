@@ -7,6 +7,7 @@ AUTHOR
 """
 
 import multiprocessing as mp
+from multiprocessing.queues import SimpleQueue
 import csv
 import time
 from libwax9 import *
@@ -61,10 +62,10 @@ def mpStream(socket, q, die):
         
         # Terminate when main tells us to
         if die.is_set():
+            print("Dying...")
+            # Tell the device to stop streaming
+            socket.sendall("\r\n")
             break
-
-    # Tell the device to stop streaming
-    socket.sendall("\r\n")
 
 
 def mpWrite(fname, q, die):
@@ -82,13 +83,14 @@ def mpWrite(fname, q, die):
     with open(fname, 'wb') as csvfile:
         csvwriter = csv.writer(csvfile)
         received_die = die.is_set()
-        while not q.empty and not received_die:
-            # Write data to file
-            csvwriter.writerow(line)
-
+        while not q.empty() or not received_die:
             # Keep checking for a kill message until we get one
             if not received_die:
                 received_die = die.is_set()
+            # Write data to file
+            if not q.empty():
+                line = q.get()
+                csvwriter.writerow(line)
 
 
 if __name__ == "__main__":
@@ -115,7 +117,7 @@ if __name__ == "__main__":
         devices[name] = socket
 
     # Stream data using one process for each WAX9 device
-    q = mp.Queue()
+    q = SimpleQueue()
     die = mp.Event()
     processes = []
     for dev_name, socket in devices.items():
@@ -130,6 +132,7 @@ if __name__ == "__main__":
     while True:
         user_in = input("Streaming... (press return to stop)")
         if not user_in:
+            print("Killing processes...")
             die.set()
             break
 
