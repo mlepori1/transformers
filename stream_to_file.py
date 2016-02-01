@@ -10,7 +10,39 @@ import multiprocessing as mp
 from multiprocessing.queues import SimpleQueue
 import csv
 import time
+import cv2
+import os
 from libwax9 import *
+
+
+def mpRecord(q, die):
+    """
+    [DESCRIPTION]
+
+    Args:
+    -----
+      q:
+      die:
+    """
+
+    dirname = str(int(time.time()))
+    os.mkdir(dirname)
+
+    cap = cv2.VideoCapture(0)
+
+    i = 0
+    while not die.is_set():
+        # Capture and save image
+        ret, frame = cap.read()
+        filename = str(i) + ".png"
+        cv2.imwrite(os.path.join(dirname, filename), frame)
+
+        # Record universal timestamp
+        q.put((i, time.time()))
+        i += 1
+
+    cap.release()
+
 
 def mpStream(socket, q, die):
     """
@@ -100,7 +132,7 @@ if __name__ == "__main__":
     if sys.version_info[0] == 2:
         input = raw_input
 
-    fname = "imu-data_{}.csv".format(int(time.time()))
+    fname = "rawdata_{}.csv".format(int(time.time()))
 
     addresses = ("00:17:E9:D7:08:F1",
                  "00:17:E9:D7:09:5D",
@@ -123,6 +155,7 @@ if __name__ == "__main__":
     for dev_name, socket in devices.items():
         p = mp.Process(name=dev_name, target=mpStream, args=(socket, q, die))
         processes.append(p)
+    processes.append(mp.Process(target=mpRecord, args=(q, die)))
     processes.append(mp.Process(target=mpWrite, args=(fname, q, die)))
 
     for p in processes:
@@ -135,7 +168,7 @@ if __name__ == "__main__":
             print("Killing processes...")
             die.set()
             break
-
+    
     for p in processes:
         p.join()
 
