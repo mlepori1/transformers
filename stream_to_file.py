@@ -6,6 +6,9 @@ AUTHOR
   Jonathan D. Jones
 """
 
+from primesense import openni2
+import numpy as np
+from itertools import cycle
 import multiprocessing as mp
 from multiprocessing.queues import SimpleQueue
 import csv
@@ -15,55 +18,88 @@ import os
 from libwax9 import *
 
 
-def mpRecord(q, die):
+def mpStreamVideo(q, die):
     """
-    [DESCRIPTION]
+    Stream data from camera until die is set
 
     Args:
     -----
-      q:
-      die:
+      q: Multiprocessing queue, for collecting data
+      die: Multiprocessing event, kill signal
     """
 
     dirname = str(int(time.time()))
     os.mkdir(dirname)
 
-    cap = cv2.VideoCapture(0)
+    openni2.initialize()
+    dev = openni2.Device.open_any()
+
+    # Start streaming color video
+    color_stream = dev.create_color_stream()
+    color_stream.start()
+
+    # Start streaming depth video
+    depth_stream = dev.create_depth_stream()
+    depth_stream.start()
 
     i = 0
     while not die.is_set():
-        # Capture and save image
-        ret, frame = cap.read()
-        filename = str(i) + ".png"
-        cv2.imwrite(os.path.join(dirname, filename), frame)
 
-        # Record universal timestamp
-        q.put((i, time.time()))
+        # Read depth frame data, convert to image matrix, write to file,
+        # record frame timestamp
+        frametime = time.time()
+        depth_frame = depth_stream.read_frame()
+        depth_data = depth_frame.get_buffer_as_uint16()
+        depth_array = np.ndarray((depth_frame.height, depth_frame.width),
+                                 dtype=np.uint16, buffer=depth_data)
+        filename = str(i) + "_depth" + ".png"
+        cv2.imwrite(os.path.join(dirname, filename), depth_array)
+        q.put((filename, frametime))
+
+        # Read color frame data, convert to image matrix, write to file,
+        # record frame timestamp
+        frametime = time.time()
+        color_frame = color_stream.read_frame()
+        color_data = color_frame.get_buffer_as_uint8()
+        color_array = np.ndarray((color_frame.height, 3*color_frame.width),
+                                 dtype=np.uint8, buffer=color_data)
+        color_array = np.dstack((color_array[:,2::3], color_array[:,1::3],
+            color_array[:,0::3]))
+        filename = str(i) + "_rgb"  + ".png"
+        cv2.imwrite(os.path.join(dirname, filename), color_array)
+        q.put((filename, frametime))
+
         i += 1
 
-    cap.release()
+    # Stop streaming
+    depth_stream.stop()
+    color_stream.stop()
+    openni2.unload()
 
 
-def mpStream(socket, q, die):
+def mpStreamImu(devices, q, die):
     """
-    Stream data from WAX9 device until die is set
+    Stream data from WAX9 devices until die is set
 
     Args:
     -----
-      socket: WAX9 bluetooth socket
+      devices: Dict w/ device names as keys and their sockets as values
       q: Multiprocessing queue, for collecting data
       die: Multiprocessing event, kill signal
     """
 
-    # Name the current process after the device we're streaming from
-    dev_id = mp.current_process().name
+    # This allows us to cycle through device names -> sockets in the main loop
+    dev_names = cycle(devices.keys())
 
     # Tell the device to start streaming
-    socket.sendall("stream\r\n")
+    for socket in devices.values():
+        socket.sendall("stream\r\n")
 
-    # Read data until told to terminate
+    # Read data sequentially from sensors until told to terminate
     stream = []
     prev_frame = ''
+    dev_id = dev_names.next()
+    socket = devices[dev_id]
     while True:
         # Wait 1 second before timing out
         # FIXME: It might not be necessary to check if the socket's ready to
@@ -79,11 +115,15 @@ def mpStream(socket, q, die):
         if not frame[-1] == '\xc0':
             frame = prev_frame + frame
             prev_frame = frame
-        # Make sure the packet we're about to write begins with 0xC0. Else we
-        # lost part of it somewhere. Only decode complete packets.
-        # FIXME: Warn or something when we lose a packet
         if frame[-1] == '\xc0' and len(frame) > 1:
+            # When we reach the end of a packet, reset prev_frame and cycle to
+            # the next device
+            dev_id = dev_names.next()
+            socket = devices[dev_id]
             prev_frame = ''
+            # Make sure the packet we're about to write begins with 0xC0. Else we
+            # lost part of it somewhere. Only decode complete packets.
+            # FIXME: Warn or something when we lose a packet
             if frame[0] == '\xc0':
                 # Convert data from hex representation (see p. 7, 'WAX9 application
                 # developer's guide')
@@ -96,7 +136,8 @@ def mpStream(socket, q, die):
         if die.is_set():
             print("Dying...")
             # Tell the device to stop streaming
-            socket.sendall("\r\n")
+            for socket in devices.values():
+                socket.sendall("\r\n")
             break
 
 
@@ -108,8 +149,8 @@ def mpWrite(fname, q, die):
     Args:
     -----
       fname (str): output file name
-      q: Multiprocessing queue
-      die:
+      q: Multiprocessing queue, for collecting data
+      die: Multiprocessing event, kill signal
     """
 
     with open(fname, 'wb') as csvfile:
@@ -148,14 +189,12 @@ if __name__ == "__main__":
         print(getSettings(socket))
         devices[name] = socket
 
-    # Stream data using one process for each WAX9 device
+    # Stream data
     q = SimpleQueue()
     die = mp.Event()
     processes = []
-    for dev_name, socket in devices.items():
-        p = mp.Process(name=dev_name, target=mpStream, args=(socket, q, die))
-        processes.append(p)
-    processes.append(mp.Process(target=mpRecord, args=(q, die)))
+    processes.append(mp.Process(target=mpStreamImu, args=(devices, q, die)))
+    processes.append(mp.Process(target=mpStreamVideo, args=(q, die)))
     processes.append(mp.Process(target=mpWrite, args=(fname, q, die)))
 
     for p in processes:

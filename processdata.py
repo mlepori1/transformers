@@ -26,7 +26,7 @@ def allNotEmpty(queues):
 name2pos = {'WAX9-08F1':0, 'WAX9-090F':1, 'WAX9-095D':2, 'WAX9-0949':3}
 queues = [deque() for i in name2pos.items()]
 
-filename = "imu-data_1453909220.csv"
+filename = "rawdata_1454709630.csv"
 with open(filename, 'r') as csvfile:
     csvreader = csv.reader(csvfile)
     for row in csvreader:
