@@ -1,20 +1,21 @@
 """
-stream_to_file.py
-  Connect to four WAX9 IMUs, stream data, write to CSV
+streamdata.py
+  Connect to four WAX9 IMUs and a PrimeSense camera, stream data, write to CSV
 
 AUTHOR
   Jonathan D. Jones
 """
 
-from primesense import openni2
 import numpy as np
-from itertools import cycle
 import multiprocessing as mp
 from multiprocessing.queues import SimpleQueue
-import csv
-import time
+from primesense import openni2
 import cv2
+import csv
 import os
+import sys
+import time
+from itertools import cycle
 from libwax9 import *
 
 
@@ -38,13 +39,15 @@ def mpStreamVideo(q, die):
     color_stream = dev.create_color_stream()
     color_stream.start()
 
+    """
     # Start streaming depth video
     depth_stream = dev.create_depth_stream()
     depth_stream.start()
+    """
 
     i = 0
     while not die.is_set():
-
+        """
         # Read depth frame data, convert to image matrix, write to file,
         # record frame timestamp
         frametime = time.time()
@@ -55,6 +58,7 @@ def mpStreamVideo(q, die):
         filename = str(i) + "_depth" + ".png"
         cv2.imwrite(os.path.join(dirname, filename), depth_array)
         q.put((filename, frametime))
+        """
 
         # Read color frame data, convert to image matrix, write to file,
         # record frame timestamp
@@ -65,14 +69,14 @@ def mpStreamVideo(q, die):
                                  dtype=np.uint8, buffer=color_data)
         color_array = np.dstack((color_array[:,2::3], color_array[:,1::3],
             color_array[:,0::3]))
-        filename = str(i) + "_rgb"  + ".png"
+        filename = "rgb_" + str(i)  + ".png"
         cv2.imwrite(os.path.join(dirname, filename), color_array)
-        q.put((filename, frametime))
+        q.put((i, frametime, "IMG_RGB"))
 
         i += 1
 
     # Stop streaming
-    depth_stream.stop()
+    #depth_stream.stop()
     color_stream.stop()
     openni2.unload()
 
@@ -104,9 +108,9 @@ def mpStreamImu(devices, q, die):
         # Wait 1 second before timing out
         # FIXME: It might not be necessary to check if the socket's ready to
         #   be read in this application
-        read_ready, wr, er = select.select([socket], [], [], 1)
-        if len(read_ready) == 0:
-            continue
+        #read_ready, wr, er = select.select([socket], [], [], 1)
+        #if len(read_ready) == 0:
+        #    continue
         frame = socket.recv(36)
 
         # The WAX9 device transmits SLIP-encoded data: packets begin and end
@@ -128,9 +132,12 @@ def mpStreamImu(devices, q, die):
                 # Convert data from hex representation (see p. 7, 'WAX9 application
                 # developer's guide')
                 line = list(struct.unpack("<hIhhhhhhhhh", frame[3:27]))
-                line.append(time.time())
-                line.append(dev_id)
-                q.put(line)
+            else:
+                line = 11 * [0]
+            line[0] = line[0]
+            line.append(time.time())
+            line.append(dev_id)
+            q.put(line)
         
         # Terminate when main tells us to
         if die.is_set():
@@ -166,6 +173,102 @@ def mpWrite(fname, q, die):
                 csvwriter.writerow(line)
 
 
+def processData(filename, dev_names):
+    """
+    [DESCRIPTION]
+
+    Args:
+    -----
+      filename (str):
+      dev_names (list(str)):
+
+    Returns:
+    --------
+      imu_data: numpy array
+      rgb_data: numpy vector
+      sample_len (int):
+    """
+    
+    num_devices = len(dev_names)
+    name2idx = {dev_names[i]: i for i in range(num_devices)}
+
+    imu_data = []
+    rgb_data = []
+    with open(filename, 'r') as csvfile:
+        csvreader = csv.reader(csvfile)
+        for row in csvreader:
+            sample_idx = int(row[0])
+            timestamp = float(row[-2])
+
+            # Rows w/ length 3 hold RGB frame data
+            if len(row) == 3:
+                for i in range(sample_idx - (len(rgb_data) - 1)):
+                    rgb_data.append(0.0)
+                rgb_data[sample_idx] = timestamp
+
+            # Rows w/ length 13 hold IMU data
+            if len(row) == 13:
+                sample = [timestamp] + [int(x) for x in row[1:-2]]
+                sample_len = len(sample)
+
+                # Anything indexed below 1 is bad data
+                # Any sample indexed more than 200 samples beyond the latest is
+                # almost definitely bad data
+                if sample_idx < 1 or sample_idx - len(imu_data) > 200:
+                    continue
+
+                dev_idx = name2idx[row[-1]]
+                for i in range(sample_idx - (len(imu_data) - 1)):
+                    imu_data.append([[0.0] * sample_len] * num_devices)
+                imu_data[sample_idx][dev_idx] = sample
+    
+    # Flatten nested lists in each row of IMU data and cast to tuple
+    imu_data = [[datum for sample in row for datum in sample] for row in imu_data]
+    return (np.array(imu_data), np.array(rgb_data), sample_len)
+
+
+def printPercentDropped(imu_data, dev_names, sample_len):
+    """
+    [DESCRIPTION]
+
+    Args:
+    -----
+      imu_data:
+      dev_names:
+      sample_len:
+
+    Returns:
+    --------
+      percent_dropped:
+    """
+
+    # These are aggregate drop/sample counts
+    total_dropped = 0.0
+    total_samples = 0.0
+
+    # For each device, count the number of timestamps near 0. These samples
+    # were corrupted (dropped) during data transmission
+    for i, name in enumerate(dev_names):
+        # Timestamp is the first datum in a sample
+        timestamp_idx = sample_len * i
+        num_dropped = np.sum(np.less_equal(imu_data[:,timestamp_idx], 1.0))
+        num_samples = imu_data[:,timestamp_idx].shape[0]
+
+        percent_dropped = float(num_dropped) / float(num_samples) * 100
+        fmtstr = "{}: {:0.1f}% of {} samples dropped"
+        print(fmtstr.format(name, percent_dropped, num_samples))
+
+        total_dropped += num_dropped
+        total_samples += num_samples
+
+    # Percent of samples dropped over all devices
+    percent_dropped = total_dropped / total_samples * 100
+    fmtstr = "TOTAL: {:0.1f}% of {} samples dropped"
+    print(fmtstr.format(percent_dropped, int(total_samples)))
+
+    return percent_dropped
+
+
 if __name__ == "__main__":
     
     # raw_input() in python 2.x is input() in python 3.x
@@ -173,17 +276,18 @@ if __name__ == "__main__":
     if sys.version_info[0] == 2:
         input = raw_input
 
-    fname = "rawdata_{}.csv".format(int(time.time()))
-
     addresses = ("00:17:E9:D7:08:F1",
                  "00:17:E9:D7:09:5D",
                  "00:17:E9:D7:09:0F",
                  "00:17:E9:D7:09:49")
 
+    init_time = int(time.time())
+
     # Connect to devices and print settings
     devices = {}
     for address in addresses:
         print("Connecting at {}...".format(address))
+        # FIXME: check if name is empty string and redo if so
         socket, name = connect(address)
         print("Connected, device ID {}".format(name))
         print(getSettings(socket))
@@ -195,6 +299,7 @@ if __name__ == "__main__":
     processes = []
     processes.append(mp.Process(target=mpStreamImu, args=(devices, q, die)))
     processes.append(mp.Process(target=mpStreamVideo, args=(q, die)))
+    fname = "rawdata_{}.csv".format(init_time)
     processes.append(mp.Process(target=mpWrite, args=(fname, q, die)))
 
     for p in processes:
@@ -216,3 +321,12 @@ if __name__ == "__main__":
         print("Disconnecting from {}".format(dev_name))
         socket.close()
 
+    # Massage and save data
+    imu_data, rgb_data, sample_len = processData(fname, devices.keys())
+    fname = 'imudata_{}.csv'.format(init_time)
+    fmtstr = len(devices) * (['%15f'] + (sample_len - 1) * ['%i'])
+    np.savetxt(fname, imu_data, delimiter=',', fmt=fmtstr)
+    fname = 'rgbdata_{}.csv'.format(init_time)
+    np.savetxt(fname, rgb_data, delimiter=',', fmt='%15f')
+
+    percent_dropped = printPercentDropped(imu_data, devices.keys(), sample_len)
