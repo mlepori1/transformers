@@ -19,31 +19,24 @@ from itertools import cycle
 from libwax9 import *
 
 
-def mpStreamVideo(q, die):
+def streamVideo(path, q, die):
     """
     Stream data from camera until die is set
 
     Args:
     -----
+      path:
       q: Multiprocessing queue, for collecting data
       die: Multiprocessing event, kill signal
     """
 
-    dirname = str(int(time.time()))
-    os.mkdir(dirname)
-
+    # Start streaming rgb video
     openni2.initialize()
     dev = openni2.Device.open_any()
-
-    # Start streaming color video
+    #depth_stream = dev.create_depth_stream()
     color_stream = dev.create_color_stream()
-    color_stream.start()
-
-    """
-    # Start streaming depth video
-    depth_stream = dev.create_depth_stream()
-    depth_stream.start()
-    """
+    for stream in [color_stream]: #, depth_stream]:
+        stream.start()
 
     i = 0
     while not die.is_set():
@@ -55,9 +48,9 @@ def mpStreamVideo(q, die):
         depth_data = depth_frame.get_buffer_as_uint16()
         depth_array = np.ndarray((depth_frame.height, depth_frame.width),
                                  dtype=np.uint16, buffer=depth_data)
-        filename = str(i) + "_depth" + ".png"
+        filename = "depth_" + str(i) + ".png"
         cv2.imwrite(os.path.join(dirname, filename), depth_array)
-        q.put((filename, frametime))
+        q.put((i, frametime, "IMG_DEPTH"))
         """
 
         # Read color frame data, convert to image matrix, write to file,
@@ -70,7 +63,7 @@ def mpStreamVideo(q, die):
         color_array = np.dstack((color_array[:,2::3], color_array[:,1::3],
             color_array[:,0::3]))
         filename = "rgb_" + str(i)  + ".png"
-        cv2.imwrite(os.path.join(dirname, filename), color_array)
+        cv2.imwrite(os.path.join(path, filename), color_array)
         q.put((i, frametime, "IMG_RGB"))
 
         i += 1
@@ -81,7 +74,7 @@ def mpStreamVideo(q, die):
     openni2.unload()
 
 
-def mpStreamImu(devices, q, die):
+def streamImu(devices, q, die):
     """
     Stream data from WAX9 devices until die is set
 
@@ -105,12 +98,6 @@ def mpStreamImu(devices, q, die):
     dev_id = dev_names.next()
     socket = devices[dev_id]
     while True:
-        # Wait 1 second before timing out
-        # FIXME: It might not be necessary to check if the socket's ready to
-        #   be read in this application
-        #read_ready, wr, er = select.select([socket], [], [], 1)
-        #if len(read_ready) == 0:
-        #    continue
         frame = socket.recv(36)
 
         # The WAX9 device transmits SLIP-encoded data: packets begin and end
@@ -134,7 +121,6 @@ def mpStreamImu(devices, q, die):
                 line = list(struct.unpack("<hIhhhhhhhhh", frame[3:27]))
             else:
                 line = 11 * [0]
-            line[0] = line[0]
             line.append(time.time())
             line.append(dev_id)
             q.put(line)
@@ -148,19 +134,19 @@ def mpStreamImu(devices, q, die):
             break
 
 
-def mpWrite(fname, q, die):
+def write(path, q, die):
     """
     Write data on queue to file until a kill signal is received. Once the kill
     signal is received, write what's left on the queue, then terminate
 
     Args:
     -----
-      fname (str): output file name
+      path (str):
       q: Multiprocessing queue, for collecting data
       die: Multiprocessing event, kill signal
     """
 
-    with open(fname, 'wb') as csvfile:
+    with open(path, 'wb') as csvfile:
         csvwriter = csv.writer(csvfile)
         received_die = die.is_set()
         while not q.empty() or not received_die:
@@ -173,13 +159,13 @@ def mpWrite(fname, q, die):
                 csvwriter.writerow(line)
 
 
-def processData(filename, dev_names):
+def processData(path, dev_names):
     """
     [DESCRIPTION]
 
     Args:
     -----
-      filename (str):
+      path (str):
       dev_names (list(str)):
 
     Returns:
@@ -194,7 +180,7 @@ def processData(filename, dev_names):
 
     imu_data = []
     rgb_data = []
-    with open(filename, 'r') as csvfile:
+    with open(path, 'r') as csvfile:
         csvreader = csv.reader(csvfile)
         for row in csvreader:
             sample_idx = int(row[0])
@@ -275,13 +261,27 @@ if __name__ == "__main__":
     # Below is for compatibility with python 2
     if sys.version_info[0] == 2:
         input = raw_input
+    
+    # Define pathnames and filenames for the data from this trial
+    init_time = str(int(time.time()))   # Used as a trial identifier
+    raw_path = os.path.join("data", "raw")
+    imu_path = os.path.join("data", "imu")
+    rgb_path = os.path.join("data", "rgb")
+    rgb_trial_path = os.path.join(rgb_path, init_time)
+    rgb_timestamp_path = os.path.join(rgb_trial_path, "frame-timestamps.csv")
+    raw_file_path = os.path.join(raw_path, init_time + ".csv")
+    imu_file_path = os.path.join(imu_path, init_time + ".csv")
 
+    # Create data directories if they don't exist
+    for path in [raw_path, imu_path, rgb_trial_path]:
+        if not os.path.exists(path):
+            os.makedirs(path)
+    
+    # Bluetooth MAC addresses of the IMUs we want to stream from
     addresses = ("00:17:E9:D7:08:F1",
                  "00:17:E9:D7:09:5D",
                  "00:17:E9:D7:09:0F",
                  "00:17:E9:D7:09:49")
-
-    init_time = int(time.time())
 
     # Connect to devices and print settings
     devices = {}
@@ -293,15 +293,13 @@ if __name__ == "__main__":
         print(getSettings(socket))
         devices[name] = socket
 
-    # Stream data
+    # Starting receiving and writing data
     q = SimpleQueue()
     die = mp.Event()
     processes = []
-    processes.append(mp.Process(target=mpStreamImu, args=(devices, q, die)))
-    processes.append(mp.Process(target=mpStreamVideo, args=(q, die)))
-    fname = "rawdata_{}.csv".format(init_time)
-    processes.append(mp.Process(target=mpWrite, args=(fname, q, die)))
-
+    processes.append(mp.Process(target=streamImu, args=(devices, q, die)))
+    processes.append(mp.Process(target=streamVideo, args=(rgb_trial_path, q, die)))
+    processes.append(mp.Process(target=write, args=(raw_file_path, q, die)))
     for p in processes:
         p.start()
 
@@ -322,11 +320,9 @@ if __name__ == "__main__":
         socket.close()
 
     # Massage and save data
-    imu_data, rgb_data, sample_len = processData(fname, devices.keys())
-    fname = 'imudata_{}.csv'.format(init_time)
+    imu_data, rgb_data, sample_len = processData(raw_file_path, devices.keys())
     fmtstr = len(devices) * (['%15f'] + (sample_len - 1) * ['%i'])
-    np.savetxt(fname, imu_data, delimiter=',', fmt=fmtstr)
-    fname = 'rgbdata_{}.csv'.format(init_time)
-    np.savetxt(fname, rgb_data, delimiter=',', fmt='%15f')
+    np.savetxt(imu_file_path, imu_data, delimiter=',', fmt=fmtstr)
+    np.savetxt(rgb_timestamp_path, rgb_data, delimiter=',', fmt='%15f')
 
     percent_dropped = printPercentDropped(imu_data, devices.keys(), sample_len)
