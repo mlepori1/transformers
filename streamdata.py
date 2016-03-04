@@ -17,6 +17,7 @@ import sys
 import time
 from itertools import cycle
 from libwax9 import *
+from postprocess import *
 
 
 def streamVideo(path, q, die):
@@ -213,6 +214,22 @@ def processData(path, dev_names):
     return (np.array(imu_data), np.array(rgb_data), sample_len)
 
 
+def saveSettings(init_time, dev_settings):
+    """
+    [DESCRIPTION]
+    
+    Args:
+    -----
+      dev_settings:
+    """
+    
+    path = os.path.join('data', 'dev-settings', '{}.txt'.format(init_time))
+    with open(path, 'wb') as file:
+        for settings in dev_settings.values():
+            file.write(settings)
+            file.write('\n')
+
+
 def printPercentDropped(imu_data, dev_names, sample_len):
     """
     [DESCRIPTION]
@@ -285,13 +302,16 @@ if __name__ == "__main__":
 
     # Connect to devices and print settings
     devices = {}
+    dev_settings = {}
     for address in addresses:
         print("Connecting at {}...".format(address))
         # FIXME: check if name is empty string and redo if so
         socket, name = connect(address)
         print("Connected, device ID {}".format(name))
-        print(getSettings(socket))
+        settings = getSettings(socket)
+        print(settings)
         devices[name] = socket
+        dev_settings[name] = settings
 
     # Starting receiving and writing data
     q = SimpleQueue()
@@ -326,3 +346,5 @@ if __name__ == "__main__":
     np.savetxt(rgb_timestamp_path, rgb_data, delimiter=',', fmt='%15f')
 
     percent_dropped = printPercentDropped(imu_data, devices.keys(), sample_len)
+    
+    plotImuData(init_time, devices.keys(), sample_len)
