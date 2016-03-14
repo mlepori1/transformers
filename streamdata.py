@@ -355,11 +355,16 @@ if __name__ == "__main__":
     np.savetxt(imu_file_path, imu_data, delimiter=',', fmt=fmtstr)
     np.savetxt(rgb_timestamp_path, rgb_data, delimiter=',', fmt='%15f')
     
-    # Convert rgb frames to video
-    ffmpeg = ['ffmpeg', '-i', ]
-    subprocess.call(ffmpeg)
+    # Convert rgb frames to avi video
+    # NOTE: This only works on the Linux machine for now
+    print('')
+    frame_fmt = os.path.join(rgb_trial_path, 'rgb_%6d.png')
+    video_path = os.path.join(rgb_path, init_time + '.avi')
+    make_video = ['avconv', '-f', 'image2', '-i', frame_fmt, '-r', '30', video_path]
+    subprocess.call(make_video)
+    print('')
     
     percent_dropped = printPercentDropped(imu_data, devices.keys(), sample_len)
     
-    ids = (x[-4:] for x in devices.keys())  # Grab hex ID from WAX9 ID
+    ids = [x[-4:] for x in devices.keys()]  # Grab hex ID from WAX9 ID
     plotImuData(int(init_time), ids, sample_len)
