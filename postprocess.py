@@ -102,6 +102,6 @@ def plotImuData(t_init, devices, sample_len):
 
 
 if __name__ == '__main__':
-    t_init = 1456525126
+    t_init = 1457450852
     devices = ('08F1', '095D', '090F', '0949')
     plotImuData(t_init, devices, 11)

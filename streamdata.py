@@ -15,7 +15,9 @@ import csv
 import os
 import sys
 import time
+import subprocess
 from itertools import cycle
+
 from libwax9 import *
 from postprocess import *
 
@@ -26,7 +28,7 @@ def streamVideo(path, q, die):
 
     Args:
     -----
-      path:
+      [str] path: Path (full or relative) to output file
       q: Multiprocessing queue, for collecting data
       die: Multiprocessing event, kill signal
     """
@@ -63,9 +65,9 @@ def streamVideo(path, q, die):
                                  dtype=np.uint8, buffer=color_data)
         color_array = np.dstack((color_array[:,2::3], color_array[:,1::3],
             color_array[:,0::3]))
-        filename = "rgb_" + str(i)  + ".png"
+        filename = 'rgb_{:06d}.png'.format(i)
         cv2.imwrite(os.path.join(path, filename), color_array)
-        q.put((i, frametime, "IMG_RGB"))
+        q.put((i, frametime, 'IMG_RGB'))
 
         i += 1
 
@@ -81,7 +83,8 @@ def streamImu(devices, q, die):
 
     Args:
     -----
-      devices: Dict w/ device names as keys and their sockets as values
+      [dict(str->socket)] devices: Dict w/ device names as keys and their
+        sockets as values
       q: Multiprocessing queue, for collecting data
       die: Multiprocessing event, kill signal
     """
@@ -91,10 +94,9 @@ def streamImu(devices, q, die):
 
     # Tell the device to start streaming
     for socket in devices.values():
-        socket.sendall("stream\r\n")
+        socket.sendall('stream\r\n')
 
     # Read data sequentially from sensors until told to terminate
-    stream = []
     prev_frame = ''
     dev_id = dev_names.next()
     socket = devices[dev_id]
@@ -119,7 +121,7 @@ def streamImu(devices, q, die):
             if frame[0] == '\xc0':
                 # Convert data from hex representation (see p. 7, 'WAX9 application
                 # developer's guide')
-                line = list(struct.unpack("<hIhhhhhhhhh", frame[3:27]))
+                line = list(struct.unpack('<hIhhhhhhhhh', frame[3:27]))
             else:
                 line = 11 * [0]
             line.append(time.time())
@@ -128,10 +130,10 @@ def streamImu(devices, q, die):
         
         # Terminate when main tells us to
         if die.is_set():
-            print("Dying...")
+            print('Dying...')
             # Tell the device to stop streaming
             for socket in devices.values():
-                socket.sendall("\r\n")
+                socket.sendall('\r\n')
             break
 
 
@@ -142,7 +144,7 @@ def write(path, q, die):
 
     Args:
     -----
-      path (str):
+      [str] path: Path (full or relative) to output file
       q: Multiprocessing queue, for collecting data
       die: Multiprocessing event, kill signal
     """
@@ -162,18 +164,21 @@ def write(path, q, die):
 
 def processData(path, dev_names):
     """
-    [DESCRIPTION]
+    Convert raw data to numpy array and save
 
     Args:
     -----
-      path (str):
-      dev_names (list(str)):
+      [str] path: Path (full or relative) to raw data file
+      [list(str)] dev_names: IMU IDs
 
     Returns:
     --------
-      imu_data: numpy array
-      rgb_data: numpy vector
-      sample_len (int):
+      [np array] imu_data: Length n-by-m*d, where n is the number of IMU
+        samples, m is the number of IMU devices, and d is the length of one IMU
+        sample.
+      [np vector] rgb_data: Contains the global timestamp for every video
+        frame recorded
+      [int] sample_len: Length of one IMU sample (d)
     """
     
     num_devices = len(dev_names)
@@ -214,13 +219,15 @@ def processData(path, dev_names):
     return (np.array(imu_data), np.array(rgb_data), sample_len)
 
 
-def saveSettings(init_time, dev_settings):
+def saveSettings(path, dev_settings):
     """
-    [DESCRIPTION]
+    Record settings for each IMU device.
     
     Args:
     -----
-      dev_settings:
+      [str] path: Path (full or relative) to output file
+      [dict(str->str)] dev_settings: Dict mapping device IDs to recorded
+        settings 
     """
     
     path = os.path.join('data', 'dev-settings', '{}.txt'.format(init_time))
@@ -258,7 +265,7 @@ def printPercentDropped(imu_data, dev_names, sample_len):
         num_samples = imu_data[:,timestamp_idx].shape[0]
 
         percent_dropped = float(num_dropped) / float(num_samples) * 100
-        fmtstr = "{}: {:0.1f}% of {} samples dropped"
+        fmtstr = '{}: {:0.1f}% of {} samples dropped'
         print(fmtstr.format(name, percent_dropped, num_samples))
 
         total_dropped += num_dropped
@@ -266,7 +273,7 @@ def printPercentDropped(imu_data, dev_names, sample_len):
 
     # Percent of samples dropped over all devices
     percent_dropped = total_dropped / total_samples * 100
-    fmtstr = "TOTAL: {:0.1f}% of {} samples dropped"
+    fmtstr = 'TOTAL: {:0.1f}% of {} samples dropped'
     print(fmtstr.format(percent_dropped, int(total_samples)))
 
     return percent_dropped
@@ -281,33 +288,35 @@ if __name__ == "__main__":
     
     # Define pathnames and filenames for the data from this trial
     init_time = str(int(time.time()))   # Used as a trial identifier
-    raw_path = os.path.join("data", "raw")
-    imu_path = os.path.join("data", "imu")
-    rgb_path = os.path.join("data", "rgb")
+    settings_path = os.path.join('data', 'dev-settings')
+    raw_path = os.path.join('data', 'raw')
+    imu_path = os.path.join('data', 'imu')
+    rgb_path = os.path.join('data', 'rgb')
     rgb_trial_path = os.path.join(rgb_path, init_time)
-    rgb_timestamp_path = os.path.join(rgb_trial_path, "frame-timestamps.csv")
-    raw_file_path = os.path.join(raw_path, init_time + ".csv")
-    imu_file_path = os.path.join(imu_path, init_time + ".csv")
+    rgb_timestamp_path = os.path.join(rgb_trial_path, 'frame-timestamps.csv')
+    raw_file_path = os.path.join(raw_path, init_time + '.csv')
+    imu_file_path = os.path.join(imu_path, init_time + '.csv')
+    settings_file_path = os.path.join(settings_path, init_time + '.txt')
 
     # Create data directories if they don't exist
-    for path in [raw_path, imu_path, rgb_trial_path]:
+    for path in [settings_path, raw_path, imu_path, rgb_trial_path]:
         if not os.path.exists(path):
             os.makedirs(path)
     
     # Bluetooth MAC addresses of the IMUs we want to stream from
-    addresses = ("00:17:E9:D7:08:F1",
-                 "00:17:E9:D7:09:5D",
-                 "00:17:E9:D7:09:0F",
-                 "00:17:E9:D7:09:49")
+    addresses = ('00:17:E9:D7:08:F1',
+                 '00:17:E9:D7:09:5D',
+                 '00:17:E9:D7:09:0F',
+                 '00:17:E9:D7:09:49')
 
     # Connect to devices and print settings
     devices = {}
     dev_settings = {}
     for address in addresses:
-        print("Connecting at {}...".format(address))
+        print('Connecting at {}...'.format(address))
         # FIXME: check if name is empty string and redo if so
         socket, name = connect(address)
-        print("Connected, device ID {}".format(name))
+        print('Connected, device ID {}'.format(name))
         settings = getSettings(socket)
         print(settings)
         devices[name] = socket
@@ -325,9 +334,9 @@ if __name__ == "__main__":
 
     # Wait for kill signal from user
     while True:
-        user_in = input("Streaming... (press return to stop)")
+        user_in = input('Streaming... (press return to stop)')
         if not user_in:
-            print("Killing processes...")
+            print('Killing processes...')
             die.set()
             break
     
@@ -336,16 +345,21 @@ if __name__ == "__main__":
 
     # Disconnect from devices
     for dev_name, socket in devices.items():
-        print("Disconnecting from {}".format(dev_name))
+        print('Disconnecting from {}'.format(dev_name))
         socket.close()
 
-    # Massage and save data
-    saveSettings(init_time, dev_settings)
+    # Massage and save IMU, RGB frame data
+    saveSettings(settings_file_path, dev_settings)
     imu_data, rgb_data, sample_len = processData(raw_file_path, devices.keys())
     fmtstr = len(devices) * (['%15f'] + (sample_len - 1) * ['%i'])
     np.savetxt(imu_file_path, imu_data, delimiter=',', fmt=fmtstr)
     np.savetxt(rgb_timestamp_path, rgb_data, delimiter=',', fmt='%15f')
-
+    
+    # Convert rgb frames to video
+    ffmpeg = ['ffmpeg', '-i', ]
+    subprocess.call(ffmpeg)
+    
     percent_dropped = printPercentDropped(imu_data, devices.keys(), sample_len)
     
-    plotImuData(int(init_time), devices.keys(), sample_len)
+    ids = (x[-4:] for x in devices.keys())  # Grab hex ID from WAX9 ID
+    plotImuData(int(init_time), ids, sample_len)
