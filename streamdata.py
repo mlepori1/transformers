@@ -340,6 +340,7 @@ if __name__ == "__main__":
         socket.close()
 
     # Massage and save data
+    saveSettings(init_time, dev_settings)
     imu_data, rgb_data, sample_len = processData(raw_file_path, devices.keys())
     fmtstr = len(devices) * (['%15f'] + (sample_len - 1) * ['%i'])
     np.savetxt(imu_file_path, imu_data, delimiter=',', fmt=fmtstr)
@@ -347,4 +348,4 @@ if __name__ == "__main__":
 
     percent_dropped = printPercentDropped(imu_data, devices.keys(), sample_len)
     
-    plotImuData(init_time, devices.keys(), sample_len)
+    plotImuData(int(init_time), devices.keys(), sample_len)
