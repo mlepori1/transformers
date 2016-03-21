@@ -12,7 +12,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 
-def convertFrameIndex(video_timestamps, kinem_timestamps):
+def vidFrame2imuFrame(video_timestamps, kinem_timestamps):
     """
     Find the indices of the kinematic timestamps that most closely
     match the video timestamps.
@@ -47,6 +47,87 @@ def convertFrameIndex(video_timestamps, kinem_timestamps):
         
     return indices
 
+def loadLabels(t_init):
+    """
+    Try to load annotations from file for trial starting at time t_init. If
+    there are no labels, warn the user and return None.
+    
+    Args:
+    -----
+      [int] t_init:
+    
+    Returns:
+    --------
+      [np array] labels: Structured array with the following fields
+        [int] start: Video frame index for start of event
+        [int] end: Video frame index for end of event
+        [int] action: Integer event ID (0-5). See labels file for description
+        [int] object: Integer ID for object of event. Ex: 1 in 'place 1 on
+          4'. Not all events have objects; when object N/A ID is 0
+        [int] target: Integer ID for target of event. Ex: 4 in 'place 1 on
+          4'. Not all events have targets; when target is N/A ID is 0
+        [str] obj_studs: Adjacent studs are recorded for placement events. The
+          i-th entry in this list is adjacent to the i-th entry in tgt_studs.
+        [str] tgt_studs: Same as above. The i-th entry in this list is adjacent
+          to the i-th entry in obj_studs.
+    """
+    
+    fn = os.path.join('data', 'labels', '{}.csv'.format(t_init))
+    
+    if not os.path.exists(fn):
+        print('Trial {}: no labels found'.format(t_init))
+        return None
+    
+    # 'studs' are length-18 strings because 18 is an upper bound on the
+    # description length for this attribute: max 8 studs + 8 spaces + 2 parens
+    typestruct = [('start', 'i'), ('end', 'i'), ('action', 'i'),
+                  ('object', 'i'), ('target', 'i'), ('obj_studs', 'S18'),
+                  ('tgt_studs', 'S18')]
+    labels = np.loadtxt(fn, delimiter=',', dtype=typestruct, skiprows=2)
+    return labels
+
+
+def parseLabels(labels, num_frames):
+    """
+    Return boundaries and labels for annotated actions.
+    
+    Args:
+    -----
+      labels:
+      num_frames:
+    
+    Returns:
+    --------
+      bounds:
+      actions:
+    """
+    
+    bounds = []
+    actions = []
+    
+    prev_end = 0
+    bounds.append(prev_end)
+    for i in range(len(labels)):
+        cur_start = labels['start'][i]
+        cur_end = labels['end'][i]
+        cur_action = labels['action'][i]
+        assert(cur_start >= prev_end)
+        if cur_start > prev_end:
+            actions.append(0)   # 0 means inactive
+            bounds.append(cur_start)
+        actions.append(cur_action)
+        bounds.append(cur_end)
+        prev_end = cur_end
+    """
+    # Write inactivity until end if prev_end isn't the last index
+    assert(num_frames - 1 >= prev_end)
+    if num_frames - 1 > prev_end:
+        actions.append(0)
+        bounds.append(num_frames - 1)
+    """
+    
+    return (np.array(bounds), np.array(actions))
+
 
 def plotImuData(t_init, devices, sample_len):
     """
@@ -58,6 +139,9 @@ def plotImuData(t_init, devices, sample_len):
       [list(str)] devices:
       [int] sample_len:
     """
+    
+    # Map device names to integer IDs
+    name2id = {devices[i]:i for i in range(len(devices))}
 
     # Load IMU data
     fn = os.path.join('data', 'imu', '{}.csv'.format(t_init))
@@ -74,16 +158,12 @@ def plotImuData(t_init, devices, sample_len):
     # Load RGB frame timestamps
     fn = os.path.join('data', 'rgb', str(t_init), 'frame-timestamps.csv')
     video_timestamps = np.loadtxt(fn)
+    num_vid_frames = video_timestamps.shape[0]
     
-    # Load labels if we have them (file contains indices and descriptions)
-    fn = os.path.join('data', 'labels', '{}.csv'.format(t_init))
-    if os.path.exists(fn):
-        typestruct = [('index', 'i'), ('comment', 'S')]
-        labels = np.loadtxt(fn, delimiter=',', dtype=typestruct)
-        labels = labels['index']
-    else:
-        print('Trial {}: no labels found'.format(t_init))
-        labels = []
+    # Load labels if we have them. If not, no point in going any further
+    labels = loadLabels(t_init)
+    if labels is None:
+        return
     
     imu_fig_path = os.path.join('output', 'figures', 'imu', str(t_init))
     if not os.path.exists(imu_fig_path):
@@ -96,9 +176,15 @@ def plotImuData(t_init, devices, sample_len):
         imu = imus[i]
         name = devices[i]
         
-        # Convert video frame labels to IMU indices
-        vid_idxs = convertFrameIndex(video_timestamps, imu[:,0])
-        label_idxs = vid_idxs[labels]
+        # FIXME: searching only the object and target fields for matching names
+        #   ignores the rotate_all label
+        # relevant_labels = np.logical_or(labels['object'] == i + 1,
+        #                                 labels['target'] == i + 1)
+        
+        vid_bounds, actions = parseLabels(labels, num_vid_frames)
+        # Convert video frame labels to frame indices for this IMU
+        vid2imu = vidFrame2imuFrame(video_timestamps, imu[:,0])
+        imu_bounds = vid2imu[vid_bounds] #[relevant_labels]]
     
         # Filter out bad data for now b/c it makes the plots impossible to read
         bad_data = np.less(imu[:,0], 1.0)
@@ -108,75 +194,53 @@ def plotImuData(t_init, devices, sample_len):
         imu[:,0] = imu[:,0] - t_init
     
         # Accelerometer range setting +/- 8g --> divide by 4096 to get units of g
-        imu[:,2:5] = imu[:,2:5] / 4096.0
-        fa, ax_a = plt.subplots(3, 1)
-        ax_a[0].plot(imu[:,0], imu[:,2], label=name)
-        ax_a[1].plot(imu[:,0], imu[:,3], label=name)
-        ax_a[2].plot(imu[:,0], imu[:,4], label=name)
-        ax_a[0].scatter(imu[label_idxs,0], imu[label_idxs,2], c='k')
-        ax_a[1].scatter(imu[label_idxs,0], imu[label_idxs,3], c='k')
-        ax_a[2].scatter(imu[label_idxs,0], imu[label_idxs,4], c='k')
-        ax_a[0].set_title('Acceleration in IMU frame')
-        ax_a[0].set_ylabel(r'$a_x$ (g)')
-        ax_a[1].set_ylabel(r'$a_y$ (g)')
-        ax_a[2].set_ylabel(r'$a_z$ (g)')
-    
         # Gyroscope range setting +/- 2000 dps --> multiply by 0.07 to get units
         # of degrees per second
-        imu[:,5:8] = imu[:,5:8] * 0.07 / 180
-        fg, ax_g = plt.subplots(3, 1)
-        ax_g[0].plot(imu[:,0], imu[:,5], label=name)
-        ax_g[1].plot(imu[:,0], imu[:,6], label=name)
-        ax_g[2].plot(imu[:,0], imu[:,7], label=name)
-        ax_g[0].scatter(imu[label_idxs,0], imu[label_idxs,5], c='k')
-        ax_g[1].scatter(imu[label_idxs,0], imu[label_idxs,6], c='k')
-        ax_g[2].scatter(imu[label_idxs,0], imu[label_idxs,7], c='k')
-        ax_g[0].set_title('Angular velocity in IMU frame')
-        ax_g[0].set_ylabel(r'$\omega_x$ ($\pi$ rad/s)')
-        ax_g[1].set_ylabel(r'$\omega_y$ ($\pi$ rad/s)')
-        ax_g[2].set_ylabel(r'$\omega_z$ ($\pi$ rad/s)')
-    
         # Multiply by 1e-4 to get units of mT, but this will be very approximate
         # (see WAX9 developer guide)
-        imu[:,8:] = imu[:,8:] * 1e-4
-        fm, ax_m = plt.subplots(3, 1)
-        ax_m[0].plot(imu[:,0], imu[:,8], label=name)
-        ax_m[1].plot(imu[:,0], imu[:,9], label=name)
-        ax_m[2].plot(imu[:,0], imu[:,10], label=name)
-        ax_m[0].scatter(imu[label_idxs,0], imu[label_idxs,8], c='k')
-        ax_m[1].scatter(imu[label_idxs,0], imu[label_idxs,9], c='k')
-        ax_m[2].scatter(imu[label_idxs,0], imu[label_idxs,10], c='k')
-        ax_m[0].set_title('Magnetic field in IMU frame')
-        ax_m[0].set_ylabel(r'$B_x$ (mT)')
-        ax_m[1].set_ylabel(r'$B_y$ (mT)')
-        ax_m[2].set_ylabel(r'$B_z$ (mT)')
-    
-        # x label is the same for all axes
-        for axes in (ax_a, ax_g, ax_m):
-            for ax in axes:
+        coeffs = [1 / 4096.0, 0.07 / 180, 1e-4]
+        titles = ['Acceleration', 'Angular velocity', 'Magnetic field']
+        syms = ['a', '\omega', 'B']
+        units = ['g', '$\pi$ rad/s', 'mT']
+        abbrevs = ['accel', 'ang-vel', 'mag']
+        coords = ['x', 'y', 'z']
+        assert(len(coords) == 3)
+        
+        for i, title in enumerate(titles):
+            start = 2 + i * len(coords)
+            end = 2 + (i + 1) * len(coords)
+            imu[:,start:end] = imu[:,start:end] * coeffs[i]
+            f, axes = plt.subplots(len(coords), 1)
+            for j, ax in enumerate(axes):
+                # Plot IMU reading
+                ax.plot(imu[:,0], imu[:,start+j], c='black', label=name)
+                # Plot labels as colorbar in background
+                max_val = np.max(imu[:,start+j])
+                min_val = np.min(imu[:,start+j])
+                ax.pcolor(imu[imu_bounds,0], np.array([min_val, max_val]),
+                          np.tile(actions, (2,1)), cmap='Pastel2')
+                # Label X and Y axes
                 ax.set_xlabel('t (s)')
+                ax.set_ylabel(r'${}_{}$ ({})'.format(syms[i], coords[j], units[i]))
+            axes[0].set_title('{} in IMU frame'.format(title))
+            f.tight_layout()
+            
+            fname = '{}_{}.pdf'.format(abbrevs[i], name)
+            f.savefig(os.path.join(imu_fig_path, fname))
+            plt.close()
         
-        # Set tight layout BEFORE shrinking plot otherwise figures are wonky
-        for fig in (fa, fg, fm):
-            fig.tight_layout()
-        
+        """
         # Shrink plot width by 20% to make room for the legend
         for axes in (ax_a, ax_g, ax_m):
             for ax in axes:
                 box = ax.get_position()
                 ax.set_position([box.x0, box.y0, box.width * 0.8, box.height])
                 ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
-        
-        # Save plots to IMU figures directory and DON'T show them
-        for fig, reading in zip((fa, fg, fm), ('accel', 'ang-vel', 'mag')):
-            fname = '{}_{}.png'.format(reading, name)
-            fig.savefig(os.path.join(imu_fig_path, fname))
-            plt.close()
-    
-    #plt.show()
+        """
 
 
 if __name__ == '__main__':
     t_init = 1457987953
+    #labels = loadLabels(t_init)
     devices = ('08F1', '095D', '090F', '0949')
     plotImuData(t_init, devices, 11)
