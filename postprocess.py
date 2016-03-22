@@ -211,17 +211,23 @@ def plotImuData(t_init, devices, sample_len):
         assert(len(coords) == 3)
         
         # Set colormaps and normalization for plotting labels (between 0 and 6)
+        label_names = ('inactive', 'remove', 'rotate', 'rotate all',
+                       'place above', 'place below', 'place beside')
+        num_labels = len(label_names)
         cmap = mpl.cm.Pastel2
-        norm = mpl.colors.Normalize(vmin=0.0, vmax=6.0)
+        cmap_list = [cmap(i) for i in range(cmap.N)]
+        cmap = cmap.from_list('custom', cmap_list, cmap.N)
+        bounds = list(range(num_labels))
+        norm = mpl.colors.BoundaryNorm(bounds, cmap.N)
         
         for j, title in enumerate(titles):
             start = 2 + j * len(coords)
             end = 2 + (j + 1) * len(coords)
             imu[:,start:end] = imu[:,start:end] * coeffs[j]
-            f, axes = plt.subplots(len(coords)+1, 1, figsize=plt.figaspect(1.25))
+            f, axes = plt.subplots(len(coords)+1, 1, figsize=(6, 6.5))
             for k, ax in enumerate(axes[:-1]):
                 # Plot IMU reading
-                ax.plot(imu[:,0], imu[:,start+k], color='blue', label=name)
+                ax.plot(imu[:,0], imu[:,start+k], color='black', label=name)
                 # Plot labels as colorbar in background
                 max_val = np.max(imu[:,start+k])
                 min_val = np.min(imu[:,start+k])
@@ -233,7 +239,7 @@ def plotImuData(t_init, devices, sample_len):
             # Plot colormap used for labels with tics at label indices
             mpl.colorbar.ColorbarBase(axes[-1], cmap=cmap, norm=norm,
                                       orientation='horizontal',
-                                      ticks=list(range(7)))
+                                      ticks=bounds, boundaries=bounds)
             axes[0].set_title('{} in IMU frame, {}'.format(title, name))
             f.tight_layout()
             
