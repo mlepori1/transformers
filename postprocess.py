@@ -36,8 +36,8 @@ def vidFrame2imuFrame(vid_timestamps, imu_timestamps):
     imu_len = imu_timestamps.shape[0]
             
     # For each video timestamp, find the index of the nearest
-    # kinematic timestamp (+/- one frame)
-    # Video and kinematic timestamps are in increasing order.
+    # IMU timestamp (+/- one frame)
+    # Video and IMU timestamps are in increasing order.
     indices = np.zeros((vid_len,), dtype=int)
     j = 0
     for i in range(vid_len):
@@ -51,7 +51,7 @@ def vidFrame2imuFrame(vid_timestamps, imu_timestamps):
 def loadLabels(t_init):
     """
     Try to load annotations from file for trial starting at time t_init. If
-    there are no labels, warn the user and return None.
+    there are no labels, warn the user and return an empty list.
     
     Args:
     -----
@@ -77,14 +77,14 @@ def loadLabels(t_init):
     
     if not os.path.exists(fn):
         print('Trial {}: no labels found'.format(t_init))
-        return None
+        return []
     
     # 'studs' are length-18 strings because 18 is an upper bound on the
     # description length for this attribute: max 8 studs + 8 spaces + 2 parens
     typestruct = [('start', 'i'), ('end', 'i'), ('action', 'i'),
                   ('object', 'i'), ('target', 'i'), ('obj_studs', 'S18'),
                   ('tgt_studs', 'S18')]
-    labels = np.loadtxt(fn, delimiter=',', dtype=typestruct, skiprows=2)
+    labels = np.loadtxt(fn, delimiter=',', dtype=typestruct)
     return labels
 
 
@@ -152,6 +152,9 @@ def plotImuData(t_init, devices, sample_len):
     num_samples, num_vars = data.shape
     assert(num_vars % sample_len == 0)
     
+    # Determine the number of IMUs present in this trial and slice their data
+    # into a list
+    # FIXME: we already know how many IMUs there are, it's len(devices)
     imus = []
     for i in range(int(num_vars / sample_len)):
         i_start = i * sample_len
@@ -164,6 +167,9 @@ def plotImuData(t_init, devices, sample_len):
     num_vid_frames = video_timestamps.shape[0]
     
     # Load labels if we have them. If not, no point in going any further
+    label_names = ('inactive', 'remove', 'rotate', 'rotate all',
+                   'place above', 'place below', 'place beside')
+    num_labels = len(label_names)
     labels = loadLabels(t_init)
     if labels is None:
         return
@@ -172,7 +178,27 @@ def plotImuData(t_init, devices, sample_len):
     if not os.path.exists(imu_fig_path):
         os.makedirs(imu_fig_path)
     
-    # Plot accelerometer, gyroscope, magnetometer readings
+    # Accelerometer range setting +/- 8g --> divide by 4096 to get units of g
+    # Gyroscope range setting +/- 2000 dps --> multiply by 0.07 to get units
+    # of degrees per second
+    # Multiply by 1e-4 to get units of mT, but this will be very approximate
+    # (see WAX9 developer guide)
+    convert_factors = [1 / 4096.0, 0.07 / 180, 1e-4]
+    titles = ['Acceleration', 'Angular velocity', 'Magnetic field']
+    syms = ['a', '\omega', 'B']
+    units = ['g', '$\pi$ rad/s', 'mT']
+    abbrevs = ['accel', 'ang-vel', 'mag']
+    coords = ['x', 'y', 'z']
+    assert(len(coords) == 3)
+    
+    # Set colormaps and normalization for plotting labels (between 0 and 6)
+    cmap = mpl.cm.Pastel2
+    cmap_list = [cmap(i) for i in range(cmap.N)]
+    cmap = cmap.from_list('custom', cmap_list, cmap.N)
+    bounds = list(range(num_labels))
+    norm = mpl.colors.BoundaryNorm(bounds, cmap.N)
+    
+    # Convert readings to natural units and plot, for each IMU selected
     selected_devices = range(len(imus))
     for i in selected_devices:
         
@@ -180,82 +206,56 @@ def plotImuData(t_init, devices, sample_len):
         name = devices[i]
         
         # Filter out bad data for now b/c it makes the plots impossible to read
+        # (bad data are marked with a timestamp of 0)
         bad_data = np.less(imu[:,0], 1.0)
         imu = imu[np.logical_not(bad_data),:]
-        
-        # FIXME: searching only the object and target fields for matching names
-        #   ignores the rotate_all label
-        # relevant_labels = np.logical_or(labels['object'] == i + 1,
-        #                                 labels['target'] == i + 1)
         
         # Get action boundaries (in video frames) from annotations and convert
         # to imu frames
         vid_bounds, actions = parseLabels(labels, num_vid_frames)
         vid2imu = vidFrame2imuFrame(video_timestamps, imu[:,0])
-        imu_bounds = vid2imu[vid_bounds] #[relevant_labels]]
+        imu_bounds = vid2imu[vid_bounds]
     
         # Calculate time relative to trial start
         imu[:,0] = imu[:,0] - t_init
     
-        # Accelerometer range setting +/- 8g --> divide by 4096 to get units of g
-        # Gyroscope range setting +/- 2000 dps --> multiply by 0.07 to get units
-        # of degrees per second
-        # Multiply by 1e-4 to get units of mT, but this will be very approximate
-        # (see WAX9 developer guide)
-        coeffs = [1 / 4096.0, 0.07 / 180, 1e-4]
-        titles = ['Acceleration', 'Angular velocity', 'Magnetic field']
-        syms = ['a', '\omega', 'B']
-        units = ['g', '$\pi$ rad/s', 'mT']
-        abbrevs = ['accel', 'ang-vel', 'mag']
-        coords = ['x', 'y', 'z']
-        assert(len(coords) == 3)
-        
-        # Set colormaps and normalization for plotting labels (between 0 and 6)
-        label_names = ('inactive', 'remove', 'rotate', 'rotate all',
-                       'place above', 'place below', 'place beside')
-        num_labels = len(label_names)
-        cmap = mpl.cm.Pastel2
-        cmap_list = [cmap(i) for i in range(cmap.N)]
-        cmap = cmap.from_list('custom', cmap_list, cmap.N)
-        bounds = list(range(num_labels))
-        norm = mpl.colors.BoundaryNorm(bounds, cmap.N)
-        
+        # Plot accelerometer, gyroscope, magnetometer readings
         for j, title in enumerate(titles):
+            
+            # Slice accel/gyro/mag data and convert to natural units
             start = 2 + j * len(coords)
             end = 2 + (j + 1) * len(coords)
-            imu[:,start:end] = imu[:,start:end] * coeffs[j]
+            imu[:,start:end] = imu[:,start:end] * convert_factors[j]
+            
+            # X, Y, Z readings go in separate subplots on the same figure
             f, axes = plt.subplots(len(coords)+1, 1, figsize=(6, 6.5))
             for k, ax in enumerate(axes[:-1]):
+                
                 # Plot IMU reading
                 ax.plot(imu[:,0], imu[:,start+k], color='black', label=name)
-                # Plot labels as colorbar in background
-                max_val = np.max(imu[:,start+k])
-                min_val = np.min(imu[:,start+k])
-                ax.pcolor(imu[imu_bounds,0], np.array([min_val, max_val]),
-                          np.tile(actions, (2,1)), cmap=cmap, norm=norm)
+                
+                # Plot labels as colorbar in background, but only if they exist
+                if imu_bounds.shape[0] > 0:
+                    max_val = np.max(imu[:,start+k])
+                    min_val = np.min(imu[:,start+k])
+                    ax.pcolor(imu[imu_bounds,0], np.array([min_val, max_val]),
+                              np.tile(actions, (2,1)), cmap=cmap, norm=norm)
+                
                 # Label X and Y axes
                 ax.set_xlabel('t (s)')
                 ax.set_ylabel(r'${}_{}$ ({})'.format(syms[j], coords[k], units[j]))
+                
             # Plot colormap used for labels with tics at label indices
             mpl.colorbar.ColorbarBase(axes[-1], cmap=cmap, norm=norm,
-                                      orientation='horizontal',
-                                      ticks=bounds, boundaries=bounds)
+                                      orientation='horizontal', ticks=bounds,
+                                      boundaries=bounds)
             axes[0].set_title('{} in IMU frame, {}'.format(title, name))
             f.tight_layout()
             
-            # Save plot
+            # Save plot and don't show
             fname = '{}_{}.pdf'.format(abbrevs[j], name)
             f.savefig(os.path.join(imu_fig_path, fname))
             plt.close()
-                    
-        """
-        # Shrink plot width by 20% to make room for the legend
-        for axes in (ax_a, ax_g, ax_m):
-            for ax in axes:
-                box = ax.get_position()
-                ax.set_position([box.x0, box.y0, box.width * 0.8, box.height])
-                ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
-        """
 
 
 if __name__ == '__main__':

@@ -314,7 +314,7 @@ if __name__ == "__main__":
     dev_settings = {}
     for address in addresses:
         print('Connecting at {}...'.format(address))
-        # FIXME: check if name is empty string and redo if so
+        # TODO: check if name is empty string and retry if so
         socket, name = connect(address)
         print('Connected, device ID {}'.format(name))
         settings = getSettings(socket)
@@ -322,7 +322,7 @@ if __name__ == "__main__":
         devices[name] = socket
         dev_settings[name] = settings
 
-    # Starting receiving and writing data
+    # Start receiving and writing data
     q = SimpleQueue()
     die = mp.Event()
     processes = []
@@ -356,7 +356,7 @@ if __name__ == "__main__":
     np.savetxt(rgb_timestamp_path, rgb_data, delimiter=',', fmt='%15f')
     
     # Convert rgb frames to avi video
-    # NOTE: This only works on the Linux machine for now
+    # NOTE: This depends on the avconv utility for now
     print('')
     frame_fmt = os.path.join(rgb_trial_path, 'rgb_%6d.png')
     video_path = os.path.join(rgb_path, init_time + '.avi')
@@ -366,5 +366,6 @@ if __name__ == "__main__":
     
     percent_dropped = printPercentDropped(imu_data, devices.keys(), sample_len)
     
+    # Show IMU data (for validation)
     ids = [x[-4:] for x in devices.keys()]  # Grab hex ID from WAX9 ID
     plotImuData(int(init_time), ids, sample_len)
