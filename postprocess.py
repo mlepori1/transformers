@@ -10,29 +10,30 @@ AUTHOR
 import os
 import numpy as np
 from matplotlib import pyplot as plt
+import matplotlib as mpl
 
 
-def vidFrame2imuFrame(video_timestamps, kinem_timestamps):
+def vidFrame2imuFrame(vid_timestamps, imu_timestamps):
     """
-    Find the indices of the kinematic timestamps that most closely
+    Find the indices of the IMU timestamps that most closely
     match the video timestamps.
     
     Args:
     -----
-    [np vector] video_timestamps: The i-th entry contains the universal time
+    [np vector] vid_timestamps: The i-th entry contains the universal time
       at which the i-th VIDEO FRAME occurred
-    [np vector] kinem_timestamps: The i-th entry contains the universal time
-      at which the i-th KINEMATIC SAMPLE occurred
+    [np vector] imu_timestamps: The i-th entry contains the universal time
+      at which the i-th IMU SAMPLE occurred
       
     Returns:
     --------
-    [np vector] indices: Same length as video_timestamps.
-      The i-th entry holds the index of kinem_timestamps that most
+    [np vector] indices: Same length as vid_timestamps.
+      The i-th entry holds the index of imu_timestamps that most
       closely matches the time of the i-th index in video_timestamps.
     """
     
-    vid_len = video_timestamps.shape[0]
-    kin_len = kinem_timestamps.shape[0]
+    vid_len = vid_timestamps.shape[0]
+    imu_len = imu_timestamps.shape[0]
             
     # For each video timestamp, find the index of the nearest
     # kinematic timestamp (+/- one frame)
@@ -40,8 +41,8 @@ def vidFrame2imuFrame(video_timestamps, kinem_timestamps):
     indices = np.zeros((vid_len,), dtype=int)
     j = 0
     for i in range(vid_len):
-        while video_timestamps[i] > kinem_timestamps[j] \
-          and j < kin_len - 1:
+        while vid_timestamps[i] > imu_timestamps[j] \
+          and j < imu_len - 1:
             j += 1
         indices[i] = j
         
@@ -111,20 +112,22 @@ def parseLabels(labels, num_frames):
         cur_start = labels['start'][i]
         cur_end = labels['end'][i]
         cur_action = labels['action'][i]
+        # Label indices should increase monotonically
         assert(cur_start >= prev_end)
+        # If there's a gap between end of last action and the beginning of the
+        # current action, fill it with inactivity
         if cur_start > prev_end:
             actions.append(0)   # 0 means inactive
             bounds.append(cur_start)
+        # Append the current action and its end index
         actions.append(cur_action)
         bounds.append(cur_end)
         prev_end = cur_end
-    """
     # Write inactivity until end if prev_end isn't the last index
     assert(num_frames - 1 >= prev_end)
     if num_frames - 1 > prev_end:
         actions.append(0)
         bounds.append(num_frames - 1)
-    """
     
     return (np.array(bounds), np.array(actions))
 
@@ -176,19 +179,20 @@ def plotImuData(t_init, devices, sample_len):
         imu = imus[i]
         name = devices[i]
         
+        # Filter out bad data for now b/c it makes the plots impossible to read
+        bad_data = np.less(imu[:,0], 1.0)
+        imu = imu[np.logical_not(bad_data),:]
+        
         # FIXME: searching only the object and target fields for matching names
         #   ignores the rotate_all label
         # relevant_labels = np.logical_or(labels['object'] == i + 1,
         #                                 labels['target'] == i + 1)
         
+        # Get action boundaries (in video frames) from annotations and convert
+        # to imu frames
         vid_bounds, actions = parseLabels(labels, num_vid_frames)
-        # Convert video frame labels to frame indices for this IMU
         vid2imu = vidFrame2imuFrame(video_timestamps, imu[:,0])
         imu_bounds = vid2imu[vid_bounds] #[relevant_labels]]
-    
-        # Filter out bad data for now b/c it makes the plots impossible to read
-        bad_data = np.less(imu[:,0], 1.0)
-        imu = imu[np.logical_not(bad_data),:]
     
         # Calculate time relative to trial start
         imu[:,0] = imu[:,0] - t_init
@@ -206,29 +210,38 @@ def plotImuData(t_init, devices, sample_len):
         coords = ['x', 'y', 'z']
         assert(len(coords) == 3)
         
-        for i, title in enumerate(titles):
-            start = 2 + i * len(coords)
-            end = 2 + (i + 1) * len(coords)
-            imu[:,start:end] = imu[:,start:end] * coeffs[i]
-            f, axes = plt.subplots(len(coords), 1)
-            for j, ax in enumerate(axes):
+        # Set colormaps and normalization for plotting labels (between 0 and 6)
+        cmap = mpl.cm.Pastel2
+        norm = mpl.colors.Normalize(vmin=0.0, vmax=6.0)
+        
+        for j, title in enumerate(titles):
+            start = 2 + j * len(coords)
+            end = 2 + (j + 1) * len(coords)
+            imu[:,start:end] = imu[:,start:end] * coeffs[j]
+            f, axes = plt.subplots(len(coords)+1, 1, figsize=plt.figaspect(1.25))
+            for k, ax in enumerate(axes[:-1]):
                 # Plot IMU reading
-                ax.plot(imu[:,0], imu[:,start+j], c='black', label=name)
+                ax.plot(imu[:,0], imu[:,start+k], color='blue', label=name)
                 # Plot labels as colorbar in background
-                max_val = np.max(imu[:,start+j])
-                min_val = np.min(imu[:,start+j])
+                max_val = np.max(imu[:,start+k])
+                min_val = np.min(imu[:,start+k])
                 ax.pcolor(imu[imu_bounds,0], np.array([min_val, max_val]),
-                          np.tile(actions, (2,1)), cmap='Pastel2')
+                          np.tile(actions, (2,1)), cmap=cmap, norm=norm)
                 # Label X and Y axes
                 ax.set_xlabel('t (s)')
-                ax.set_ylabel(r'${}_{}$ ({})'.format(syms[i], coords[j], units[i]))
-            axes[0].set_title('{} in IMU frame'.format(title))
+                ax.set_ylabel(r'${}_{}$ ({})'.format(syms[j], coords[k], units[j]))
+            # Plot colormap used for labels with tics at label indices
+            mpl.colorbar.ColorbarBase(axes[-1], cmap=cmap, norm=norm,
+                                      orientation='horizontal',
+                                      ticks=list(range(7)))
+            axes[0].set_title('{} in IMU frame, {}'.format(title, name))
             f.tight_layout()
             
-            fname = '{}_{}.pdf'.format(abbrevs[i], name)
+            # Save plot
+            fname = '{}_{}.pdf'.format(abbrevs[j], name)
             f.savefig(os.path.join(imu_fig_path, fname))
             plt.close()
-        
+                    
         """
         # Shrink plot width by 20% to make room for the legend
         for axes in (ax_a, ax_g, ax_m):
