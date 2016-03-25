@@ -335,7 +335,7 @@ if 0:
     #  Plot points in block_set
     figure(1)
     for b in block_set.blocks:
-        print b.xy
+        print(b.xy)
         scatter(b.xy[1], -b.xy[0], s=35, color=b.color[0])
 
     axis([0,640,0,-480])
@@ -347,7 +347,7 @@ if 0:
         trail = np.array(b.xyz_hist)
         plot(trail[:,0], trail[:,1], c=colors[i])
         # scatter3d(trail)
-        print i, trail.shape, trail[-1]
+        print(i, trail.shape, trail[-1])
 
 if 0:
     from mpl_toolkits.mplot3d import Axes3D
@@ -361,7 +361,7 @@ if 0:
         # plot(trail[:,0], trail[:,1], c=colors[i])
         valid = np.nonzero(np.all(trail != 0, -1))[0]
         ax.plot3D(trail[valid,0], trail[valid,1], trail[valid,2], c=colors[i])
-        print i, trail.shape, trail[-1]
+        print(i, trail.shape, trail[-1])
         
 
 # Export pts
@@ -449,8 +449,8 @@ if 0:
         # pts_t = np.dot(R.T, (pts-t).T).T    
         pts_m = np.dot(R.T, (model_pts-t).T).T
 
-    print t
-    print R
+    print(t)
+    print(R)
 
     i = 0
 
