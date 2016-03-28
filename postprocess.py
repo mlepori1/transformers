@@ -83,22 +83,32 @@ def loadImuData(t_init, devices):
     
     # Convert IMU data to natural units
     # FIXME: Get conversion factors from device settings file
-    for imu in imus:
+    for i in range(len(imus)):
+        
+        imu_data = imus[i]
+        
+        # Filter out bad data for now b/c it makes the plots impossible to read
+        # (bad data are marked with a timestamp of 0)
+        bad_data = np.less(imu_data[:,0], 1.0)
+        imu_data = imu_data[np.logical_not(bad_data),:]
+        
         # Calculate time relative to TRIAL start (this is before each IMU
         # actually started streaming data)
-        imu[:,0] = imu[:,0] - t_init
+        imu_data[:,0] = imu_data[:,0] - t_init
         
         # Accelerometer range setting +/- 8g --> divide by 4096 to get units of
         # g (ie acceleration due to earth's gravitational field)
-        imu[:,2:5] = imu[:,2:5] / 4096.0
+        imu_data[:,2:5] = imu_data[:,2:5] / 4096.0
         
         # Gyroscope range setting +/- 2000 dps --> multiply by 0.07 to get
         # units of degrees per second --> divide by 180 to get radians / sec
-        imu[:,5:8] = imu[:,5:8] * 0.07 / 180
+        imu_data[:,5:8] = imu_data[:,5:8] * 0.07 / 180
         
         # Multiply by 1e-4 to get units of mT, but this will be very
         # approximate (see WAX9 developer guide)
-        imu[:,8:11] = imu[:,8:11] * 1e-4
+        imu_data[:,8:11] = imu_data[:,8:11] * 1e-4
+        
+        imus[i] = imu_data
     
     return imus
 
@@ -208,6 +218,85 @@ def parseLabels(labels, num_frames):
     return (np.array(bounds), np.array(actions))
 
 
+def plot3dof(data, labels, label_bounds, fig_text):
+    """
+    [DESCRIPTION]
+    
+    Args:
+    -----
+    [np array] data: n-by-4 array (n is the number of samples) with the
+      following columns
+      [0] - time
+      [1] - x component
+      [2] - y component
+      [3] - z component
+    [np vector] labels: 
+    [np vector] label_bounds: boundary indices for the actions in labels. The
+      length of this vector is len(labels) + 1
+    [list(str)] fig_text: List of text strings to be used in labeling the
+      figure. Elements are the following
+      [0] - title
+      [1] - symbol
+      [2] - unit
+    
+    Returns:
+    --------
+    [int] f: matplotlib handle for the figure that was created
+    """
+    
+    # FIXME: don't use a magic number like this
+    NUM_LABELS = 7
+    
+    assert(data.shape[1] == 4)
+    assert(len(label_bounds) == len(labels) + 1)
+    
+    # Unpack figure text
+    assert(len(fig_text) == 3)
+    title = fig_text[0]
+    sym = fig_text[1]
+    unit = fig_text[2]
+    
+    # Set colormaps and normalization for plotting labels
+    cmap = mpl.cm.Pastel2
+    cmap_list = [cmap(i) for i in range(cmap.N)]
+    cmap = cmap.from_list('custom', cmap_list, cmap.N)
+    bounds = list(range(NUM_LABELS))
+    norm = mpl.colors.BoundaryNorm(bounds, cmap.N)
+    
+    coords = ['x', 'y', 'z']
+                                    
+    # X, Y, Z readings go in separate subplots on the same figure
+    # Make an extra subplot for label colors
+    f, axes = plt.subplots(len(coords)+1, 1, figsize=(6, 6.5))
+    for k, ax in enumerate(axes[:-1]):
+        
+        # Plot IMU reading
+        ax.plot(data[:,0], data[:,k+1], color='black', zorder=3)
+        ax.scatter(data[:,0], data[:,k+1], color='red', marker='.', zorder=2)
+        
+        # Plot labels as colorbar in background, but only if they exist
+        if label_bounds.shape[0] > 0:
+            max_val = np.max(data[:,k+1])
+            min_val = np.min(data[:,k+1])
+            ax.pcolor(data[label_bounds,0], np.array([min_val, max_val]),
+                      np.tile(labels, (2,1)), cmap=cmap, norm=norm,
+                      zorder=1)
+        
+        # Label X and Y axes
+        ax.set_xlabel(r'$t \/ (\mathrm{s})$')
+        fmt_str = r'${}_{} \/ ({})$'
+        ax.set_ylabel(fmt_str.format(sym, coords[k], unit))
+    
+    # Plot colormap used for labels with tics at label indices
+    mpl.colorbar.ColorbarBase(axes[-1], cmap=cmap, norm=norm,
+                              orientation='horizontal', ticks=bounds,
+                              boundaries=bounds)
+    axes[0].set_title('{} in IMU frame'.format(title))
+    f.tight_layout()
+    
+    return f
+
+
 def plotImuData(t_init, devices):
     """
     Save plots of IMU acceleration, angular velocity, magnetic field
@@ -228,30 +317,18 @@ def plotImuData(t_init, devices):
     num_vid_frames = video_timestamps.shape[0]
     
     # Load labels (empty list if no labels)
-    label_names = ('inactive', 'remove', 'rotate', 'rotate all',
-                   'place above', 'place below', 'place beside')
-    num_labels = len(label_names)
     labels = loadLabels(t_init)
     
     # Define the output directory (for saving figures) and create it if it
-    # doosn't already exist
+    # doesn't already exist
     imu_fig_path = os.path.join('output', 'figures', 'imu', str(t_init))
     if not os.path.exists(imu_fig_path):
         os.makedirs(imu_fig_path)
     
-    titles = ['Acceleration', 'Angular velocity', 'Magnetic field']
-    syms = ['a', '\omega', 'B']
-    units = ['g', '$\pi$ rad/s', 'mT']
-    abbrevs = ['accel', 'ang-vel', 'mag']
-    coords = ['x', 'y', 'z']
-    assert(len(coords) == 3)
-    
-    # Set colormaps and normalization for plotting labels
-    cmap = mpl.cm.Pastel2
-    cmap_list = [cmap(i) for i in range(cmap.N)]
-    cmap = cmap.from_list('custom', cmap_list, cmap.N)
-    bounds = list(range(num_labels))
-    norm = mpl.colors.BoundaryNorm(bounds, cmap.N)
+    fig_txt = [('Acceleration', 'a', 'g \/ \mathrm{m/s}^2'),
+               ('Angular velocity', '\omega', '\pi \/ \mathrm{rad/s}'),
+               ('Magnetic field', 'B', '\mathrm{mT}')]
+    fn_abbrevs = ['accel', 'ang-vel', 'mag']
     
     # Convert readings to natural units and plot, for each IMU selected
     selected_devices = range(len(imus))
@@ -260,11 +337,6 @@ def plotImuData(t_init, devices):
         imu = imus[i]
         name = devices[i]
         
-        # Filter out bad data for now b/c it makes the plots impossible to read
-        # (bad data are marked with a timestamp of 0)
-        bad_data = np.less(imu[:,0], 1.0)
-        imu = imu[np.logical_not(bad_data),:]
-        
         # Get action boundaries (in video frames) from annotations and convert
         # to imu frames
         vid_bounds, actions = parseLabels(labels, num_vid_frames)
@@ -272,43 +344,15 @@ def plotImuData(t_init, devices):
         imu_bounds = vid2imu[vid_bounds]
         
         # Plot accelerometer, gyroscope, magnetometer readings
-        for j, title in enumerate(titles):
+        for j, title in enumerate(fig_txt):
             
-            start = 2 + j * len(coords)
-                                    
-            # X, Y, Z readings go in separate subplots on the same figure
-            # Make an extra subplot for label colors
-            f, axes = plt.subplots(len(coords)+1, 1, figsize=(6, 6.5))
-            for k, ax in enumerate(axes[:-1]):
-                
-                # Plot IMU reading
-                ax.plot(imu[:,0], imu[:,start+k], color='black', label=name,
-                        zorder=3)
-                ax.scatter(imu[:,0], imu[:,start+k], color='red', marker='.',
-                           label=name, zorder=2)
-                
-                # Plot labels as colorbar in background, but only if they exist
-                if imu_bounds.shape[0] > 0:
-                    max_val = np.max(imu[:,start+k])
-                    min_val = np.min(imu[:,start+k])
-                    ax.pcolor(imu[imu_bounds,0], np.array([min_val, max_val]),
-                              np.tile(actions, (2,1)), cmap=cmap, norm=norm,
-                              zorder=1)
-                
-                # Label X and Y axes
-                ax.set_xlabel('t (s)')
-                fmt_str = r'${}_{}$ ({})'
-                ax.set_ylabel(fmt_str.format(syms[j], coords[k], units[j]))
-            
-            # Plot colormap used for labels with tics at label indices
-            mpl.colorbar.ColorbarBase(axes[-1], cmap=cmap, norm=norm,
-                                      orientation='horizontal', ticks=bounds,
-                                      boundaries=bounds)
-            axes[0].set_title('{} in IMU frame, {}'.format(title, name))
-            f.tight_layout()
+            start = 2 + j
+            end = start + 3
+            data = np.hstack((imu[:,0:1], imu[:,start:end]))
+            f = plot3dof(data, actions, imu_bounds, fig_txt[j])
             
             # Save plot and don't show
-            fname = '{}_{}.pdf'.format(abbrevs[j], name)
+            fname = '{}_{}.pdf'.format(fn_abbrevs[j], name)
             f.savefig(os.path.join(imu_fig_path, fname))
             plt.close()
 
@@ -332,11 +376,16 @@ def trackIMU(imu_data):
     --------
     [np array] R: Block orientation (flattened rotation matrix) at each
       sample. n-by-9 array. Matrix is row-major flattened.
+    [np array] A_g: Block acceleration (in global frame) at each sample. n-by-3
+      array.
+    [np array] V: Block velocity at each sample. n-by-3 array.
+    [np array] S: Block position at each sample. n-by-3 array.
     """
     
     R = np.zeros((imu_data.shape[0], 9))
+    A_g = np.zeros((imu_data.shape[0], 3))
     V = np.zeros((imu_data.shape[0], 3))
-    X = np.zeros((imu_data.shape[0], 3))
+    S = np.zeros((imu_data.shape[0], 3))
     
     t = imu_data[:,0]
     a = imu_data[:,2:5]
@@ -348,17 +397,19 @@ def trackIMU(imu_data):
     # Assume block is initially at (1, 1, 1), not moving, rotated 0 degrees
     # w/r/t the global reference frame
     Rt = np.identity(3)
-    Xt = np.array([1, 1, 1])
+    St = np.array([1, 1, 1])
     Vt = np.array([0, 0, 0])
     R[0,:] = Rt.ravel()
     V[0,:] = Vt
-    X[0,:] = Xt
+    S[0,:] = St
     
     # Acceleration due to gravity (in global frame), units are ~9.81 * m/s^2
     # This is correct as long as the assumption about R(t0) above is correct
+    # Otherwise this should be projected onto the global axes (?)
     g = np.array([0, 0, -1])
     
     # FIXME: This can be calculated more efficiently
+    a_global_prev = a[0,:]
     for i in range(t.shape[0] - 1):
         dt = t[i+1] - t[i]
         #---[ORIENTATION]------------------------------
@@ -372,6 +423,7 @@ def trackIMU(imu_data):
         sigma = np.sqrt(w[i,:].dot(w[i,:])) * np.abs(dt)
         
         # Estimated transition matrix
+        # FIXME: This needs a name that isn't A
         A = np.identity(3)
         if sigma > 0:
             A += np.sin(sigma) / sigma * B \
@@ -382,15 +434,25 @@ def trackIMU(imu_data):
         R[i+1,:] = Rt.ravel()
         
         #---[POSITION]------------------------------
-        # Project acceleration onto global reference frame and convert to
-        # meters / second^2
-        a_global = Rt.dot(a[i,:]) * 9.81
-        
+        # Project acceleration onto global reference frame and account for the
+        # effect of gravity (we're still in units of g m/s^2)
+        a_global = (Rt.dot(a[i,:]) + g)
+        A_g[i] = a_global
+                
         # Double-integrate to get position
-        V[i+1,:] = V[i,:] + (a_global + g) * dt
-        X[i+1,:] = X[i,:] + V[i+1,:] * dt
+        # Assume velocity is zero if change in acceleration is near zero
+        a_diff = a_global_prev - a_global
+        A_THRESH = 0.01
+        if np.sqrt(a_diff.dot(a_diff)) < A_THRESH:
+            V[i+1,:] = np.zeros(3)
+        else:
+            V[i+1,:] = V[i,:] + a_global * 9.81 * dt
         
-    return (R, V, X)
+        S[i+1,:] = S[i,:] + V[i+1,:] * dt
+        
+        a_global_prev = a_global
+        
+    return (R, A_g, V, S)
 
 
 def plotPosition(X):
@@ -412,7 +474,7 @@ def plotPosition(X):
     max_dist = X.ravel().max()
     min_dist = X.ravel().min()
     ax.scatter(X[:,0], X[:,1], X[:,2], c=np.arange(X.shape[0]),
-               cmap=mpl.cm.Spectral)
+               cmap=mpl.cm.Spectral, edgecolors='face')
     ax.set_xlim(min_dist, max_dist)
     ax.set_ylim(min_dist, max_dist)
     ax.set_zlim(min_dist, max_dist)
@@ -420,17 +482,45 @@ def plotPosition(X):
     ax.set_ylabel('Y (m)')
     ax.set_zlabel('Z (m)')
     ax.set_title('Sensor Position')
-    ax.legend()
     
     return fig
 
 if __name__ == '__main__':
+    
     t_init = 1458670623
     devices = ('08F1', '095D', '090F', '0949')
     #plotImuData(t_init, devices)
     
     imus = loadImuData(t_init, devices)
-    R, V, X = trackIMU(imus[0])
-    fig = plotPosition(X)
+    imu = imus[0]
+    A = imu[:,2:5]
+    R, A_g, V, S = trackIMU(imu)
+    fig = plotPosition(S)
     
+    # Load RGB frame timestamps
+    fn = os.path.join('data', 'rgb', str(t_init), 'frame-timestamps.csv')
+    video_timestamps = np.loadtxt(fn) - t_init
+    num_vid_frames = video_timestamps.shape[0]
     
+    # Load labels (empty list if no labels)
+    labels = loadLabels(t_init)
+    
+    # Get action boundaries (in video frames) from annotations and convert
+    # to imu frames
+    vid_bounds, actions = parseLabels(labels, num_vid_frames)
+    vid2imu = vidFrame2imuFrame(video_timestamps, imu[:,0])
+    imu_bounds = vid2imu[vid_bounds]
+    
+    text = [('Global acceleration', 'a', 'g \/ \mathrm{m/s}^2'),
+            ('Acceleration', 'a', 'g \/ \mathrm{m/s}^2'),
+            ('Velocity', 'v', '\mathrm{m/s}'),
+            ('Position', 's', '\mathrm{m}')]
+    figs = []
+    for i, data in enumerate((A_g, A, V, S)):
+        augmented_data = np.hstack((imu[:,0:1], data))
+        
+        labels = np.array([0])
+        label_bounds = np.array([0, data.shape[0]-1])
+        
+        f = plot3dof(augmented_data, actions, imu_bounds, text[i])
+        figs.append(f)
