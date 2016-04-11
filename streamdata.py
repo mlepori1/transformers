@@ -28,9 +28,9 @@ def streamVideo(path, q, die):
 
     Args:
     -----
-      [str] path: Path (full or relative) to output file
-      q: Multiprocessing queue, for collecting data
-      die: Multiprocessing event, kill signal
+    [str] path: Path (full or relative) to output file
+    [mp queue] q: Multiprocessing queue, for collecting data
+    [mp event] die: Multiprocessing event, kill signal
     """
 
     # Start streaming rgb video
@@ -83,10 +83,10 @@ def streamImu(devices, q, die):
 
     Args:
     -----
-      [dict(str->socket)] devices: Dict w/ device names as keys and their
-        sockets as values
-      q: Multiprocessing queue, for collecting data
-      die: Multiprocessing event, kill signal
+    [dict(str->socket)] devices: Dict w/ device names as keys and their
+      sockets as values
+    [mp queue] q: Multiprocessing queue, for collecting data
+    [mp event] die: Multiprocessing event, kill signal
     """
 
     # This allows us to cycle through device names -> sockets in the main loop
@@ -144,9 +144,9 @@ def write(path, q, die):
 
     Args:
     -----
-      [str] path: Path (full or relative) to output file
-      q: Multiprocessing queue, for collecting data
-      die: Multiprocessing event, kill signal
+    [str] path: Path (full or relative) to output file
+    [mp queue] q: Multiprocessing queue, for collecting data
+    [mp event] die: Multiprocessing event, kill signal
     """
 
     with open(path, 'wb') as csvfile:
@@ -168,17 +168,18 @@ def processData(path, dev_names):
 
     Args:
     -----
-      [str] path: Path (full or relative) to raw data file
-      [list(str)] dev_names: IMU IDs
+    [str] path: Path (full or relative) to raw data file
+    [list(str)] dev_names: List of IMU ID strings; define m as the number of
+      items in this list
 
     Returns:
     --------
-      [np array] imu_data: Length n-by-m*d, where n is the number of IMU
-        samples, m is the number of IMU devices, and d is the length of one IMU
-        sample.
-      [np vector] rgb_data: Contains the global timestamp for every video
-        frame recorded
-      [int] sample_len: Length of one IMU sample (d)
+    [np array] imu_data: Size n-by-m*d, where n is the number of IMU
+      samples, m is the number of IMU devices, and d is the length of one IMU
+      sample. Samples
+    [np vector] rgb_data: Contains the global timestamp for every video
+      frame recorded
+    [int] sample_len: Length of one IMU sample (d)
     """
     
     num_devices = len(dev_names)
@@ -228,9 +229,9 @@ def saveSettings(path, dev_settings):
     
     Args:
     -----
-      [str] path: Path (full or relative) to output file
-      [dict(str->str)] dev_settings: Dict mapping device IDs to recorded
-        settings 
+    [str] path: Path (full or relative) to output file
+    [dict(str->str)] dev_settings: Dict mapping device IDs to recorded
+      settings 
     """
     
     path = os.path.join('data', 'dev-settings', '{}.txt'.format(init_time))
@@ -242,17 +243,22 @@ def saveSettings(path, dev_settings):
 
 def printPercentDropped(imu_data, dev_names, sample_len):
     """
-    [DESCRIPTION]
+    Calculate the proportion of missing or unusable data samples in the
+    provided data array; print to console
 
     Args:
     -----
-      imu_data:
-      dev_names:
-      sample_len:
+    [np array] imu_data: Size n-by-m*d, where n is the number of IMU
+      samples, m is the number of IMU devices, and d is the length of one IMU
+      sample.
+    [list(str)] dev_names: List of IMU ID strings; define m as the number of
+      items in this list
+    [int] sample_len: Length of one IMU sample (d)
 
     Returns:
     --------
-      percent_dropped:
+    [float] percent_dropped: Proportion of missing data samples over all
+      devices, expressed as a percentage
     """
 
     # These are aggregate drop/sample counts
@@ -307,10 +313,10 @@ if __name__ == "__main__":
             os.makedirs(path)
     
     # Bluetooth MAC addresses of the IMUs we want to stream from
-    addresses = ('00:17:E9:D7:08:F1',
-                 '00:17:E9:D7:09:5D',
-                 '00:17:E9:D7:09:0F',
-                 '00:17:E9:D7:09:49')
+    #addresses = ('00:17:E9:D7:08:F1', 
+    addresses = ('00:17:E9:D7:09:5D',)
+                 #'00:17:E9:D7:09:0F',
+                 #'00:17:E9:D7:09:49')
 
     # Connect to devices and print settings
     devices = {}
@@ -371,4 +377,4 @@ if __name__ == "__main__":
     
     # Show IMU data (for validation)
     ids = [x[-4:] for x in devices.keys()]  # Grab hex ID from WAX9 ID
-    plotImuData(int(init_time), ids, sample_len)
+    plotImuData(int(init_time), ids)

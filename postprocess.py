@@ -52,11 +52,12 @@ def rgbFrame2imuFrame(rgb_timestamps, imu_timestamps):
 
 def loadImuData(t_init, devices):
     """
-    [DESCRIPTION]
+    Load IMU samples from the file specified by t_init
     
     Args:
     -----
-    [int] t_init:
+    [int] t_init: Trial identifier. This is the (truncated) Unix time when the
+      trial's data directory was created.
     [list(str)] devices:
     
     Returns:
@@ -120,7 +121,8 @@ def loadRgbFrameTimestamps(t_init):
     
     Args:
     -----
-    [int] t_init:
+    [int] t_init: Trial identifier. This is the (truncated) Unix time when the
+      trial's data directory was created.
     
     Returns:
     --------
@@ -140,7 +142,8 @@ def loadLabels(t_init):
     
     Args:
     -----
-    [int] t_init:
+    [int] t_init: Trial identifier. This is the (truncated) Unix time when the
+      trial's data directory was created.
     
     Returns:
     --------
@@ -175,17 +178,19 @@ def loadLabels(t_init):
 
 def parseLabels(labels, num_frames):
     """
-    Return boundaries and labels for annotated actions.
+    Return event labels of annotated actions, along with the RGB frame indices
+    of action boundaries
     
     Args:
     -----
-    [np array] labels:
-    [int] num_frames:
+    [np array] labels: Structured array of event annotations (see loadLabels)
+    [int] num_frames: Number of RGB frames recorded
     
     Returns:
     --------
-    [np array] bounds:
-    [np array] actions:
+    [np vector] actions: Sequence of integer event labels for this trial
+    [np vector] action_bounds: boundary indices for the actions specified
+      above. The length of this vector is len(labels) + 1
     """
     
     bounds = []
@@ -235,7 +240,7 @@ def parseLabels(labels, num_frames):
         actions.append(0)
         bounds.append(num_frames - 1)
     
-    return (np.array(bounds), np.array(actions))
+    return (np.array(actions), np.array(bounds))
 
 
 def imuActionBounds(labels, t_rgb, t_imu):
@@ -244,14 +249,15 @@ def imuActionBounds(labels, t_rgb, t_imu):
     
     Args:
     -----
-    [] labels:
+    [np array] labels: Structured array of event annotations (see loadLabels)
     [np vector] t_rgb:
     [np vector] t_imu:
     
     Returns:
     --------
-    [np vector] actions:
-    [np vector] action_boundaries:
+    [np vector] actions: Sequence of integer event labels for this trial
+    [np vector] action_bounds: boundary indices for the actions specified
+      above. The length of this vector is len(labels) + 1
     """
     
     num_rgb_frames = t_rgb.shape[0]
@@ -260,12 +266,12 @@ def imuActionBounds(labels, t_rgb, t_imu):
     # to imu frames
     rgb_bounds, actions = parseLabels(labels, num_rgb_frames)
     rgb2imu = rgbFrame2imuFrame(t_rgb, t_imu)
-    imu_bounds = rgb2imu[rgb_bounds]
+    action_bounds = rgb2imu[rgb_bounds]
     
-    return actions, imu_bounds
+    return actions, action_bounds
 
 
-def plot3dof(data, labels, label_bounds, fig_text):
+def plot3dof(data, actions, action_bounds, fig_text):
     """
     [DESCRIPTION]
     
@@ -277,9 +283,9 @@ def plot3dof(data, labels, label_bounds, fig_text):
       [1] - x component
       [2] - y component
       [3] - z component
-    [np vector] labels: 
-    [np vector] label_bounds: boundary indices for the actions in labels. The
-      length of this vector is len(labels) + 1
+    [np vector] actions: Sequence of integer event labels for this trial
+    [np vector] action_bounds: boundary indices for the actions specified
+      above. The length of this vector is len(labels) + 1
     [list(str)] fig_text: List of text strings to be used in labeling the
       figure. Elements are the following
       [0] - title
@@ -295,7 +301,7 @@ def plot3dof(data, labels, label_bounds, fig_text):
     NUM_LABELS = 7
     
     assert(data.shape[1] == 4)
-    assert(len(label_bounds) == len(labels) + 1)
+    assert(len(action_bounds) == len(actions) + 1)
     
     # Unpack figure text
     assert(len(fig_text) == 3)
@@ -322,11 +328,11 @@ def plot3dof(data, labels, label_bounds, fig_text):
         ax.scatter(data[:,0], data[:,k+1], color='red', marker='.', zorder=2)
         
         # Plot labels as colorbar in background, but only if they exist
-        if label_bounds.shape[0] > 0:
+        if action_bounds.shape[0] > 0:
             max_val = np.max(data[:,k+1])
             min_val = np.min(data[:,k+1])
-            ax.pcolor(data[label_bounds,0], np.array([min_val, max_val]),
-                      np.tile(labels, (2,1)), cmap=cmap, norm=norm,
+            ax.pcolor(data[action_bounds,0], np.array([min_val, max_val]),
+                      np.tile(actions, (2,1)), cmap=cmap, norm=norm,
                       zorder=1)
         
         # Label X and Y axes
