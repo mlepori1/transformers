@@ -202,19 +202,22 @@ def processData(path, dev_names):
             if len(row) == 13:
                 sample = [timestamp] + [int(x) for x in row[1:-2]]
                 sample_len = len(sample)
-
+                
                 # Anything indexed below 1 is bad data
                 # Any sample indexed more than 200 samples beyond the latest is
                 # almost definitely bad data
                 if sample_idx < 1 or sample_idx - len(imu_data) > 200:
                     continue
-
+                
+                # Append rows of zeros to the data matrix until the last row
+                # is the sample index. Then write the current sample to its
+                # place in the sample index.
                 dev_idx = name2idx[row[-1]]
                 for i in range(sample_idx - (len(imu_data) - 1)):
                     imu_data.append([[0.0] * sample_len] * num_devices)
                 imu_data[sample_idx][dev_idx] = sample
     
-    # Flatten nested lists in each row of IMU data and cast to tuple
+    # Flatten nested lists in each row of IMU data
     imu_data = [[datum for sample in row for datum in sample] for row in imu_data]
     return (np.array(imu_data), np.array(rgb_data), sample_len)
 

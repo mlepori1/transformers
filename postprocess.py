@@ -14,14 +14,14 @@ import matplotlib as mpl
 from mpl_toolkits.mplot3d import Axes3D
 
 
-def vidFrame2imuFrame(vid_timestamps, imu_timestamps):
+def rgbFrame2imuFrame(rgb_timestamps, imu_timestamps):
     """
     Find the indices of the IMU timestamps that most closely
     match the video timestamps.
     
     Args:
     -----
-    [np vector] vid_timestamps: The i-th entry contains the universal time
+    [np vector] rgb_timestamps: The i-th entry contains the universal time
       at which the i-th VIDEO FRAME occurred
     [np vector] imu_timestamps: The i-th entry contains the universal time
       at which the i-th IMU SAMPLE occurred
@@ -33,16 +33,16 @@ def vidFrame2imuFrame(vid_timestamps, imu_timestamps):
       closely matches the time of the i-th index in video_timestamps.
     """
     
-    vid_len = vid_timestamps.shape[0]
+    rgb_len = rgb_timestamps.shape[0]
     imu_len = imu_timestamps.shape[0]
             
     # For each video timestamp, find the index of the nearest
     # IMU timestamp (+/- one frame)
     # Video and IMU timestamps are in increasing order.
-    indices = np.zeros((vid_len,), dtype=int)
+    indices = np.zeros((rgb_len,), dtype=int)
     j = 0
-    for i in range(vid_len):
-        while vid_timestamps[i] > imu_timestamps[j] \
+    for i in range(rgb_len):
+        while rgb_timestamps[i] > imu_timestamps[j] \
           and j < imu_len - 1:
             j += 1
         indices[i] = j
@@ -87,6 +87,7 @@ def loadImuData(t_init, devices):
         
         imu_data = imus[i]
         
+        #"""
         # Filter out bad data for now b/c it makes the plots impossible to read
         # (bad data are marked with a timestamp of 0)
         bad_data = np.less(imu_data[:,0], 1.0)
@@ -95,6 +96,7 @@ def loadImuData(t_init, devices):
         # Calculate time relative to TRIAL start (this is before each IMU
         # actually started streaming data)
         imu_data[:,0] = imu_data[:,0] - t_init
+        #"""
         
         # Accelerometer range setting +/- 8g --> divide by 4096 to get units of
         # g (ie acceleration due to earth's gravitational field)
@@ -111,6 +113,24 @@ def loadImuData(t_init, devices):
         imus[i] = imu_data
     
     return imus
+
+def loadRgbFrameTimestamps(t_init):
+    """
+    [DESCRIPTION]
+    
+    Args:
+    -----
+    [int] t_init:
+    
+    Returns:
+    --------
+    [np vector] rgb_timestamps:
+    """
+    
+    fn = os.path.join('data', 'rgb', str(t_init), 'frame-timestamps.csv')
+    rgb_timestamps = np.loadtxt(fn) - t_init
+    
+    return rgb_timestamps
 
 
 def loadLabels(t_init):
@@ -218,6 +238,33 @@ def parseLabels(labels, num_frames):
     return (np.array(bounds), np.array(actions))
 
 
+def imuActionBounds(labels, t_rgb, t_imu):
+    """
+    [DESCRIPTION]
+    
+    Args:
+    -----
+    [] labels:
+    [np vector] t_rgb:
+    [np vector] t_imu:
+    
+    Returns:
+    --------
+    [np vector] actions:
+    [np vector] action_boundaries:
+    """
+    
+    num_rgb_frames = t_rgb.shape[0]
+    
+    # Get action boundaries (in video frames) from annotations and convert
+    # to imu frames
+    rgb_bounds, actions = parseLabels(labels, num_rgb_frames)
+    rgb2imu = rgbFrame2imuFrame(t_rgb, t_imu)
+    imu_bounds = rgb2imu[rgb_bounds]
+    
+    return actions, imu_bounds
+
+
 def plot3dof(data, labels, label_bounds, fig_text):
     """
     [DESCRIPTION]
@@ -306,18 +353,16 @@ def plotImuData(t_init, devices):
     -----
     [int] t_init:
     [list(str)] devices:
+    
+    Returns:
+    --------
+      (Nothing)
     """
     
-    # Load IMU data
+    # Load IMU data, RGB frame timestamps, and labels (empty list if no labels)
     imus = loadImuData(t_init, devices)
-    
-    # Load RGB frame timestamps
-    fn = os.path.join('data', 'rgb', str(t_init), 'frame-timestamps.csv')
-    video_timestamps = np.loadtxt(fn) - t_init
-    num_vid_frames = video_timestamps.shape[0]
-    
-    # Load labels (empty list if no labels)
-    labels = loadLabels(t_init)
+    #rgb_timestamps = loadRgbFrameTimestamps(t_init)
+    #labels = loadLabels(t_init)
     
     # Define the output directory (for saving figures) and create it if it
     # doesn't already exist
@@ -330,6 +375,8 @@ def plotImuData(t_init, devices):
                ('Magnetic field', 'B', '\mathrm{mT}')]
     fn_abbrevs = ['accel', 'ang-vel', 'mag']
     
+    norm_text = ('Square L2 norm', '\| \cdot \|', ' ')
+    
     # Convert readings to natural units and plot, for each IMU selected
     selected_devices = range(len(imus))
     for i in selected_devices:
@@ -337,16 +384,16 @@ def plotImuData(t_init, devices):
         imu = imus[i]
         name = devices[i]
         
-        # Get action boundaries (in video frames) from annotations and convert
-        # to imu frames
-        vid_bounds, actions = parseLabels(labels, num_vid_frames)
-        vid2imu = vidFrame2imuFrame(video_timestamps, imu[:,0])
-        imu_bounds = vid2imu[vid_bounds]
+        #actions, imu_bounds = imuActionBounds(labels, rgb_timestamps, imu[:,0])
+        actions = np.array([0])
+        imu_bounds = np.array([0, imu.shape[0]-1])
         
         # Plot accelerometer, gyroscope, magnetometer readings
+        norm_data = imu[:,0:1]
         for j, title in enumerate(fig_txt):
             
-            start = 2 + j
+            # Make plot of current 3-DOF data
+            start = 2 + j * 3
             end = start + 3
             data = np.hstack((imu[:,0:1], imu[:,start:end]))
             f = plot3dof(data, actions, imu_bounds, fig_txt[j])
@@ -355,6 +402,18 @@ def plotImuData(t_init, devices):
             fname = '{}_{}.pdf'.format(fn_abbrevs[j], name)
             f.savefig(os.path.join(imu_fig_path, fname))
             plt.close()
+            
+            # Append magnitude
+            sq2norm = np.sum(imu[:,start:end] * imu[:,start:end], 1)
+            norm_data = np.vstack((norm_data.T, sq2norm)).T
+        
+        # Plot, save, and close magnitude figures
+        f = plot3dof(norm_data, actions, imu_bounds, norm_text)
+        fname = 'norms_{}.pdf'.format(name)
+        f.savefig(os.path.join(imu_fig_path, fname))
+        plt.close()
+    
+    return
 
 
 def trackIMU(imu_data):
@@ -485,42 +544,199 @@ def plotPosition(X):
     
     return fig
 
-if __name__ == '__main__':
+
+def plotKinematics(t_init, devices):
+    """
+    [DESCRIPTION]
     
-    t_init = 1458670623
-    devices = ('08F1', '095D', '090F', '0949')
-    #plotImuData(t_init, devices)
+    Args:
+    -----
+    [int] t_init:
+    [list(str)] devices:
     
+    Returns:
+    --------
+      (Nothing)
+    """    
+    
+    # Load IMU data, RGB frame timestamps, and labels (empty list if no labels)
     imus = loadImuData(t_init, devices)
-    imu = imus[0]
-    A = imu[:,2:5]
-    R, A_g, V, S = trackIMU(imu)
-    fig = plotPosition(S)
-    
-    # Load RGB frame timestamps
-    fn = os.path.join('data', 'rgb', str(t_init), 'frame-timestamps.csv')
-    video_timestamps = np.loadtxt(fn) - t_init
-    num_vid_frames = video_timestamps.shape[0]
-    
-    # Load labels (empty list if no labels)
+    rgb_timestamps = loadRgbFrameTimestamps(t_init)    
     labels = loadLabels(t_init)
     
-    # Get action boundaries (in video frames) from annotations and convert
-    # to imu frames
-    vid_bounds, actions = parseLabels(labels, num_vid_frames)
-    vid2imu = vidFrame2imuFrame(video_timestamps, imu[:,0])
-    imu_bounds = vid2imu[vid_bounds]
+    # Define the output directory (for saving figures) and create it if it
+    # doesn't already exist
+    imu_fig_path = os.path.join('output', 'figures', 'imu', str(t_init))
+    if not os.path.exists(imu_fig_path):
+        os.makedirs(imu_fig_path)
     
+    fn_abbrevs = ('global-accel', 'vel', 'pos')
     text = [('Global acceleration', 'a', 'g \/ \mathrm{m/s}^2'),
-            ('Acceleration', 'a', 'g \/ \mathrm{m/s}^2'),
             ('Velocity', 'v', '\mathrm{m/s}'),
             ('Position', 's', '\mathrm{m}')]
-    figs = []
-    for i, data in enumerate((A_g, A, V, S)):
-        augmented_data = np.hstack((imu[:,0:1], data))
+    
+    # Convert readings to natural units and plot, for each IMU selected
+    selected_devices = range(len(imus))
+    for i in selected_devices:
         
-        labels = np.array([0])
-        label_bounds = np.array([0, data.shape[0]-1])
+        imu = imus[i]
+        name = devices[i]
+
+        actions, imu_bounds = imuActionBounds(labels, rgb_timestamps, imu[:,0])
         
-        f = plot3dof(augmented_data, actions, imu_bounds, text[i])
-        figs.append(f)
+        R, A_g, V, S = trackIMU(imu)
+
+        for j, data in enumerate((A_g, V, S)):
+            augmented_data = np.hstack((imu[:,0:1], data))        
+            f = plot3dof(augmented_data, actions, imu_bounds, text[j])
+            
+            # Save plot and don't show
+            fname = '{}_{}.pdf'.format(fn_abbrevs[j], name)
+            f.savefig(os.path.join(imu_fig_path, fname))
+            plt.close()
+            
+        f = plotPosition(S)
+    
+    return
+
+
+def pointwiseCorrelation(t_init, devices):
+    """
+    Calculate pointwise cosine similarity for all pairs of devices in imus.
+    
+    Args:
+    -----
+    [int] t_init:
+    [list(str)] devices:
+    
+    Returns:
+    --------
+      (Nothing)
+    """
+    
+    NUM_LABELS = 7
+    
+    # Load IMU data, RGB frame timestamps, and labels (empty list if no labels)
+    imus = loadImuData(t_init, devices)
+    rgb_timestamps = loadRgbFrameTimestamps(t_init)    
+    labels = loadLabels(t_init)
+    
+    # Define the output directory (for saving figures) and create it if it
+    # doesn't already exist
+    corr_fig_path = os.path.join('output', 'figures', 'imu-corrs', str(t_init))
+    if not os.path.exists(corr_fig_path):
+        os.makedirs(corr_fig_path)
+    
+    # Set colormaps and normalization for plotting labels
+    cmap = mpl.cm.Pastel2
+    cmap_list = [cmap(i) for i in range(cmap.N)]
+    cmap = cmap.from_list('custom', cmap_list, cmap.N)
+    bounds = list(range(NUM_LABELS))
+    norm = mpl.colors.BoundaryNorm(bounds, cmap.N)
+    
+    for i, imu1 in enumerate(imus):
+        
+        name1 = devices[i]
+        
+        # Correlation is symmetric, so only calculate for the n(n-1)/2 unique
+        # cases
+        for j in range(i+1, len(imus)):
+            
+            imu2 = imus[j]
+            name2 = devices[j]
+            
+            syms = ('a', '\omega', 'B')
+            f, axes = plt.subplots(len(syms) + 1, 1, figsize=(6, 6))
+            
+            # Calculate cosine distance = (x^T y) / (|x| |y|) for acceleration,
+            # angular velocity, and magnitude readings
+            for k, ax in enumerate(axes[:-1]):
+                
+                start = 2 + k * 3
+                end = start + 3
+                
+                data1 = imu1[:, start:end]
+                data2 = imu2[:, start:end]
+                
+                norm1 = np.sqrt(np.sum(data1 * data1, 1))
+                norm2 = np.sqrt(np.sum(data2 * data2, 1))
+                
+                ptwise_corr = np.sum(data1 * data2, 1) / (norm1 * norm2)
+                
+                # Filter out bad data for now b/c it makes the plots impossible to read
+                # (bad data are marked with a timestamp of 0)
+                bad_data1 = np.less(imu1[:,0], 1.0)
+                bad_data2 = np.less(imu2[:,0], 1.0)
+                bad_data = np.logical_or(bad_data1, bad_data2)
+                ptwise_corr = ptwise_corr[np.logical_not(bad_data)]
+                
+                # Calculate time relative to TRIAL start (this is before each IMU
+                # actually started streaming data)
+                t_imu1 = imu1[np.logical_not(bad_data),0] - t_init
+                
+                actions, imu_bounds = imuActionBounds(labels, rgb_timestamps, t_imu1)
+                
+                ax.plot(t_imu1, ptwise_corr, color='k') #, zorder=2)
+                
+                # Plot labels as colorbar in background, but only if they exist
+                if imu_bounds.shape[0] > 0:
+                    max_val = ptwise_corr.max()
+                    min_val = ptwise_corr.min()
+                    ax.pcolor(t_imu1, np.array([min_val, max_val]),
+                              np.tile(labels, (2,1)), cmap=cmap, norm=norm) #,
+                              #zorder=1)
+                
+                
+                ax.set_ylabel(r'$\cos \theta_{}$'.format(syms[k]))
+                ax.set_xlabel(r'$t \/ (\mathrm{s})$')
+            
+            # Plot colormap used for labels with tics at label indices
+            mpl.colorbar.ColorbarBase(axes[-1], cmap=cmap, norm=norm,
+                                      orientation='horizontal', ticks=bounds,
+                                      boundaries=bounds)
+            axes[0].set_title('Pointwise cosine similarity for IMU readings')
+            f.tight_layout()
+            
+            # Save plot and don't show
+            fname = 'cos-sim_{}-{}.pdf'.format(name1, name2)
+            f.savefig(os.path.join(corr_fig_path, fname))
+            plt.close()
+    
+    return
+
+
+if __name__ == '__main__':
+    
+    """
+    import glob
+    
+    # Batch process all imu data files
+    devices = ('08F1', '095D', '090F', '0949')
+    pattern = '/Users/jonathan/repo/blocks/data/imu/*.csv'
+    for match in glob.glob(pattern):
+        
+        # match is a complete path. Split off the base path and file extension
+        # to get t_init
+        _, fn = os.path.split(match)
+        t, _ = os.path.splitext(fn)
+        t = int(t)
+        
+        plotImuData(t, devices)
+        #plotKinematics(t, devices)
+        #pointwiseCorrelation(t, devices)
+    """
+
+    fn = '/Users/jonathan/095D.txt'
+    
+    data = np.loadtxt(fn, delimiter=',')
+    labels = np.array([0])
+    bounds = np.array([0, data.shape[0] - 1])
+    
+    a_norm = np.sqrt(np.sum(data[:,2:5] * data[:,2:5], 1))
+    w_norm = np.sqrt(np.sum(data[:,5:8] * data[:,5:8], 1))
+    b_norm = np.sqrt(np.sum(data[:,8:11] * data[:,8:11], 1))
+    
+    data = np.vstack((data[:,0], a_norm, w_norm, b_norm)).T
+    
+    txt = ('IMU sensor 2-norms', '\| \cdot \|', '??')
+    plot3dof(data, labels, bounds, txt)
