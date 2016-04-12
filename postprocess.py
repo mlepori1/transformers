@@ -732,7 +732,8 @@ if __name__ == '__main__':
         #pointwiseCorrelation(t, devices)
     """
 
-    fn = '/Users/jonathan/095D.txt'
+    #fn = '/Users/jonathan/095D.txt'
+    fn = '/home/jdjones/repo/blocks/08F1_in-room_desktop.csv'
     
     data = np.loadtxt(fn, delimiter=',')
     labels = np.array([0])
@@ -746,3 +747,4 @@ if __name__ == '__main__':
     
     txt = ('IMU sensor 2-norms', '\| \cdot \|', '??')
     plot3dof(data, labels, bounds, txt)
+    plt.show()

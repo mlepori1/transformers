@@ -119,14 +119,24 @@ def streamImu(devices, q, die):
             # lost part of it somewhere. Only decode complete packets.
             # FIXME: Warn or something when we lose a packet
             if frame[0] == '\xc0':
-                # Convert data from hex representation (see p. 7, 'WAX9 application
-                # developer's guide')
-                line = list(struct.unpack('<hIhhhhhhhhh', frame[3:27]))
-            else:
-                line = 11 * [0]
-            line.append(time.time())
-            line.append(dev_id)
-            q.put(line)
+                line = [0] * 11
+                if frame[2] == '\x01' and len(frame) == 28:
+                    # Convert data from hex representation (see p. 7, 'WAX9 application
+                    # developer's guide')
+                    #print('01 | {} | {}'.format(len(frame), frame.encode('hex')))
+                    line = list(struct.unpack('<BBBhIhhhhhhhhhB', frame))
+                    line = line[3:14]
+                elif frame[2] == '\x02' and len(frame) == 36:
+                    # Convert data from hex representation (see p. 7, 'WAX9 application
+                    # developer's guide')
+                    #print('02 | {} | {}'.format(len(frame), frame.encode('hex')))
+                    line = list(struct.unpack('<BBBhIhhhhhhhhhhhIB', frame))
+                    line = line[3:14]
+                else:
+                    print('ER | {} | {}'.format(len(frame), frame.encode('hex')))
+                line.append(time.time())
+                line.append(dev_id)
+                q.put(line)
         
         # Terminate when main tells us to
         if die.is_set():
@@ -313,8 +323,8 @@ if __name__ == "__main__":
             os.makedirs(path)
     
     # Bluetooth MAC addresses of the IMUs we want to stream from
-    #addresses = ('00:17:E9:D7:08:F1', 
-    addresses = ('00:17:E9:D7:09:5D',)
+    addresses = ('00:17:E9:D7:08:F1',) 
+    #addresses = ('00:17:E9:D7:09:5D',)
                  #'00:17:E9:D7:09:0F',
                  #'00:17:E9:D7:09:49')
 
@@ -343,7 +353,7 @@ if __name__ == "__main__":
 
     # Wait for kill signal from user
     while True:
-        user_in = input('Streaming... (press return to stop)')
+        user_in = input('Streaming... (press return to stop)\n')
         if not user_in:
             print('Killing processes...')
             die.set()
@@ -356,7 +366,7 @@ if __name__ == "__main__":
     for dev_name, socket in devices.items():
         print('Disconnecting from {}'.format(dev_name))
         socket.close()
-
+    
     # Massage and save IMU, RGB frame data
     saveSettings(settings_file_path, dev_settings)
     imu_data, rgb_data, sample_len = processData(raw_file_path, devices.keys())
@@ -378,3 +388,4 @@ if __name__ == "__main__":
     # Show IMU data (for validation)
     ids = [x[-4:] for x in devices.keys()]  # Grab hex ID from WAX9 ID
     plotImuData(int(init_time), ids)
+    
