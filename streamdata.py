@@ -17,6 +17,7 @@ import sys
 import time
 import subprocess
 from itertools import cycle
+import struct
 
 from libwax9 import *
 from postprocess import *
@@ -107,6 +108,7 @@ def streamImu(devices, q, die):
         # with 0xC0. So if the frame doesn't end in 0xC0, we haven't received
         # the entire packet yet.
         if not frame[-1] == '\xc0':
+            print('{} | {}'.format(prev_frame.encode('hex'), frame.encode('hex')))
             frame = prev_frame + frame
             prev_frame = frame
         if frame[-1] == '\xc0' and len(frame) > 1:
@@ -115,20 +117,20 @@ def streamImu(devices, q, die):
             dev_id = dev_names.next()
             socket = devices[dev_id]
             prev_frame = ''
-            # Make sure the packet we're about to write begins with 0xC0. Else we
-            # lost part of it somewhere. Only decode complete packets.
+            # Make sure the packet we're about to write begins with 0xC0. Else
+            # we lost part of it somewhere. Only decode complete packets.
             # FIXME: Warn or something when we lose a packet
             if frame[0] == '\xc0':
                 line = [0] * 11
                 if frame[2] == '\x01' and len(frame) == 28:
-                    # Convert data from hex representation (see p. 7, 'WAX9 application
-                    # developer's guide')
+                    # Convert data from hex representation (see p. 7, 'WAX9
+                    # application developer's guide')
                     #print('01 | {} | {}'.format(len(frame), frame.encode('hex')))
                     line = list(struct.unpack('<BBBhIhhhhhhhhhB', frame))
                     line = line[3:14]
                 elif frame[2] == '\x02' and len(frame) == 36:
-                    # Convert data from hex representation (see p. 7, 'WAX9 application
-                    # developer's guide')
+                    # Convert data from hex representation (see p. 7, 'WAX9
+                    # application developer's guide')
                     #print('02 | {} | {}'.format(len(frame), frame.encode('hex')))
                     line = list(struct.unpack('<BBBhIhhhhhhhhhhhIB', frame))
                     line = line[3:14]
