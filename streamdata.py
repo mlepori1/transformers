@@ -23,26 +23,30 @@ from libwax9 import *
 from postprocess import *
 
 
-def streamVideo(path, q, die):
+def streamVideo(devices, q, die, paths):
     """
     Stream data from camera until die is set
 
     Args:
     -----
-    [str] path: Path (full or relative) to output file
+    [dict(str->cv stream)] devices:
     [mp queue] q: Multiprocessing queue, for collecting data
     [mp event] die: Multiprocessing event, kill signal
+    [dict(str->str)] paths: Path (full or relative) to image output directory
     """
-
-    # Start streaming rgb video
-    openni2.initialize()
-    dev = openni2.Device.open_any()
-    #depth_stream = dev.create_depth_stream()
-    color_stream = dev.create_color_stream()
-    for stream in [color_stream]: #, depth_stream]:
-        stream.start()
-
-    i = 0
+        
+    # This allows us to cycle through device names -> sockets in the main loop
+    dev_names = cycle(devices.keys())
+    
+    frame_index = {name: 0 for name in devices.keys()}
+    
+    for stream in devices.values():
+        stream.start()    
+    
+    dev_name = dev_names.next()
+    stream = devices[dev_name]
+    index = frame_index[dev_name]
+    path = paths[dev_name]
     while not die.is_set():
         """
         # Read depth frame data, convert to image matrix, write to file,
@@ -56,26 +60,27 @@ def streamVideo(path, q, die):
         cv2.imwrite(os.path.join(dirname, filename), depth_array)
         q.put((i, frametime, "IMG_DEPTH"))
         """
-
-        # Read color frame data, convert to image matrix, write to file,
+        
+        # Read frame data, convert to image matrix, write to file,
         # record frame timestamp
         frametime = time.time()
-        color_frame = color_stream.read_frame()
-        color_data = color_frame.get_buffer_as_uint8()
-        color_array = np.ndarray((color_frame.height, 3*color_frame.width),
-                                 dtype=np.uint8, buffer=color_data)
-        color_array = np.dstack((color_array[:,2::3], color_array[:,1::3],
-            color_array[:,0::3]))
-        filename = 'rgb_{:06d}.png'.format(i)
-        cv2.imwrite(os.path.join(path, filename), color_array)
-        q.put((i, frametime, 'IMG_RGB'))
+        frame = stream.read_frame()
+        data = frame.get_buffer_as_uint8()
+        # FIXME: depth streams should be parsed differently
+        array = np.ndarray((frame.height, 3*frame.width),
+                            dtype=np.uint8, buffer=data)
+        array = np.dstack((array[:,2::3], array[:,1::3], array[:,0::3]))
+        filename = '{:06d}.png'.format(index)
+        cv2.imwrite(os.path.join(path, filename), array)
+        q.put((frametime, index, dev_name))
 
-        i += 1
-
-    # Stop streaming
-    #depth_stream.stop()
-    color_stream.stop()
-    openni2.unload()
+        frame_index[dev_name] += 1
+        
+        # Cycle to the next device
+        dev_name = dev_names.next()
+        stream = devices[dev_name]
+        index = frame_index[dev_name]
+        path = paths[dev_name]
 
 
 def streamImu(devices, q, die):
@@ -98,47 +103,93 @@ def streamImu(devices, q, die):
         socket.sendall('stream\r\n')
 
     # Read data sequentially from sensors until told to terminate
+    error = 0
     prev_frame = ''
+    data = [0] * 11
     dev_id = dev_names.next()
     socket = devices[dev_id]
     while True:
-        frame = socket.recv(36)
-
+        
+        # Read at most 28 bytes over RFCOMM. If the packet is length-36, it
+        # will be read in two passes.
+        frame = prev_frame + socket.recv(28)
+        cur_time = time.time()
+        
         # The WAX9 device transmits SLIP-encoded data: packets begin and end
-        # with 0xC0. So if the frame doesn't end in 0xC0, we haven't received
-        # the entire packet yet.
-        if not frame[-1] == '\xc0':
-            print('{} | {}'.format(prev_frame.encode('hex'), frame.encode('hex')))
-            frame = prev_frame + frame
+        # with 0xC0
+        packet = []
+        if not frame[0] == '\xc0':
+            # We missed the beginning of this packet. There's nothing we can
+            # do to fix it, so throw it out
+            # FIXME: Make sure we don't throw out the beginning of another
+            # packet that may be included in this frame?
+            prev_frame = ''
+            error = 1
+        elif len(frame) < 28:
+            # Not long enough to be a packet yet, so keep appending to frame
             prev_frame = frame
-        if frame[-1] == '\xc0' and len(frame) > 1:
-            # When we reach the end of a packet, reset prev_frame and cycle to
-            # the next device
+        elif frame[2] == '\x01' and frame[27] == '\xc0':
+            # The first 28 bytes are a standard WAX9 packet. Process it and
+            # start appending to what's left (if anything)
+            packet = frame[:28]
+            prev_frame = frame[28:] if len(frame) > 28 else ''
+            error = 0        
+        elif len(frame) < 36:
+            # Shorter than 36 bytes with the first 28 NOT a standard packet:
+            # this might still be a long packet, so keep appending to frame
+            prev_frame = frame
+        elif frame[2] == '\x01' and frame[28] == '\xc0':
+            # Anomalous length-29 packet
+            # extra byte might come from a SLIP escape character
+            packet = frame[:29]
+            prev_frame = frame[29:] if len(frame) > 29 else ''
+            error = 1
+        elif frame[2] == '\x02' and frame[35] == '\xc0':
+            # The first 36 bytes are a long WAX9 packet. Process it and
+            # start appending to what's left (if anything)
+            packet = frame[:36]
+            prev_frame = frame[36:] if len(frame) > 36 else ''
+            error = 0
+        elif len(frame) > 36 and frame[2] == '\x02' and frame[36] == '\xc0':
+            # Anomalous length-37 packet
+            # extra byte might come from a SLIP escape character
+            packet = frame[:37]
+            prev_frame = frame[37:] if len(frame) > 37 else ''
+            error = 1
+        else:
+            # We've read more than 36 bytes and haven't found a standard
+            # packet or a long packet, so throw out this frame and start over
+            prev_frame = ''
+            error = 1
+            
+        if packet or error:
+            if len(packet) == 28:
+                # Convert data from hex representation (see p. 7, 'WAX9
+                # application developer's guide')
+                #print('01 | {} | {}'.format(len(frame), frame.encode('hex')))
+                data = [cur_time, error]
+                data += list(struct.unpack('<BBBhIhhhhhhhhhB', packet))[3:27]
+                data.append(dev_id)
+            elif len(packet) == 36:
+                # Convert data from hex representation (see p. 7, 'WAX9
+                # application developer's guide')
+                #print('02 | {} | {}'.format(len(frame), frame.encode('hex')))
+                data = [cur_time, error]
+                data += list(struct.unpack('<BBBhIhhhhhhhhhhhIB', packet))[3:27]
+                data.append(dev_id)
+            elif error:
+                # Record an error
+                # FIXME: Try to write the previous sample
+                print('ER1 | {} | {} | {}'.format(dev_id, len(frame), frame.encode('hex')))
+                data = [0] * 26
+                data[1] = error
+            
+            # Queue the packet to be written
+            q.put(data)
+            
+            # Cycle to the next device
             dev_id = dev_names.next()
             socket = devices[dev_id]
-            prev_frame = ''
-            # Make sure the packet we're about to write begins with 0xC0. Else
-            # we lost part of it somewhere. Only decode complete packets.
-            # FIXME: Warn or something when we lose a packet
-            if frame[0] == '\xc0':
-                line = [0] * 11
-                if frame[2] == '\x01' and len(frame) == 28:
-                    # Convert data from hex representation (see p. 7, 'WAX9
-                    # application developer's guide')
-                    #print('01 | {} | {}'.format(len(frame), frame.encode('hex')))
-                    line = list(struct.unpack('<BBBhIhhhhhhhhhB', frame))
-                    line = line[3:14]
-                elif frame[2] == '\x02' and len(frame) == 36:
-                    # Convert data from hex representation (see p. 7, 'WAX9
-                    # application developer's guide')
-                    #print('02 | {} | {}'.format(len(frame), frame.encode('hex')))
-                    line = list(struct.unpack('<BBBhIhhhhhhhhhhhIB', frame))
-                    line = line[3:14]
-                else:
-                    print('ER | {} | {}'.format(len(frame), frame.encode('hex')))
-                line.append(time.time())
-                line.append(dev_id)
-                q.put(line)
         
         # Terminate when main tells us to
         if die.is_set():
@@ -174,65 +225,66 @@ def write(path, q, die):
                 csvwriter.writerow(line)
 
 
-def processData(path, dev_names):
+def processData(path, imu_dev_names, img_dev_names):
     """
-    Convert raw data to numpy array and save
+    Convert raw data to numpy array
 
     Args:
     -----
     [str] path: Path (full or relative) to raw data file
-    [list(str)] dev_names: List of IMU ID strings; define m as the number of
-      items in this list
+    [list(str)] imu_dev_names: List of IMU ID strings; define p as the number
+      of items in this list
+    [list(str)] img_dev_names: List of image capture device ID strings; define
+      q as the number of items in this list
 
     Returns:
     --------
-    [np array] imu_data: Size n-by-m*d, where n is the number of IMU
-      samples, m is the number of IMU devices, and d is the length of one IMU
-      sample. Samples
-    [np vector] rgb_data: Contains the global timestamp for every video
+    [np array] imu_data: Size n-by-p*d, where n is the number of IMU
+      samples, p is the number of IMU devices, and d is the length of one IMU
+      sample. Each holds p length-d IMU samples, concatenated in the order
+      seen in imu_dev_names
+    [np array] img_data: Size m-by-p. Contains the global timestamp for every video
       frame recorded
     [int] sample_len: Length of one IMU sample (d)
     """
     
-    num_devices = len(dev_names)
-    name2idx = {dev_names[i]: i for i in range(num_devices)}
+    num_imu_devs = len(imu_dev_names)
+    imu_name2idx = {imu_dev_names[i]: i for i in range(num_imu_devices)}
+    
+    num_img_devs = len(img_dev_names)
+    img_name2idx = {img_dev_names[i]: i for i in range(num_img_devices)}
 
     imu_data = []
-    rgb_data = []
+    img_data = []
     with open(path, 'r') as csvfile:
         csvreader = csv.reader(csvfile)
         for row in csvreader:
             sample_idx = int(row[0])
             timestamp = float(row[-2])
 
-            # Rows w/ length 3 hold RGB frame data
-            if len(row) == 3:
-                for i in range(sample_idx - (len(rgb_data) - 1)):
-                    rgb_data.append(0.0)
-                rgb_data[sample_idx] = timestamp
-
-            # Rows w/ length 13 hold IMU data
-            if len(row) == 13:
-                sample = [timestamp] + [int(x) for x in row[1:-2]]
+            if row[-1] in img_devs:
+                # Append rows of zeros to the data matrix until the last row
+                # is the sample index. Then write the current sample to its
+                # place in the sample index.
+                img_dev_idx = img_name2idx[row[-1]]
+                for i in range(sample_idx - (len(img_data) - 1)):
+                    img_data.append([0.0] * num_img_devs)
+                img_data[sample_idx][img_dev_idx] = timestamp
+            elif row[-1] in imu_devs:
+                sample = [int(x) for x in row[:-1]]
                 sample_len = len(sample)
-                
-                # Anything indexed below 1 is bad data
-                # Any sample indexed more than 200 samples beyond the latest is
-                # almost definitely bad data
-                if sample_idx < 1 or sample_idx - len(imu_data) > 200:
-                    continue
                 
                 # Append rows of zeros to the data matrix until the last row
                 # is the sample index. Then write the current sample to its
                 # place in the sample index.
-                dev_idx = name2idx[row[-1]]
+                imu_dev_idx = imu_name2idx[row[-1]]
                 for i in range(sample_idx - (len(imu_data) - 1)):
-                    imu_data.append([[0.0] * sample_len] * num_devices)
-                imu_data[sample_idx][dev_idx] = sample
+                    imu_data.append([[0.0] * sample_len] * num_imu_devs)
+                imu_data[sample_idx][imu_dev_idx] = sample
     
     # Flatten nested lists in each row of IMU data
     imu_data = [[datum for sample in row for datum in sample] for row in imu_data]
-    return (np.array(imu_data), np.array(rgb_data), sample_len)
+    return (np.array(imu_data), np.array(img_data), sample_len)
 
 
 def saveSettings(path, dev_settings):
@@ -325,14 +377,14 @@ if __name__ == "__main__":
             os.makedirs(path)
     
     # Bluetooth MAC addresses of the IMUs we want to stream from
-    addresses = ('00:17:E9:D7:08:F1',) 
-    #addresses = ('00:17:E9:D7:09:5D',)
+    addresses = ('00:17:E9:D7:08:F1',)
+                 #'00:17:E9:D7:09:5D',
                  #'00:17:E9:D7:09:0F',
                  #'00:17:E9:D7:09:49')
 
     # Connect to devices and print settings
-    devices = {}
-    dev_settings = {}
+    imu_devs = {}
+    imu_settings = {}
     for address in addresses:
         print('Connecting at {}...'.format(address))
         # TODO: check if name is empty string and retry if so
@@ -340,15 +392,24 @@ if __name__ == "__main__":
         print('Connected, device ID {}'.format(name))
         settings = getSettings(socket)
         print(settings)
-        devices[name] = socket
-        dev_settings[name] = settings
+        imu_devs[name] = socket
+        imu_settings[name] = settings
+    
+    # Open video streams
+    img_devs = {}
+    img_paths = {}
+    openni2.initialize()
+    dev = openni2.Device.open_any()
+    #img_devs['IMG-DEPTH'] = dev.create_depth_stream()
+    img_devs['IMG-RGB'] = dev.create_color_stream()
+    img_paths['IMG-RGB'] = rgb_trial_path
 
     # Start receiving and writing data
     q = SimpleQueue()
     die = mp.Event()
     processes = []
-    processes.append(mp.Process(target=streamImu, args=(devices, q, die)))
-    processes.append(mp.Process(target=streamVideo, args=(rgb_trial_path, q, die)))
+    processes.append(mp.Process(target=streamImu, args=(imu_devs, q, die)))
+    #processes.append(mp.Process(target=streamVideo, args=(img_devs, q, die, img_paths)))
     processes.append(mp.Process(target=write, args=(raw_file_path, q, die)))
     for p in processes:
         p.start()
@@ -365,29 +426,36 @@ if __name__ == "__main__":
         p.join()
 
     # Disconnect from devices
-    for dev_name, socket in devices.items():
+    for dev_name, socket in imu_devs.items():
         print('Disconnecting from {}'.format(dev_name))
         socket.close()
     
+    # Stop streaming
+    for dev_name, stream in img_devs.items():
+        stream.stop()
+    openni2.unload()
+    
+    """
     # Massage and save IMU, RGB frame data
     saveSettings(settings_file_path, dev_settings)
-    imu_data, rgb_data, sample_len = processData(raw_file_path, devices.keys())
+    imu_data, img_data, sample_len = processData(raw_file_path, imu_devs.keys(), img_devs.keys())
     fmtstr = len(devices) * (['%15f'] + (sample_len - 1) * ['%i'])
     np.savetxt(imu_file_path, imu_data, delimiter=',', fmt=fmtstr)
-    np.savetxt(rgb_timestamp_path, rgb_data, delimiter=',', fmt='%15f')
+    np.savetxt(img_timestamp_path, img_data, delimiter=',', fmt='%15f')
     
     # Convert rgb frames to avi video
     # NOTE: This depends on the avconv utility for now
     print('')
-    frame_fmt = os.path.join(rgb_trial_path, 'rgb_%6d.png')
+    frame_fmt = os.path.join(rgb_trial_path, '%6d.png')
     video_path = os.path.join(rgb_path, init_time + '.avi')
     make_video = ['avconv', '-f', 'image2', '-i', frame_fmt, '-r', '30', video_path]
     subprocess.call(make_video)
     print('')
     
-    percent_dropped = printPercentDropped(imu_data, devices.keys(), sample_len)
+    percent_dropped = printPercentDropped(imu_data, imu_devs.keys(), sample_len)
     
     # Show IMU data (for validation)
-    ids = [x[-4:] for x in devices.keys()]  # Grab hex ID from WAX9 ID
+    ids = [x[-4:] for x in imu_devs.keys()]  # Grab hex ID from WAX9 ID
     plotImuData(int(init_time), ids)
+    """
     

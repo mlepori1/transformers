@@ -88,17 +88,6 @@ def loadImuData(t_init, devices):
         
         imu_data = imus[i]
         
-        #"""
-        # Filter out bad data for now b/c it makes the plots impossible to read
-        # (bad data are marked with a timestamp of 0)
-        bad_data = np.less(imu_data[:,0], 1.0)
-        imu_data = imu_data[np.logical_not(bad_data),:]
-        
-        # Calculate time relative to TRIAL start (this is before each IMU
-        # actually started streaming data)
-        imu_data[:,0] = imu_data[:,0] - t_init
-        #"""
-        
         # Accelerometer range setting +/- 8g --> divide by 4096 to get units of
         # g (ie acceleration due to earth's gravitational field)
         imu_data[:,2:5] = imu_data[:,2:5] / 4096.0
