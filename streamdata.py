@@ -67,11 +67,11 @@ def streamVideo(devices, q, die, paths):
         frame = stream.read_frame()
         data = frame.get_buffer_as_uint8()
         # FIXME: depth streams should be parsed differently
-        array = np.ndarray((frame.height, 3*frame.width),
-                            dtype=np.uint8, buffer=data)
-        array = np.dstack((array[:,2::3], array[:,1::3], array[:,0::3]))
+        img_array = np.ndarray((frame.height, 3*frame.width),
+                               dtype=np.uint8, buffer=data)
+        img_array = np.dstack((img_array[:,2::3], img_array[:,1::3], img_array[:,0::3]))
         filename = '{:06d}.png'.format(index)
-        cv2.imwrite(os.path.join(path, filename), array)
+        cv2.imwrite(os.path.join(path, filename), img_array)
         q.put((frametime, index, dev_name))
 
         frame_index[dev_name] += 1
@@ -180,7 +180,8 @@ def streamImu(devices, q, die):
             elif error:
                 # Record an error
                 # FIXME: Try to write the previous sample
-                print('ER1 | {} | {} | {}'.format(dev_id, len(frame), frame.encode('hex')))
+                print('ERR | {} | {} | {}'.format(dev_id, len(frame), frame.encode('hex')))
+                print('    | {} | {} | {}'.format(dev_id, len(prev_frame), prev_frame.encode('hex')))
                 data = [0] * 26
                 data[1] = error
             
@@ -225,7 +226,7 @@ def write(path, q, die):
                 csvwriter.writerow(line)
 
 
-def processData(path, imu_dev_names, img_dev_names):
+def raw2npArray(path, imu_dev_names, img_dev_names):
     """
     Convert raw data to numpy array
 
@@ -249,10 +250,10 @@ def processData(path, imu_dev_names, img_dev_names):
     """
     
     num_imu_devs = len(imu_dev_names)
-    imu_name2idx = {imu_dev_names[i]: i for i in range(num_imu_devices)}
+    imu_name2idx = {imu_dev_names[i]: i for i in range(num_imu_devs)}
     
     num_img_devs = len(img_dev_names)
-    img_name2idx = {img_dev_names[i]: i for i in range(num_img_devices)}
+    img_name2idx = {img_dev_names[i]: i for i in range(num_img_devs)}
 
     imu_data = []
     img_data = []
@@ -438,7 +439,7 @@ if __name__ == "__main__":
     """
     # Massage and save IMU, RGB frame data
     saveSettings(settings_file_path, dev_settings)
-    imu_data, img_data, sample_len = processData(raw_file_path, imu_devs.keys(), img_devs.keys())
+    imu_data, img_data, sample_len = raw2npArray(raw_file_path, imu_devs.keys(), img_devs.keys())
     fmtstr = len(devices) * (['%15f'] + (sample_len - 1) * ['%i'])
     np.savetxt(imu_file_path, imu_data, delimiter=',', fmt=fmtstr)
     np.savetxt(img_timestamp_path, img_data, delimiter=',', fmt='%15f')
