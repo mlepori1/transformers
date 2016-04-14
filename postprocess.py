@@ -90,15 +90,15 @@ def loadImuData(t_init, devices):
         
         # Accelerometer range setting +/- 8g --> divide by 4096 to get units of
         # g (ie acceleration due to earth's gravitational field)
-        imu_data[:,2:5] = imu_data[:,2:5] / 4096.0
+        imu_data[:,4:7] = imu_data[:,4:7] / 4096.0
         
         # Gyroscope range setting +/- 2000 dps --> multiply by 0.07 to get
         # units of degrees per second --> divide by 180 to get radians / sec
-        imu_data[:,5:8] = imu_data[:,5:8] * 0.07 / 180
+        imu_data[:,7:10] = imu_data[:,7:10] * 0.07 / 180
         
         # Multiply by 1e-4 to get units of mT, but this will be very
         # approximate (see WAX9 developer guide)
-        imu_data[:,8:11] = imu_data[:,8:11] * 1e-4
+        imu_data[:,10:13] = imu_data[:,10:13] * 1e-4
         
         imus[i] = imu_data
     
@@ -388,7 +388,7 @@ def plotImuData(t_init, devices):
         for j, title in enumerate(fig_txt):
             
             # Make plot of current 3-DOF data
-            start = 2 + j * 3
+            start = 4 + j * 3
             end = start + 3
             data = np.hstack((imu[:,0:1], imu[:,start:end]))
             f = plot3dof(data, actions, imu_bounds, fig_txt[j])
@@ -442,8 +442,8 @@ def trackIMU(imu_data):
     S = np.zeros((imu_data.shape[0], 3))
     
     t = imu_data[:,0]
-    a = imu_data[:,2:5]
-    w = imu_data[:,5:8]
+    a = imu_data[:,4:7]
+    w = imu_data[:,7:10]
     
     # Strapdown inertial navigation (see "An introduction to inertial
     # navigation", Oliver J. Woodman, section 6)
@@ -647,7 +647,7 @@ def pointwiseCorrelation(t_init, devices):
             # angular velocity, and magnitude readings
             for k, ax in enumerate(axes[:-1]):
                 
-                start = 2 + k * 3
+                start = 4 + k * 3
                 end = start + 3
                 
                 data1 = imu1[:, start:end]
