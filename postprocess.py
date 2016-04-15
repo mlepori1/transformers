@@ -88,6 +88,9 @@ def loadImuData(t_init, devices):
         
         imu_data = imus[i]
         
+        bad = imu_data[:,0] == 0
+        imu_data = imu_data[np.logical_not(bad),:]
+        
         # Accelerometer range setting +/- 8g --> divide by 4096 to get units of
         # g (ie acceleration due to earth's gravitational field)
         imu_data[:,4:7] = imu_data[:,4:7] / 4096.0
