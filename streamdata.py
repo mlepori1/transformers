@@ -97,6 +97,7 @@ def streamImu(devices, q, die):
     [mp event] die: Multiprocessing event, kill signal
     """
     
+    # Special SLIP bytes
     SLIP_END = '\xc0'
     SLIP_ESC = '\xdb'
     SLIP_ESC_END = '\xdc'
@@ -113,20 +114,13 @@ def streamImu(devices, q, die):
     prev_escaped = False
     packet_ready = False
     frame = ''
-    data = [0] * 11
+    data = [0] * 14
     dev_id = dev_names.next()
     socket = devices[dev_id]
     while True:
         
-        """
-        # Read at most 28 bytes over RFCOMM. If the packet is length-36, it
-        # will be read in two passes.
-        frame = prev_frame + socket.recv(28)
-        """
-        
         # Read and process one byte from the IMU
         byte = socket.recv(1)
-        #print("  | {}".format(byte.encode('hex')))
         if prev_escaped:
             prev_escaped = False
             if byte == SLIP_ESC_END:
@@ -135,7 +129,7 @@ def streamImu(devices, q, die):
                 frame += SLIP_ESC
             else:
                 # Anything else means we received an unexpected escaped byte
-                print("ERR | {} | unexpected byte".format(byte.encode('hex')))
+                print('ERR | {} | unexpected byte'.format(byte.encode('hex')))
         elif byte == SLIP_END and len(frame) > 0:
             frame += byte
             packet = frame
@@ -146,85 +140,32 @@ def streamImu(devices, q, die):
         else:
             frame += byte
         
-        """
-        cur_time = time.time()
-        
-        # The WAX9 device transmits SLIP-encoded data: packets begin and end
-        # with 0xC0
-        packet = []
-        if not frame[0] == '\xc0':
-            # We missed the beginning of this packet. There's nothing we can
-            # do to fix it, so throw it out
-            # FIXME: Make sure we don't throw out the beginning of another
-            # packet that may be included in this frame?
-            prev_frame = ''
-            error = 1
-        elif len(frame) < 28:
-            # Not long enough to be a packet yet, so keep appending to frame
-            prev_frame = frame
-        elif frame[2] == '\x01' and frame[27] == '\xc0':
-            # The first 28 bytes are a standard WAX9 packet. Process it and
-            # start appending to what's left (if anything)
-            packet = frame[:28]
-            prev_frame = frame[28:] if len(frame) > 28 else ''
-            error = 0        
-        elif len(frame) < 36:
-            # Shorter than 36 bytes with the first 28 NOT a standard packet:
-            # this might still be a long packet, so keep appending to frame
-            prev_frame = frame
-        elif frame[2] == '\x01' and frame[28] == '\xc0':
-            # Anomalous length-29 packet
-            # extra byte might come from a SLIP escape character
-            packet = frame[:29]
-            prev_frame = frame[29:] if len(frame) > 29 else ''
-            error = 1
-        elif frame[2] == '\x02' and frame[35] == '\xc0':
-            # The first 36 bytes are a long WAX9 packet. Process it and
-            # start appending to what's left (if anything)
-            packet = frame[:36]
-            prev_frame = frame[36:] if len(frame) > 36 else ''
-            error = 0
-        elif len(frame) > 36 and frame[2] == '\x02' and frame[36] == '\xc0':
-            # Anomalous length-37 packet
-            # extra byte might come from a SLIP escape character
-            packet = frame[:37]
-            prev_frame = frame[37:] if len(frame) > 37 else ''
-            error = 1
-        else:
-            # We've read more than 36 bytes and haven't found a standard
-            # packet or a long packet, so throw out this frame and start over
-            prev_frame = ''
-            error = 1
-        """
-            
+        # Once we read a complete packet, unpack the bytes and queue the data
+        # to be written
         if packet_ready:
             
             cur_time = time.time()
             packet_ready = False
             
-            if len(packet) == 28:
+            if len(packet) == 28:   # Standard packet
                 error = 0
                 # Convert data from hex representation (see p. 7, 'WAX9
                 # application developer's guide')
-                #print('01 | {} | {}'.format(len(frame), frame.encode('hex')))
-                data = [cur_time, error]
-                data += list(struct.unpack('<BBBhIhhhhhhhhhB', packet))[3:27]
-                data.append(dev_id)
-            elif len(packet) == 36:
+                fmtstr = '<' + 3 * 'B' + 'h' + 'I' + 9 * 'h' + 'B'
+                unpacked = list(struct.unpack(fmtstr, packet))[3:14]
+                data = [cur_time, error] + unpacked[3:14] + [dev_id]
+            elif len(packet) == 36: # Long packet
                 error = 0
                 # Convert data from hex representation (see p. 7, 'WAX9
                 # application developer's guide')
-                #print('02 | {} | {}'.format(len(frame), frame.encode('hex')))
-                data = [cur_time, error]
-                data += list(struct.unpack('<BBBhIhhhhhhhhhhhIB', packet))[3:27]
-                data.append(dev_id)
+                fmtstr = '<' + 3 * 'B' + 'h' + 'I' + 11 * 'h' + 'I' + 'B'
+                unpacked = list(struct.unpack(fmtstr, packet))
+                data = [cur_time, error] + unpacked[3:14] + [dev_id]
             else:
                 error = 1
                 # Record an error
-                # FIXME: Try to write the previous sample?
                 print('ERR | {} | {} | {}'.format(dev_id, len(packet), packet.encode('hex')))
-                #print('    | {} | {} | {}'.format(dev_id, len(prev_frame), prev_frame.encode('hex')))
-                data = [0] * 26
+                data = [0] * len(data)
                 data[1] = error
             
             # Queue the packet to be written
@@ -476,7 +417,7 @@ if __name__ == "__main__":
     imu_data, img_data, sample_len = raw2npArray(raw_file_path, imu_devs.keys(), (img_dev_name,))
     fmtstr = len(imu_devs) * (['%15f'] + (sample_len - 1) * ['%i'])
     np.savetxt(imu_file_path, imu_data, delimiter=',', fmt=fmtstr)
-    np.savetxt(img_timestamp_path, img_data, delimiter=',', fmt='%15f')
+    np.savetxt(rgb_timestamp_path, img_data, delimiter=',', fmt='%15f')
     
     # Convert rgb frames to avi video
     # NOTE: This depends on the avconv utility for now
