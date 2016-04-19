@@ -88,6 +88,14 @@ def loadImuData(t_init, devices):
         
         imu_data = imus[i]
         
+        # Filter out all-zero rows representing missing samples
+        # Missing samples can be identified because their timestamps are zero
+        # instead of UNIX time
+        # FIXME: Mark the error column when these rows are written in the
+        #   first place
+        bad_sample = imu_data[:,0] < 1.0
+        imu_data = imu_data[np.logical_not(bad_sample),:]
+        
         # Accelerometer range setting +/- 8g --> divide by 4096 to get units of
         # g (ie acceleration due to earth's gravitational field)
         imu_data[:,4:7] = imu_data[:,4:7] / 4096.0
@@ -119,7 +127,7 @@ def loadRgbFrameTimestamps(t_init):
     """
     
     fn = os.path.join('data', 'rgb', str(t_init), 'frame-timestamps.csv')
-    rgb_timestamps = np.loadtxt(fn) - t_init
+    rgb_timestamps = np.loadtxt(fn)
     
     return rgb_timestamps
 
@@ -253,7 +261,7 @@ def imuActionBounds(labels, t_rgb, t_imu):
     
     # Get action boundaries (in video frames) from annotations and convert
     # to imu frames
-    rgb_bounds, actions = parseLabels(labels, num_rgb_frames)
+    actions, rgb_bounds = parseLabels(labels, num_rgb_frames)
     rgb2imu = rgbFrame2imuFrame(t_rgb, t_imu)
     action_bounds = rgb2imu[rgb_bounds]
     
@@ -356,8 +364,8 @@ def plotImuData(t_init, devices):
     
     # Load IMU data, RGB frame timestamps, and labels (empty list if no labels)
     imus = loadImuData(t_init, devices)
-    #rgb_timestamps = loadRgbFrameTimestamps(t_init)
-    #labels = loadLabels(t_init)
+    rgb_timestamps = loadRgbFrameTimestamps(t_init)
+    labels = loadLabels(t_init)
     
     # Define the output directory (for saving figures) and create it if it
     # doesn't already exist
@@ -379,9 +387,7 @@ def plotImuData(t_init, devices):
         imu = imus[i]
         name = devices[i]
         
-        #actions, imu_bounds = imuActionBounds(labels, rgb_timestamps, imu[:,0])
-        actions = np.array([0])
-        imu_bounds = np.array([0, imu.shape[0]-1])
+        actions, imu_bounds = imuActionBounds(labels, rgb_timestamps, imu[:,0])
         
         # Plot accelerometer, gyroscope, magnetometer readings
         norm_data = imu[:,0:1]
@@ -681,7 +687,6 @@ def pointwiseCorrelation(t_init, devices):
                               np.tile(labels, (2,1)), cmap=cmap, norm=norm) #,
                               #zorder=1)
                 
-                
                 ax.set_ylabel(r'$\cos \theta_{}$'.format(syms[k]))
                 ax.set_xlabel(r'$t \/ (\mathrm{s})$')
             
@@ -702,7 +707,6 @@ def pointwiseCorrelation(t_init, devices):
 
 if __name__ == '__main__':
     
-    """
     import glob
     
     # Batch process all imu data files
@@ -717,10 +721,10 @@ if __name__ == '__main__':
         t = int(t)
         
         plotImuData(t, devices)
-        #plotKinematics(t, devices)
-        #pointwiseCorrelation(t, devices)
-    """
+        plotKinematics(t, devices)
+        pointwiseCorrelation(t, devices)
 
+    """
     #fn = '/Users/jonathan/095D.txt'
     fn = '/home/jdjones/repo/blocks/08F1_in-room_desktop.csv'
     
@@ -737,3 +741,4 @@ if __name__ == '__main__':
     txt = ('IMU sensor 2-norms', '\| \cdot \|', '??')
     plot3dof(data, labels, bounds, txt)
     plt.show()
+    """
