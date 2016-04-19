@@ -152,7 +152,7 @@ def streamImu(devices, q, die):
                 # Convert data from hex representation (see p. 7, 'WAX9
                 # application developer's guide')
                 fmtstr = '<' + 3 * 'B' + 'h' + 'I' + 9 * 'h' + 'B'
-                unpacked = list(struct.unpack(fmtstr, packet))[3:14]
+                unpacked = list(struct.unpack(fmtstr, packet))
                 data = [cur_time, error] + unpacked[3:14] + [dev_id]
             elif len(packet) == 36: # Long packet
                 error = 0
@@ -269,7 +269,6 @@ def raw2npArray(path, imu_dev_names, img_dev_names):
     
     # Flatten nested lists in each row of IMU data
     imu_data = [[datum for sample in row for datum in sample] for row in imu_data]
-    import pdb; pdb.set_trace()
     return (np.array(imu_data), np.array(img_data), sample_len)
 
 
@@ -318,10 +317,10 @@ def printPercentDropped(imu_data, dev_names, sample_len):
     # For each device, count the number of timestamps near 0. These samples
     # were corrupted (dropped) during data transmission
     for i, name in enumerate(dev_names):
-        # Timestamp is the first datum in a sample
-        timestamp_idx = sample_len * i
-        num_dropped = np.sum(np.less_equal(imu_data[:,timestamp_idx], 1.0))
-        num_samples = imu_data[:,timestamp_idx].shape[0]
+        # Error indicator is the second datum in a sample
+        err_col = sample_len * i + 1
+        num_dropped = np.sum(imu_data[:,err_col])
+        num_samples = imu_data.shape[0]
 
         percent_dropped = float(num_dropped) / float(num_samples) * 100
         fmtstr = '{}: {:0.1f}% of {} samples dropped'
