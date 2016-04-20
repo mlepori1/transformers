@@ -20,7 +20,8 @@ from itertools import cycle
 import struct
 
 from libwax9 import *
-from postprocess import *
+from libduplo import *
+from duplocorpus import DuploCorpus
 
 
 def streamVideo(dev_name, q, die, path):
@@ -208,135 +209,6 @@ def write(path, q, die):
                 csvwriter.writerow(line)
 
 
-def raw2npArray(path, imu_dev_names, img_dev_names):
-    """
-    Convert raw data to numpy array
-
-    Args:
-    -----
-    [str] path: Path (full or relative) to raw data file
-    [list(str)] imu_dev_names: List of IMU ID strings; define p as the number
-      of items in this list
-    [list(str)] img_dev_names: List of image capture device ID strings; define
-      q as the number of items in this list
-
-    Returns:
-    --------
-    [np array] imu_data: Size n-by-p*d, where n is the number of IMU
-      samples, p is the number of IMU devices, and d is the length of one IMU
-      sample. Each holds p length-d IMU samples, concatenated in the order
-      seen in imu_dev_names
-    [np array] img_data: Size m-by-p. Contains the global timestamp for every video
-      frame recorded
-    [int] sample_len: Length of one IMU sample (d)
-    """
-    
-    num_imu_devs = len(imu_dev_names)
-    imu_name2idx = {imu_dev_names[i]: i for i in range(num_imu_devs)}
-    
-    num_img_devs = len(img_dev_names)
-    img_name2idx = {img_dev_names[i]: i for i in range(num_img_devs)}
-
-    imu_data = []
-    img_data = []
-    with open(path, 'r') as csvfile:
-        csvreader = csv.reader(csvfile)
-        for row in csvreader:
-            timestamp = float(row[0])
-            dev_name = row[-1]
-
-            if dev_name in img_dev_names:
-                sample_idx = int(row[1])
-                # Append rows of zeros to the data matrix until the last row
-                # is the sample index. Then write the current sample to its
-                # place in the sample index.
-                img_dev_idx = img_name2idx[dev_name]
-                for i in range(sample_idx - (len(img_data) - 1)):
-                    img_data.append([0.0] * num_img_devs)
-                img_data[sample_idx][img_dev_idx] = timestamp
-            elif dev_name in imu_dev_names:
-                sample_idx = int(row[2])
-                sample = [timestamp] + [int(x) for x in row[1:-1]]
-                sample_len = len(sample)
-                
-                # Append rows of zeros to the data matrix until the last row
-                # is the sample index. Then write the current sample to its
-                # place in the sample index.
-                imu_dev_idx = imu_name2idx[row[-1]]
-                for i in range(sample_idx - (len(imu_data) - 1)):
-                    imu_data.append([[0.0] * sample_len] * num_imu_devs)
-                imu_data[sample_idx][imu_dev_idx] = sample
-    
-    # Flatten nested lists in each row of IMU data
-    imu_data = [[datum for sample in row for datum in sample] for row in imu_data]
-    return (np.array(imu_data), np.array(img_data), sample_len)
-
-
-def saveSettings(path, dev_settings):
-    """
-    Record settings for each IMU device.
-    
-    Args:
-    -----
-    [str] path: Path (full or relative) to output file
-    [dict(str->str)] dev_settings: Dict mapping device IDs to recorded
-      settings 
-    """
-    
-    path = os.path.join('data', 'dev-settings', '{}.txt'.format(init_time))
-    with open(path, 'wb') as file:
-        for settings in dev_settings.values():
-            file.write(settings)
-            file.write('\n')
-
-
-def printPercentDropped(imu_data, dev_names, sample_len):
-    """
-    Calculate the proportion of missing or unusable data samples in the
-    provided data array; print to console
-
-    Args:
-    -----
-    [np array] imu_data: Size n-by-m*d, where n is the number of IMU
-      samples, m is the number of IMU devices, and d is the length of one IMU
-      sample.
-    [list(str)] dev_names: List of IMU ID strings; define m as the number of
-      items in this list
-    [int] sample_len: Length of one IMU sample (d)
-
-    Returns:
-    --------
-    [float] percent_dropped: Proportion of missing data samples over all
-      devices, expressed as a percentage
-    """
-
-    # These are aggregate drop/sample counts
-    total_dropped = 0.0
-    total_samples = 0.0
-
-    # For each device, count the number of timestamps near 0. These samples
-    # were corrupted (dropped) during data transmission
-    for i, name in enumerate(dev_names):
-        # Error indicator is the second datum in a sample
-        err_col = sample_len * i + 1
-        num_dropped = np.sum(imu_data[:,err_col])
-        num_samples = imu_data.shape[0]
-
-        percent_dropped = float(num_dropped) / float(num_samples) * 100
-        fmtstr = '{}: {:0.1f}% of {} samples dropped'
-        print(fmtstr.format(name, percent_dropped, num_samples))
-
-        total_dropped += num_dropped
-        total_samples += num_samples
-
-    # Percent of samples dropped over all devices
-    percent_dropped = total_dropped / total_samples * 100
-    fmtstr = 'TOTAL: {:0.1f}% of {} samples dropped'
-    print(fmtstr.format(percent_dropped, int(total_samples)))
-
-    return percent_dropped
-
-
 if __name__ == "__main__":
     
     # raw_input() in python 2.x is input() in python 3.x
@@ -344,22 +216,14 @@ if __name__ == "__main__":
     if sys.version_info[0] == 2:
         input = raw_input
     
+    corpus = DuploCorpus()
+    
     # Define pathnames and filenames for the data from this trial
-    init_time = str(int(time.time()))   # Used as a trial identifier
-    settings_path = os.path.join('data', 'dev-settings')
-    raw_path = os.path.join('data', 'raw')
-    imu_path = os.path.join('data', 'imu')
-    rgb_path = os.path.join('data', 'rgb')
-    rgb_trial_path = os.path.join(rgb_path, init_time)
-    rgb_timestamp_path = os.path.join(rgb_trial_path, 'frame-timestamps.csv')
-    raw_file_path = os.path.join(raw_path, init_time + '.csv')
-    imu_file_path = os.path.join(imu_path, init_time + '.csv')
-    settings_file_path = os.path.join(settings_path, init_time + '.txt')
-
-    # Create data directories if they don't exist
-    for path in [settings_path, raw_path, imu_path, rgb_trial_path]:
-        if not os.path.exists(path):
-            os.makedirs(path)
+    trial_id = corpus.meta_data.shape[0]
+    init_time = time.time()
+    
+    raw_file_path = os.path.join(corpus.paths['raw'], '{}.csv'.format(trial_id))
+    rgb_trial_path = os.path.join(corpus.paths['rgb'], trial_id)
     
     # Bluetooth MAC addresses of the IMUs we want to stream from
     addresses = ('00:17:E9:D7:08:F1',
@@ -380,17 +244,14 @@ if __name__ == "__main__":
         imu_devs[name] = socket
         imu_settings[name] = settings
     
-    
-    #img_devs['IMG-DEPTH'] = dev.create_depth_stream()
     img_dev_name = 'IMG-RGB'
 
     # Start receiving and writing data
     q = SimpleQueue()
     die = mp.Event()
-    processes = []
-    processes.append(mp.Process(target=streamImu, args=(imu_devs, q, die)))
-    processes.append(mp.Process(target=streamVideo, args=(img_dev_name, q, die, rgb_trial_path)))
-    processes.append(mp.Process(target=write, args=(raw_file_path, q, die)))
+    processes = (mp.Process(target=streamImu, args=(imu_devs, q, die)),
+                 mp.Process(target=streamVideo, args=(img_dev_name, q, die, rgb_trial_path)),
+                 mp.Process(target=write, args=(raw_path, q, die)))
     for p in processes:
         p.start()
 
@@ -409,27 +270,10 @@ if __name__ == "__main__":
     for dev_name, socket in imu_devs.items():
         print('Disconnecting from {}'.format(dev_name))
         socket.close()
+    
+    corpus.postprocess(trial_id, imu_devs, imu_settings, img_dev_name)        
         
-    
-    # Massage and save IMU, RGB frame data
-    saveSettings(settings_file_path, imu_settings)
-    imu_data, img_data, sample_len = raw2npArray(raw_file_path, imu_devs.keys(), (img_dev_name,))
-    fmtstr = len(imu_devs) * (['%15f'] + (sample_len - 1) * ['%i'])
-    np.savetxt(imu_file_path, imu_data, delimiter=',', fmt=fmtstr)
-    np.savetxt(rgb_timestamp_path, img_data, delimiter=',', fmt='%15f')
-    
-    # Convert rgb frames to avi video
-    # NOTE: This depends on the avconv utility for now
-    print('')
-    frame_fmt = os.path.join(rgb_trial_path, '%6d.png')
-    video_path = os.path.join(rgb_path, init_time + '.avi')
-    make_video = ['avconv', '-f', 'image2', '-i', frame_fmt, '-r', '30', video_path]
-    subprocess.call(make_video)
-    print('')
-    
-    percent_dropped = printPercentDropped(imu_data, imu_devs.keys(), sample_len)
-    
     # Show IMU data (for validation)
     ids = [x[-4:] for x in imu_devs.keys()]  # Grab hex ID from WAX9 ID
-    plotImuData(int(init_time), ids)
+    corpus.makeImuFigs(trial_id, ids)
     
