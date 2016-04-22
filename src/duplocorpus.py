@@ -29,8 +29,7 @@ class DuploCorpus:
         
         # Load metadata array
         fn = os.path.join(self.paths['data'], 'meta-data.csv')
-        self.metadata_typestruct = [('trial_id', 'U10'), ('t0', 'f8'),
-                                    ('child_id', 'U10'),
+        self.metadata_typestruct = [('trial_id', 'U10'), ('child_id', 'U10'),
                                     ('has_labels', 'bool')]
         self.meta_data = np.loadtxt(fn, dtype=self.metadata_typestruct,
                                     delimiter=',')
@@ -292,7 +291,7 @@ class DuploCorpus:
         print('')
     
     
-    def postprocess(self, trial_id, imu_devs, imu_settings, img_dev_name):
+    def postprocess(self, child_id, trial_id, imu_devs, imu_settings, img_dev_name):
         """
         []
         
@@ -311,6 +310,10 @@ class DuploCorpus:
         
         label_path = os.path.join(self.paths['labels'], str(trial_id) + '.csv')
         has_labels = os.path.exists(label_path)
+        
+        meta_row = np.array((trial_id, child_id, has_labels),
+                            dtype=self.metadata_typestruct)
+        self.meta_data = np.hstack((self.meta_data, meta_row))
         
         # Update metadata
         fn = os.path.join(self.paths['data'], 'meta-data.csv')

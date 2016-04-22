@@ -216,6 +216,11 @@ if __name__ == "__main__":
     if sys.version_info[0] == 2:
         input = raw_input
     
+    # FIXME: make sure we don't get bad input
+    child_age = input("Enter the child's age: ")
+    child_gender = input("Enter the child's gender: ")
+    num_blocks = input("Enter the number of blocks in this task: ")
+    
     corpus = DuploCorpus()
     
     # Define pathnames and filenames for the data from this trial
@@ -271,7 +276,8 @@ if __name__ == "__main__":
         print('Disconnecting from {}'.format(dev_name))
         socket.close()
     
-    corpus.postprocess(trial_id, imu_devs, imu_settings, img_dev_name)        
+    child_id = '_'.join((child_age, child_gender))
+    corpus.postprocess(child_id, trial_id, imu_devs, imu_settings, img_dev_name)        
         
     # Show IMU data (for validation)
     ids = [x[-4:] for x in imu_devs.keys()]  # Grab hex ID from WAX9 ID
