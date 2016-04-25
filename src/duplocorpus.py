@@ -29,12 +29,59 @@ class DuploCorpus:
         
         # Load metadata array
         fn = os.path.join(self.paths['data'], 'meta-data.csv')
-        self.metadata_typestruct = [('trial_id', 'U10'), ('child_id', 'U10'),
-                                    ('has_labels', 'bool')]
-        self.meta_data = np.loadtxt(fn, dtype=self.metadata_typestruct,
-                                    delimiter=',')
+        self.meta_data = self.readMetadata(fn)
+
         
+    def readMetadata(self, fn):
+        """
+        Read metadata from specified file and return as a numpy structured
+        array.
+        
+        Args:
+        -----
+        [str] fn: Path to metadata file
+        
+        Returns:
+        --------
+        [np array] meta_data: Numpy structured array with the following fields
+          [int] trial_id:
+          [str] child_id:
+          [int] has_labels:
+        """
+
+        meta_data = []
+        typestruct = [('trial_id', 'i4'), ('child_id', 'U10'),
+                      ('has_labels', 'i4')]
+        
+        # Start a new, empty metadata array if a file doesn't already exist
+        if not os.path.exists(fn):
+            return np.array(meta_data, dtype=typestruct)
+        
+        # Read contents of the metadata file line-by-line
+        with open(fn, 'r') as metafile:
+            metareader = csv.reader(metafile)
+            for row in metareader:
+                meta_data.append(tuple(row))
+        
+        return np.array(meta_data, dtype=typestruct)
     
+    
+    def writeMetaData(self, fn):
+        """
+        Write this object's metadata array to a file at the specified location
+        
+        Args:
+        -----
+        [str] fn: Path to metadata file
+        """
+        
+        # Write contents of the metadata array to file line-by-line
+        with open(fn, 'wb') as metafile:
+            metawriter = csv.writer(metafile)
+            for row in self.meta_data:
+                metawriter.writerow(row)
+        
+        
     def initLogger(self):
         """
         Set up logger for warnings, etc
@@ -68,7 +115,8 @@ class DuploCorpus:
         # file
         self.paths['src'] = os.path.split(__file__)[0]
         self.paths['root'] = os.path.dirname(self.paths['src'])
-        self.paths['output'] = os.path.join(self.paths['root'], 'output')        
+        self.paths['output'] = os.path.join(self.paths['root'], 'output')   
+        self.paths['figures'] = os.path.join(self.paths['output'], 'figures')
         self.paths['working'] = os.path.join(self.paths['root'], 'working')
         self.paths['data'] = os.path.join(self.paths['root'], 'data')
         self.paths['imu'] = os.path.join(self.paths['data'], 'imu')
@@ -78,7 +126,7 @@ class DuploCorpus:
         self.paths['labels'] = os.path.join(self.paths['data'], 'labels')
         
         # Make directories that do not surely exist already
-        for key in ['working', 'output']:
+        for key in self.paths.keys():
             if not os.path.exists(self.paths[key]):
                 os.makedirs(self.paths[key])        
     
@@ -100,7 +148,7 @@ class DuploCorpus:
                 settings_file.write('\n')
     
     
-    def readImuData(self, trial_id):
+    def readImuData(self, trial_id, devices):
         """
         Args:
         -----
@@ -109,14 +157,22 @@ class DuploCorpus:
         
         Returns:
         --------
-        [np array] imu_data:
+        [list(np array)] imus:
         """
         
         fn = os.path.join(self.paths['imu'], '{}.csv'.format(trial_id))
         #fmtstr = num_imus * (['%15f'] + (sample_len - 1) * ['%i'])
         imu_data = np.loadtxt(fn, delimiter=',')
         
-        return imu_data
+        # FIXME: Assert len devices evenly divides number samples
+        imus = []
+        sample_len = int(imu_data.shape[1] / len(devices))
+        for i, device in enumerate(devices):
+            start = i * sample_len
+            end = (i + 1) * sample_len
+            imus.append(imu_data[:,start:end])
+        
+        return imus
 
 
     def writeImuData(self, trial_id, imu_data, num_imus, sample_len):
@@ -309,16 +365,18 @@ class DuploCorpus:
         #self.makeRgbVideo(trial_id)
         
         label_path = os.path.join(self.paths['labels'], str(trial_id) + '.csv')
-        has_labels = os.path.exists(label_path)
+        has_labels = int(os.path.exists(label_path))
+
+        # Update metadata array
+        num_rows = max(self.meta_data.shape[0], trial_id + 1)
+        meta_data = np.zeros(num_rows, dtype=self.meta_data.dtype)
+        meta_data[self.meta_data['trial_id']] = self.meta_data
+        meta_data[trial_id] = (trial_id, child_id, has_labels)        
+        self.meta_data = meta_data
         
-        meta_row = np.array((trial_id, child_id, has_labels),
-                            dtype=self.metadata_typestruct)
-        self.meta_data = np.hstack((self.meta_data, meta_row))
-        
-        # Update metadata
+        # Write new metadata array to file
         fn = os.path.join(self.paths['data'], 'meta-data.csv')
-        np.savetxt(self.meta_data, fn, dtype=self.metadata_typestruct,
-                   delimiter=',')
+        self.writeMetaData(fn)
     
     
     def makeImuFigs(self, trial_id, devices):
@@ -334,12 +392,12 @@ class DuploCorpus:
         
         # Load IMU data, RGB frame timestamps, and labels (empty list if no labels)
         imus = self.readImuData(trial_id, devices)
-        rgb_timestamps = self.readRgbFrameTimestamps(trial_id)
+        rgb_timestamps = self.readRgbTimestamps(trial_id)
         labels = self.readLabels(trial_id)
         
         # Define the output directory (for saving figures) and create it if it
         # doesn't already exist
-        imu_fig_path = os.path.join('output', 'figures', 'imu', str(trial_id))
+        imu_fig_path = os.path.join(self.paths['figures'], 'imu', str(trial_id))
         if not os.path.exists(imu_fig_path):
             os.makedirs(imu_fig_path)
         
@@ -386,7 +444,6 @@ class DuploCorpus:
         
         return
     
-
     
     def makeCorrelationFigs(self, trial_id, devices):
         """

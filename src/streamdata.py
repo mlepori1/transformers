@@ -228,13 +228,15 @@ if __name__ == "__main__":
     init_time = time.time()
     
     raw_file_path = os.path.join(corpus.paths['raw'], '{}.csv'.format(trial_id))
-    rgb_trial_path = os.path.join(corpus.paths['rgb'], trial_id)
+    rgb_trial_path = os.path.join(corpus.paths['rgb'], str(trial_id))
+    if not os.path.exists(rgb_trial_path):
+        os.makedirs(rgb_trial_path)
     
     # Bluetooth MAC addresses of the IMUs we want to stream from
-    addresses = ('00:17:E9:D7:08:F1',
-                 '00:17:E9:D7:09:5D',
-                 '00:17:E9:D7:09:0F',
-                 '00:17:E9:D7:09:49')
+    #addresses = ('00:17:E9:D7:08:F1',
+    #             '00:17:E9:D7:09:5D',
+    addresses = ('00:17:E9:D7:09:0F',)
+    #             '00:17:E9:D7:09:49')
 
     # Connect to devices and print settings
     imu_devs = {}
@@ -256,7 +258,7 @@ if __name__ == "__main__":
     die = mp.Event()
     processes = (mp.Process(target=streamImu, args=(imu_devs, q, die)),
                  mp.Process(target=streamVideo, args=(img_dev_name, q, die, rgb_trial_path)),
-                 mp.Process(target=write, args=(raw_path, q, die)))
+                 mp.Process(target=write, args=(raw_file_path, q, die)))
     for p in processes:
         p.start()
 
