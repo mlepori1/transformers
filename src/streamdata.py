@@ -291,7 +291,8 @@ if __name__ == "__main__":
         # Test device connection
         q = SimpleQueue()
         die = mp.Event()
-        p = mp.Process(target=streamImu, args=(imu_devs, q, die))
+        imu_dev = {name: socket}
+        p = mp.Process(target=streamImu, args=(imu_dev, q, die))
         p.start()
         msg_str = 'Pick up the {} block and put it back down. '
         input(msg_str.format(block_color) + 'Then, press enter.\n>> ')
