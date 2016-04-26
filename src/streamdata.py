@@ -15,7 +15,6 @@ import csv
 import os
 import sys
 import time
-import subprocess
 from itertools import cycle
 import struct
 
@@ -209,6 +208,24 @@ def write(path, q, die):
                 csvwriter.writerow(line)
 
 
+def testImu(dev_name, socket):
+    """
+    Verify IMU is functioning properly by instructing the user to lift it and
+    put it back down.
+    
+    Args:
+    -----
+    [str] dev_name: Name of IMU device to be tested
+    [socket] socket: Socket object representing bluetooth connection
+    
+    Returns:
+    --------
+    [bool] valid: Is the device working as expected? Boolean T/F
+    """
+    
+    print('Pick up sensor {} and put it back down.')
+
+
 if __name__ == "__main__":
     
     # raw_input() in python 2.x is input() in python 3.x
@@ -216,10 +233,80 @@ if __name__ == "__main__":
     if sys.version_info[0] == 2:
         input = raw_input
     
-    # FIXME: make sure we don't get bad input
-    child_age = input("Enter the child's age: ")
-    child_gender = input("Enter the child's gender: ")
-    num_blocks = input("Enter the number of blocks in this task: ")
+    # Prompt user for metadata
+    MIN_AGE = 4
+    MAX_AGE = 6
+    child_age = int(input("What is the child's age?\n>> "))
+    while child_age < MIN_AGE or child_age > MAX_AGE:
+        child_age = int(input("Please enter a number between 4 and 6.\n>> "))
+    
+    child_gender = input("What is the child's gender?\n>> ")
+    while not child_gender in ('M', 'F', 'O'):
+        child_age = input("Please enter M (male), F (female) or O "
+                          "(other / do not wish to disclose).\n>> ")
+    
+    num_blocks = int(input("How many blocks are in this task?\n>> "))
+    while not num_blocks in (4, 6, 8):
+        num_blocks = int(input("Please enter 4, 6, or 8.\n>> "))
+    if num_blocks == 4:
+        block_colors = ('red', 'yellow')
+    else:
+        block_colors = ('red', 'yellow', 'blue', 'green')
+    
+    imu_devs = {}
+    imu_settings = {}
+    mac_prefix = ['00', '17', 'E9', 'D7']
+    imu_ids = ('08F1', '095D', '090F', '0949')
+    imus_in_use = []
+    for block_color in block_colors:
+        
+        # Match IMUs to block colors
+        while True:
+            msg_str = "Place a sensor in the {} block. What is the sensor's ID?\n>> "
+            imu_id = input(msg_str.format(block_color))
+            while not imu_id in imu_ids:
+                msg_str = "That isn't a valid ID. Sensor IDs are: {}\n>> "
+                imu_id = input(msg_str.format(imu_ids))
+            if not imu_id in imus_in_use:
+                imus_in_use.append(imu_id)
+                break
+            print('That sensor is already in use!')
+        
+        # Compute the device's MAC address
+        mac_bytes = mac_prefix + [imu_id[0:2], imu_id[2:4]]
+        address = ':'.join(mac_bytes)
+        
+        # Connect to devices and print settings
+        print('Connecting to device at {}...'.format(address))
+        socket, name = connect(address)
+        while name is None:     # Sometimes we get an empty connection
+            print('Bad connection. Trying again...')
+            socket, name = connect(address)
+        print('Connected, device ID {}'.format(name))
+        settings = getSettings(socket)
+        print(settings)
+        imu_devs[name] = socket
+        imu_settings[name] = settings
+        
+        # Test device connection
+        q = SimpleQueue()
+        die = mp.Event()
+        p = mp.Process(target=streamImu, args=(imu_devs, q, die))
+        p.start()
+        msg_str = 'Pick up the {} block and put it back down. '
+        input(msg_str.format(block_color) + 'Then, press enter.\n>> ')
+        die.set()
+        p.join()
+        
+        # Print test stats
+        test_data = []
+        while not q.empty():
+            test_data.append(q.get())
+        test_data = np.array(test_data)
+        test_avg = test_data.mean(axis=0)
+        test_std = test_data.std(axis=0)
+        print('Mean of IMU readings: {}'.format(test_avg))
+        print('Standard deviation of IMU readings: {}'.format(test_std))
     
     corpus = DuploCorpus()
     
@@ -230,30 +317,10 @@ if __name__ == "__main__":
     raw_file_path = os.path.join(corpus.paths['raw'], '{}.csv'.format(trial_id))
     rgb_trial_path = os.path.join(corpus.paths['rgb'], str(trial_id))
     if not os.path.exists(rgb_trial_path):
-        os.makedirs(rgb_trial_path)
+        os.makedirs(rgb_trial_path)                
     
-    # Bluetooth MAC addresses of the IMUs we want to stream from
-    #addresses = ('00:17:E9:D7:08:F1',
-    #             '00:17:E9:D7:09:5D',
-    addresses = ('00:17:E9:D7:09:0F',)
-    #             '00:17:E9:D7:09:49')
-
-    # Connect to devices and print settings
-    imu_devs = {}
-    imu_settings = {}
-    for address in addresses:
-        print('Connecting at {}...'.format(address))
-        # TODO: check if name is empty string and retry if so
-        socket, name = connect(address)
-        print('Connected, device ID {}'.format(name))
-        settings = getSettings(socket)
-        print(settings)
-        imu_devs[name] = socket
-        imu_settings[name] = settings
-    
-    img_dev_name = 'IMG-RGB'
-
     # Start receiving and writing data
+    img_dev_name = 'IMG-RGB'
     q = SimpleQueue()
     die = mp.Event()
     processes = (mp.Process(target=streamImu, args=(imu_devs, q, die)),
