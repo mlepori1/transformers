@@ -26,10 +26,10 @@ def labelVideo(trial_id):
       (Nothing)
     """
     
-    rgb_path = os.path.join('data', 'rgb', trial_id)
+    rgb_path = os.path.join('..', 'data', 'rgb', trial_id)
         
     # Create label directory if it doesn't exist
-    label_path = os.path.join('data', 'rgb', trial_id)
+    label_path = os.path.join('..', 'labels', trial_id)
     if not os.path.exists(label_path):
         os.makedirs(label_path)
     
@@ -56,9 +56,9 @@ def labelVideo(trial_id):
         if ret == ord(" "):
             print('space')
         elif ret == ord('j'):   # Jump five frames ahead
-            frame_idx -= 5
+            frame_idx -= 1
         elif ret == ord('k'):   # Jump five frames back
-            frame_idx += 5
+            frame_idx += 1
         elif ret == ord('q'):   # Exit
             break       
     
@@ -66,7 +66,7 @@ def labelVideo(trial_id):
 
 
 if __name__ == '__main__':
-    trial_id = '1460754570'
+    trial_id = '0'
     labelVideo(trial_id)
 
 

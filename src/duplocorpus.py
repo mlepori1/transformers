@@ -116,7 +116,7 @@ class DuploCorpus:
         self.paths['src'] = os.path.split(__file__)[0]
         self.paths['root'] = os.path.dirname(self.paths['src'])
         self.paths['output'] = os.path.join(self.paths['root'], 'output')   
-        self.paths['figures'] = os.path.join(self.paths['output'], 'figures')
+        self.paths['figures'] = os.path.join(self.paths['root'], 'figures')
         self.paths['working'] = os.path.join(self.paths['root'], 'working')
         self.paths['data'] = os.path.join(self.paths['root'], 'data')
         self.paths['imu'] = os.path.join(self.paths['data'], 'imu')
@@ -311,7 +311,9 @@ class DuploCorpus:
                         img_timestamps.append([0.0] * num_img_devs)
                     img_timestamps[sample_idx][img_dev_idx] = timestamp
                 elif dev_name in imu_dev_names:
-                    sample_idx = int(row[2])
+                    # IMU samples are one-indexed, so subtract 1 to convert to
+                    # python's zero-indexing
+                    sample_idx = int(row[2]) - 1
                     sample = [timestamp] + [int(x) for x in row[1:-1]]
                     sample_len = len(sample)
                     
@@ -320,7 +322,9 @@ class DuploCorpus:
                     # place in the sample index.
                     imu_dev_idx = imu_name2idx[row[-1]]
                     for i in range(sample_idx - (len(imu_data) - 1)):
-                        imu_data.append([[0.0] * sample_len] * num_imu_devs)
+                        dummy = [0.0] * sample_len
+                        dummy[1] = 1
+                        imu_data.append([dummy] * num_imu_devs)
                     imu_data[sample_idx][imu_dev_idx] = sample
         
         # Flatten nested lists in each row of IMU data
@@ -414,6 +418,10 @@ class DuploCorpus:
             
             imu = imus[i]
             name = devices[i]
+            
+            # Check the error column for bad samples
+            bad_data = imu[:,1] == 1
+            imu = imu[np.logical_not(bad_data),:]
             
             actions, imu_bounds = imuActionBounds(labels, rgb_timestamps, imu[:,0])
             
@@ -551,3 +559,5 @@ class DuploCorpus:
 
 if __name__ == '__main__':
     c = DuploCorpus()
+    devs = ('08F1', '0949', '095D', '090F')
+    c.makeImuFigs(4, devs)

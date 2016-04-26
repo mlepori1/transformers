@@ -83,7 +83,7 @@ def streamVideo(dev_name, q, die, path):
     print("Closing RGB camera")    
     stream.stop()
     openni2.unload()
-
+    
 
 def streamImu(devices, q, die):
     """
@@ -103,7 +103,7 @@ def streamImu(devices, q, die):
     SLIP_ESC_END = '\xdc'
     SLIP_ESC_ESC = '\xdd'
 
-    # This allows us to cycle through device names -> sockets in the main loop
+    # This allows us to cycle through device names --> sockets in the main loop
     dev_names = cycle(devices.keys())
 
     # Tell the device to start streaming
@@ -174,13 +174,14 @@ def streamImu(devices, q, die):
             # Cycle to the next device
             dev_id = dev_names.next()
             socket = devices[dev_id]
-        
-        # Terminate when main tells us to
-        if die.is_set():
-            # Tell the device to stop streaming
-            for socket in devices.values():
-                socket.sendall('\r\n')
-            break
+            
+            # Terminate when main tells us to -- but only after we finish
+            # reading the current packet
+            if die.is_set():
+                # Tell the device to stop streaming
+                for socket in devices.values():
+                    socket.sendall('\r\n')
+                break
 
 
 def write(path, q, die):
@@ -236,16 +237,16 @@ if __name__ == "__main__":
     # Prompt user for metadata
     MIN_AGE = 4
     MAX_AGE = 6
-    child_age = int(input("What is the child's age?\n>> "))
+    child_age = int(input("What is the child's age? Enter a number between 4 and 6.\n>> "))
     while child_age < MIN_AGE or child_age > MAX_AGE:
         child_age = int(input("Please enter a number between 4 and 6.\n>> "))
     
-    child_gender = input("What is the child's gender?\n>> ")
-    while not child_gender in ('M', 'F', 'O'):
-        child_age = input("Please enter M (male), F (female) or O "
-                          "(other / do not wish to disclose).\n>> ")
+    child_gender = input("What is the child's gender? Enter m, f, or o.\n>> ").lower()
+    while not child_gender in ('m', 'f', 'o'):
+        child_gender = input("Please enter m (male), f (female) or o "
+                             "(other / do not wish to disclose).\n>> ").lower()
     
-    num_blocks = int(input("How many blocks are in this task?\n>> "))
+    num_blocks = int(input("How many blocks are in this task? Enter 4, 6, or 8.\n>> "))
     while not num_blocks in (4, 6, 8):
         num_blocks = int(input("Please enter 4, 6, or 8.\n>> "))
     if num_blocks == 4:
@@ -284,7 +285,7 @@ if __name__ == "__main__":
             socket, name = connect(address)
         print('Connected, device ID {}'.format(name))
         settings = getSettings(socket)
-        print(settings)
+        #print(settings)
         imu_devs[name] = socket
         imu_settings[name] = settings
         
@@ -302,12 +303,16 @@ if __name__ == "__main__":
         # Print test stats
         test_data = []
         while not q.empty():
-            test_data.append(q.get())
+            line = q.get()
+            test_data.append(line[:-1])
         test_data = np.array(test_data)
-        test_avg = test_data.mean(axis=0)
-        test_std = test_data.std(axis=0)
-        print('Mean of IMU readings: {}'.format(test_avg))
-        print('Standard deviation of IMU readings: {}'.format(test_std))
+        a_norm = np.sum(test_data[:,4:7] ** 2, 1)
+        w_norm = np.sum(test_data[:,7:10] ** 2, 1)
+        h_norm = np.sum(test_data[:,10:13] ** 2, 1)
+        norm_data = np.vstack((test_data[:,0], a_norm, w_norm, h_norm)).T
+        fig_text = ['Square L2 norm', '\| \cdot \|^2', '??']
+        f = plot3dof(norm_data, np.array([0]), np.array([0, test_data.shape[0] - 1]), fig_text)
+        plt.show()
     
     corpus = DuploCorpus()
     
@@ -346,7 +351,7 @@ if __name__ == "__main__":
         print('Disconnecting from {}'.format(dev_name))
         socket.close()
     
-    child_id = '_'.join((child_age, child_gender))
+    child_id = '_'.join((str(child_age), child_gender))
     corpus.postprocess(child_id, trial_id, imu_devs, imu_settings, img_dev_name)        
         
     # Show IMU data (for validation)
