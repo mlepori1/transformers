@@ -209,24 +209,6 @@ def write(path, q, die):
                 csvwriter.writerow(line)
 
 
-def testImu(dev_name, socket):
-    """
-    Verify IMU is functioning properly by instructing the user to lift it and
-    put it back down.
-    
-    Args:
-    -----
-    [str] dev_name: Name of IMU device to be tested
-    [socket] socket: Socket object representing bluetooth connection
-    
-    Returns:
-    --------
-    [bool] valid: Is the device working as expected? Boolean T/F
-    """
-    
-    print('Pick up sensor {} and put it back down.')
-
-
 if __name__ == "__main__":
     
     # raw_input() in python 2.x is input() in python 3.x

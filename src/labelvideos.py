@@ -50,23 +50,24 @@ def labelVideo(trial_id):
         cv2.imshow('Segmentation', frame)
             
         # Wait until we read some input from the user
-        ret = cv2.waitKey(0)
+        user_in = chr(cv2.waitKey(0))
+        print(user_in)
             
         # Act on the input if it's one of the recognized characters
-        if ret == ord(" "):
+        if user_in == " ":
             print('space')
-        elif ret == ord('j'):   # Jump five frames ahead
+        elif user_in == 'j':   # Jump five frames ahead
             frame_idx -= 1
-        elif ret == ord('k'):   # Jump five frames back
+        elif user_in == 'k':   # Jump five frames back
             frame_idx += 1
-        elif ret == ord('q'):   # Exit
+        elif user_in == 'q':   # Exit
             break       
     
     print("End of sequence")
 
 
 if __name__ == '__main__':
-    trial_id = '0'
+    trial_id = '1460754570'
     labelVideo(trial_id)
 
 
