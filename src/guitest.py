@@ -7,7 +7,7 @@ AUTHOR
 """
 
 from Tkinter import *
-from PIL import Image, ImageTk
+#from PIL import Image, ImageTk
 from tksimpledialog import Dialog
 
 class MetadataDialog(Dialog):
@@ -92,7 +92,7 @@ class BlockDialog(Dialog):
         
         print(dev_id)
 
-
+"""
 class ImageDialog(Dialog):
     
     def body(self, master):
@@ -113,11 +113,12 @@ class ImageDialog(Dialog):
     
     def apply(self):
         print()
+"""
 
 if __name__ == '__main__':
     
     root = Tk()
-    root.withdraw()
+    #root.withdraw()
         
     # Prompt for participant number, date of birth, and gender
     d = MetadataDialog(root)

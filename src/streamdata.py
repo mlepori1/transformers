@@ -8,6 +8,7 @@ AUTHOR
 
 import numpy as np
 import multiprocessing as mp
+import select
 from multiprocessing.queues import SimpleQueue
 from primesense import openni2
 import cv2
@@ -15,7 +16,6 @@ import csv
 import os
 import sys
 import time
-from itertools import cycle
 import struct
 
 from libwax9 import *
@@ -23,17 +23,19 @@ from libduplo import *
 from duplocorpus import DuploCorpus
 
 
-def streamVideo(dev_name, q, die, path):
+def streamVideo(dev_name, die, path):
     """
     Stream data from camera until die is set
 
     Args:
     -----
     [dict(str->cv stream)] dev_name:
-    [mp queue] q: Multiprocessing queue, for collecting data
     [mp event] die: Multiprocessing event, kill signal
     [str] path: Path (full or relative) to image output directory
     """
+    
+    f_rgb = open(os.path.join(path, 'frame_timestamps.csv'), 'w')
+    rgb_writer = csv.writer(f_rgb)
     
     # Open video streams
     print("Opening RGB camera...")
@@ -75,7 +77,7 @@ def streamVideo(dev_name, q, die, path):
         # Write to file
         filename = '{:06d}.png'.format(frame_index)
         cv2.imwrite(os.path.join(path, filename), img_array)
-        q.put((frametime, frame_index, dev_name))
+        rgb_writer.writerow((frametime, frame_index, dev_name))
 
         frame_index += 1
 
@@ -84,8 +86,10 @@ def streamVideo(dev_name, q, die, path):
     stream.stop()
     openni2.unload()
     
+    f_rgb.close()
+    
 
-def streamImu(devices, q, die):
+def streamImu(devices, die, path):
     """
     Stream data from WAX9 devices until die is set
 
@@ -93,9 +97,16 @@ def streamImu(devices, q, die):
     -----
     [dict(str->socket)] devices: Dict w/ device names as keys and their
       sockets as values
-    [mp queue] q: Multiprocessing queue, for collecting data
     [mp event] die: Multiprocessing event, kill signal
+    [str] path: Path to raw IMU output file
     """
+    
+    SAMPLE_RATE = 30
+    TIMEOUT = 1.5 * (1.0 / SAMPLE_RATE)
+    
+    # Set up output files
+    f_imu = open(path, 'w')
+    imu_writer = csv.writer(f_imu)
     
     # Special SLIP bytes
     SLIP_END = '\xc0'
@@ -103,49 +114,58 @@ def streamImu(devices, q, die):
     SLIP_ESC_END = '\xdc'
     SLIP_ESC_ESC = '\xdd'
 
-    # This allows us to cycle through device names --> sockets in the main loop
-    dev_names = cycle(devices.keys())
-
-    # Tell the device to start streaming
-    for socket in devices.values():
-        socket.sendall('stream\r\n')
-
-    # Read data sequentially from sensors until told to terminate
-    prev_escaped = False
-    packet_ready = False
-    frame = ''
-    data = [0] * 14
-    dev_id = dev_names.next()
-    socket = devices[dev_id]
+    # Tell the imu devices to start streaming
+    for imu_socket in devices.values():
+        imu_socket.sendall('stream\r\n')
+    
     while True:
         
-        # Read and process one byte from the IMU
-        byte = socket.recv(1)
-        if prev_escaped:
-            prev_escaped = False
-            if byte == SLIP_ESC_END:
-                frame += SLIP_END
-            elif byte == SLIP_ESC_ESC:
-                frame += SLIP_ESC
-            else:
-                # Anything else means we received an unexpected escaped byte
-                print('ERR | {} | unexpected byte'.format(byte.encode('hex')))
-        elif byte == SLIP_END and len(frame) > 0:
-            frame += byte
-            packet = frame
-            frame = ''
-            packet_ready = True
-        elif byte == SLIP_ESC:
-            prev_escaped = True
-        else:
-            frame += byte
-        
-        # Once we read a complete packet, unpack the bytes and queue the data
-        # to be written
-        if packet_ready:
+        # Read data sequentially from sensors until told to terminate
+        for dev_id, imu_socket in devices.items():   
             
-            cur_time = time.time()
+            # Read bytes from the current sensor until we have a complete
+            # packet of hang on a timeout
+            prev_escaped = False
             packet_ready = False
+            frame = ''
+            while not packet_ready:                
+                # Time out if we spend longer than the sample period waiting to
+                # read from the socket
+                ready = select.select([imu_socket], [], [], TIMEOUT)
+                if ready[0]:
+                    # Read and process one byte from the IMU
+                    byte = imu_socket.recv(1)
+                    if prev_escaped:
+                        prev_escaped = False
+                        if byte == SLIP_ESC_END:
+                            frame += SLIP_END
+                        elif byte == SLIP_ESC_ESC:
+                            frame += SLIP_ESC
+                        else:
+                            # Anything else means we received an unexpected escaped byte
+                            print('ERR | {} | unexpected byte'.format(byte.encode('hex')))
+                    elif byte == SLIP_END and len(frame) > 0:
+                        frame += byte
+                        packet = frame
+                        frame = ''
+                        packet_ready = True
+                    elif byte == SLIP_ESC:
+                        prev_escaped = True
+                    else:
+                        frame += byte
+                # If select times out, we've waited longer than a sample
+                # period. This sample must be bad, so throw it out by resetting
+                # the data frame.
+                else:
+                    packet = frame
+                    print('ERR | timeout | {}'.format(frame.encode('hex')))
+                    frame = ''
+                    packet_ready = True
+                    prev_escaped = False
+                
+            # Once we read a complete packet, unpack the bytes and queue the data
+            # to be written
+            cur_time = time.time()
             
             if len(packet) == 28:   # Standard packet
                 error = 0
@@ -165,51 +185,29 @@ def streamImu(devices, q, die):
                 error = 1
                 # Record an error
                 print('ERR | {} | {} | {}'.format(dev_id, len(packet), packet.encode('hex')))
-                data = [0] * len(data)
+                data = [0] * 14
                 data[1] = error
-            
+                data[-1] = dev_id
+                
             # Queue the packet to be written
-            q.put(data)
-            
-            # Cycle to the next device
-            dev_id = dev_names.next()
-            socket = devices[dev_id]
-            
-            # Terminate when main tells us to -- but only after we finish
-            # reading the current packet
-            if die.is_set():
-                # Tell the device to stop streaming
-                for socket in devices.values():
-                    socket.sendall('\r\n')
-                break
-
-
-def write(path, q, die):
-    """
-    Write data on queue to file until a kill signal is received. Once the kill
-    signal is received, write what's left on the queue, then terminate
-
-    Args:
-    -----
-    [str] path: Path (full or relative) to output file
-    [mp queue] q: Multiprocessing queue, for collecting data
-    [mp event] die: Multiprocessing event, kill signal
-    """
-
-    with open(path, 'wb') as csvfile:
-        csvwriter = csv.writer(csvfile)
-        received_die = die.is_set()
-        while not q.empty() or not received_die:
-            # Keep checking for a kill message until we get one
-            if not received_die:
-                received_die = die.is_set()
-            # Write data to file
-            if not q.empty():
-                line = q.get()
-                csvwriter.writerow(line)
+            imu_writer.writerow(data)
+        
+        # Terminate when main tells us to -- but only after we finish
+        # reading the current set of packets
+        if die.is_set():
+            # Tell the devices to stop streaming
+            for imu_socket in devices.values():
+                imu_socket.sendall('\r\n')
+            break
+    
+    f_imu.close()
 
 
 if __name__ == "__main__":
+    
+    # 15 samples per second + a little room
+    SAMPLE_FREQ = 15
+    SAMPLE_PERIOD = 1.0 / SAMPLE_FREQ + 0.001
     
     # raw_input() in python 2.x is input() in python 3.x
     # Below is for compatibility with python 2
@@ -233,6 +231,8 @@ if __name__ == "__main__":
         num_blocks = int(input("Please enter 4, 6, or 8.\n>> "))
     if num_blocks == 4:
         block_colors = ('red', 'yellow')
+    elif num_blocks == 6:
+        block_colors = ('red', 'yellow', 'blue')
     else:
         block_colors = ('red', 'yellow', 'blue', 'green')
     
@@ -261,16 +261,17 @@ if __name__ == "__main__":
         
         # Connect to devices and print settings
         print('Connecting to device at {}...'.format(address))
-        socket, name = connect(address)
+        imu_socket, name = connect(address)
         while name is None:     # Sometimes we get an empty connection
             print('Bad connection. Trying again...')
-            socket, name = connect(address)
+            imu_socket, name = connect(address)
         print('Connected, device ID {}'.format(name))
-        settings = getSettings(socket)
+        settings = getSettings(imu_socket)
         #print(settings)
-        imu_devs[name] = socket
+        imu_devs[name] = imu_socket
         imu_settings[name] = settings
         
+        """
         # Test device connection
         q = SimpleQueue()
         die = mp.Event()
@@ -295,6 +296,7 @@ if __name__ == "__main__":
         fig_text = ['Square L2 norm', '\| \cdot \|^2', '??']
         f = plot3dof(norm_data, np.array([0]), np.array([0, test_data.shape[0] - 1]), fig_text)
         plt.show()
+        """
     
     corpus = DuploCorpus()
     
@@ -302,18 +304,19 @@ if __name__ == "__main__":
     trial_id = corpus.meta_data.shape[0]
     init_time = time.time()
     
-    raw_file_path = os.path.join(corpus.paths['raw'], '{}.csv'.format(trial_id))
+    raw_file_path = os.path.join(corpus.paths['imu-raw'], '{}.csv'.format(trial_id))
     rgb_trial_path = os.path.join(corpus.paths['rgb'], str(trial_id))
     if not os.path.exists(rgb_trial_path):
-        os.makedirs(rgb_trial_path)                
+        os.makedirs(rgb_trial_path)
+    
+    t_start = time.time()               
     
     # Start receiving and writing data
     img_dev_name = 'IMG-RGB'
     q = SimpleQueue()
     die = mp.Event()
-    processes = (mp.Process(target=streamImu, args=(imu_devs, q, die)),
-                 mp.Process(target=streamVideo, args=(img_dev_name, q, die, rgb_trial_path)),
-                 mp.Process(target=write, args=(raw_file_path, q, die)))
+    processes = (mp.Process(target=streamImu, args=(imu_devs, die, raw_file_path)),
+                 mp.Process(target=streamVideo, args=(img_dev_name, die, rgb_trial_path)))
     for p in processes:
         p.start()
 
@@ -329,9 +332,13 @@ if __name__ == "__main__":
         p.join()
 
     # Disconnect from devices
-    for dev_name, socket in imu_devs.items():
+    for dev_name, imu_socket in imu_devs.items():
         print('Disconnecting from {}'.format(dev_name))
-        socket.close()
+        imu_socket.close()
+    
+    # Estimate number of samples from duration of data collection
+    t_end = time.time()
+    print((t_end - t_start) * SAMPLE_FREQ)
     
     child_id = '_'.join((str(child_age), child_gender))
     corpus.postprocess(child_id, trial_id, imu_devs, imu_settings, img_dev_name)        

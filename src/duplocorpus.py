@@ -122,7 +122,7 @@ class DuploCorpus:
         self.paths['imu'] = os.path.join(self.paths['data'], 'imu')
         self.paths['imu-settings'] = os.path.join(self.paths['data'], 'imu-settings')
         self.paths['rgb'] = os.path.join(self.paths['data'], 'rgb')
-        self.paths['raw'] = os.path.join(self.paths['data'], 'raw')
+        self.paths['imu-raw'] = os.path.join(self.paths['data'], 'imu-raw')
         self.paths['labels'] = os.path.join(self.paths['data'], 'labels')
         
         # Make directories that do not surely exist already
@@ -170,7 +170,14 @@ class DuploCorpus:
         for i, device in enumerate(devices):
             start = i * sample_len
             end = (i + 1) * sample_len
-            imus.append(imu_data[:,start:end])
+            imu = imu_data[:,start:end]
+            
+            imu[:,3] = imu[:,3] / 65536.0   # Convert sample timestamp to seconds
+            imu[:,4:7] = imu[:,4:7] / 4096.0    # Convert acceleration samples to g
+            imu[:,7:10] = imu[:,7:10] * 0.07  # Convert angular velocity samples to deg/s
+            imu[:,10:13] = imu[:,10:13] * 1e-3  # Convert magnetic field to units of mGauss
+            
+            imus.append(imu)
         
         return imus
 
@@ -286,46 +293,55 @@ class DuploCorpus:
         
         num_imu_devs = len(imu_dev_names)
         imu_name2idx = {imu_dev_names[i]: i for i in range(num_imu_devs)}
+        path = os.path.join(self.paths['imu-raw'], '{}.csv'.format(trial_id))
+        imu_data = []
+        with open(path, 'r') as csvfile:
+            csvreader = csv.reader(csvfile)
+            for row in csvreader:
+                
+                timestamp = float(row[0])
+                dev_name = row[-1]
+    
+                # IMU samples are one-indexed, so subtract 1 to convert to
+                # python's zero-indexing
+                sample_idx = int(row[2]) - 1
+                sample = [timestamp] + [int(x) for x in row[1:-1]]
+                sample_len = len(sample)
+                
+                # Don't try to interpret rows that represent bad samples
+                error = int(row[1])
+                if error:
+                    continue
+                
+                # Append rows of zeros to the data matrix until the last row
+                # is the sample index. Then write the current sample to its
+                # place in the sample index.
+                imu_dev_idx = imu_name2idx[row[-1]]
+                for i in range(sample_idx - (len(imu_data) - 1)):
+                    dummy = [0.0] * sample_len
+                    dummy[1] = 1
+                    imu_data.append([dummy] * num_imu_devs)
+                imu_data[sample_idx][imu_dev_idx] = sample
         
         num_img_devs = len(img_dev_names)
         img_name2idx = {img_dev_names[i]: i for i in range(num_img_devs)}
-        
-        path = os.path.join(self.paths['raw'], '{}.csv'.format(trial_id))
-    
-        imu_data = []
+        path = os.path.join(self.paths['rgb'], str(trial_id), 'frame_timestamps.csv')
         img_timestamps = []
         with open(path, 'r') as csvfile:
             csvreader = csv.reader(csvfile)
             for row in csvreader:
                 timestamp = float(row[0])
                 dev_name = row[-1]
-    
-                if dev_name in img_dev_names:
-                    sample_idx = int(row[1])
-                    
-                    # Append rows of zeros to the data matrix until the last row
-                    # is the sample index. Then write the current sample to its
-                    # place in the sample index.
-                    img_dev_idx = img_name2idx[dev_name]
-                    for i in range(sample_idx - (len(img_timestamps) - 1)):
-                        img_timestamps.append([0.0] * num_img_devs)
-                    img_timestamps[sample_idx][img_dev_idx] = timestamp
-                elif dev_name in imu_dev_names:
-                    # IMU samples are one-indexed, so subtract 1 to convert to
-                    # python's zero-indexing
-                    sample_idx = int(row[2]) - 1
-                    sample = [timestamp] + [int(x) for x in row[1:-1]]
-                    sample_len = len(sample)
-                    
-                    # Append rows of zeros to the data matrix until the last row
-                    # is the sample index. Then write the current sample to its
-                    # place in the sample index.
-                    imu_dev_idx = imu_name2idx[row[-1]]
-                    for i in range(sample_idx - (len(imu_data) - 1)):
-                        dummy = [0.0] * sample_len
-                        dummy[1] = 1
-                        imu_data.append([dummy] * num_imu_devs)
-                    imu_data[sample_idx][imu_dev_idx] = sample
+                
+                sample_idx = int(row[1])
+                
+                # Append rows of zeros to the data matrix until the last row
+                # is the sample index. Then write the current sample to its
+                # place in the sample index.
+                img_dev_idx = img_name2idx[dev_name]
+                for i in range(sample_idx - (len(img_timestamps) - 1)):
+                    img_timestamps.append([0.0] * num_img_devs)
+                img_timestamps[sample_idx][img_dev_idx] = timestamp
         
         # Flatten nested lists in each row of IMU data
         imu_data = [[datum for sample in row for datum in sample] for row in imu_data]
@@ -559,5 +575,6 @@ class DuploCorpus:
 
 if __name__ == '__main__':
     c = DuploCorpus()
-    devs = ('08F1', '0949', '095D', '090F')
-    c.makeImuFigs(4, devs)
+    devs = ('WAX9-08F1', 'WAX9-0949', 'WAX9-095D', 'WAX9-090F')
+    imu_data, rgb_timestamps, sample_len = c.parseRawData(3, devs, ('IMG-RGB',))
+    #c.makeImuFigs(4, devs)
