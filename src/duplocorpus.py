@@ -7,11 +7,14 @@ AUTHOR
   Jonathan D. Jones
 """
 
+import sys
 import os
 import logging
 import csv
+import glob
 import subprocess
 
+import cv2
 import numpy as np
 from matplotlib import pyplot as plt
 import matplotlib as mpl
@@ -31,57 +34,7 @@ class DuploCorpus:
         fn = os.path.join(self.paths['data'], 'meta-data.csv')
         self.meta_data = self.readMetadata(fn)
 
-        
-    def readMetadata(self, fn):
-        """
-        Read metadata from specified file and return as a numpy structured
-        array.
-        
-        Args:
-        -----
-        [str] fn: Path to metadata file
-        
-        Returns:
-        --------
-        [np array] meta_data: Numpy structured array with the following fields
-          [int] trial_id:
-          [str] child_id:
-          [int] has_labels:
-        """
-
-        meta_data = []
-        typestruct = [('trial_id', 'i4'), ('child_id', 'U10'),
-                      ('has_labels', 'i4')]
-        
-        # Start a new, empty metadata array if a file doesn't already exist
-        if not os.path.exists(fn):
-            return np.array(meta_data, dtype=typestruct)
-        
-        # Read contents of the metadata file line-by-line
-        with open(fn, 'r') as metafile:
-            metareader = csv.reader(metafile)
-            for row in metareader:
-                meta_data.append(tuple(row))
-        
-        return np.array(meta_data, dtype=typestruct)
     
-    
-    def writeMetaData(self, fn):
-        """
-        Write this object's metadata array to a file at the specified location
-        
-        Args:
-        -----
-        [str] fn: Path to metadata file
-        """
-        
-        # Write contents of the metadata array to file line-by-line
-        with open(fn, 'wb') as metafile:
-            metawriter = csv.writer(metafile)
-            for row in self.meta_data:
-                metawriter.writerow(row)
-        
-        
     def initLogger(self):
         """
         Set up logger for warnings, etc
@@ -113,7 +66,7 @@ class DuploCorpus:
         
         # Root directory is one level above the directory that contains this
         # file
-        self.paths['src'] = os.path.split(__file__)[0]
+        self.paths['src'] = os.path.dirname(os.path.abspath(__file__))
         self.paths['root'] = os.path.dirname(self.paths['src'])
         self.paths['output'] = os.path.join(self.paths['root'], 'output')   
         self.paths['figures'] = os.path.join(self.paths['root'], 'figures')
@@ -128,7 +81,60 @@ class DuploCorpus:
         # Make directories that do not surely exist already
         for key in self.paths.keys():
             if not os.path.exists(self.paths[key]):
-                os.makedirs(self.paths[key])        
+                os.makedirs(self.paths[key])
+    
+    
+    def readMetadata(self, fn):
+        """
+        Read metadata from specified file and return as a numpy structured
+        array.
+        
+        Args:
+        -----
+        [str] fn: Path to metadata file
+        
+        Returns:
+        --------
+        [np array] meta_data: Numpy structured array with the following fields
+          [int] trial_id:
+          [str] child_id:
+          [int] has_labels:
+          [str] 08F1:
+          [str] 095D:
+          [str] 090F:
+          [str] 0949:
+        """
+
+        meta_data = []
+        typestruct = [('trial_id', 'i4'), ('child_id', 'U10'),
+                      ('has_labels', 'i4'), ('08F1', 'U10'), ('095D', 'U10'),
+                      ('090F', 'U10'), ('0949', 'U10')]
+        
+        # Start a new, empty metadata array if a file doesn't already exist
+        if not os.path.exists(fn):
+            return np.array(meta_data, dtype=typestruct)
+        
+        # Read contents of the metadata file line-by-line
+        with open(fn, 'r') as metafile:
+            metareader = csv.reader(metafile)
+            for row in metareader:
+                meta_data.append(tuple(row))
+        
+        return np.array(meta_data, dtype=typestruct)
+    
+    
+    def writeMetaData(self):
+        """
+        Write this object's metadata array to a file names meta-data.csv in the
+        data directory
+        """
+        
+        # Write contents of the metadata array to file line-by-line
+        fn = os.path.join(self.paths['data'], 'meta-data.csv')
+        with open(fn, 'wb') as metafile:
+            metawriter = csv.writer(metafile)
+            for row in self.meta_data:
+                metawriter.writerow(row)
     
     
     def writeImuSettings(self, trial_id, dev_settings):
@@ -161,7 +167,6 @@ class DuploCorpus:
         """
         
         fn = os.path.join(self.paths['imu'], '{}.csv'.format(trial_id))
-        #fmtstr = num_imus * (['%15f'] + (sample_len - 1) * ['%i'])
         imu_data = np.loadtxt(fn, delimiter=',')
         
         # FIXME: Assert len devices evenly divides number samples
@@ -367,7 +372,7 @@ class DuploCorpus:
         print('')
     
     
-    def postprocess(self, child_id, trial_id, imu_devs, imu_settings, img_dev_name):
+    def postprocess(self, child_id, trial_id, imu_devs, imu_settings, img_dev_name, imu2block):
         """
         []
         
@@ -387,16 +392,14 @@ class DuploCorpus:
         label_path = os.path.join(self.paths['labels'], str(trial_id) + '.csv')
         has_labels = int(os.path.exists(label_path))
 
-        # Update metadata array
+        # Update metadata array and write to file
+        block_mappings = (imu2block['08F1'], imu2block['095D'], imu2block['090F'], imu2block['0949'])
         num_rows = max(self.meta_data.shape[0], trial_id + 1)
         meta_data = np.zeros(num_rows, dtype=self.meta_data.dtype)
         meta_data[self.meta_data['trial_id']] = self.meta_data
-        meta_data[trial_id] = (trial_id, child_id, has_labels)        
+        meta_data[trial_id] = (trial_id, child_id, has_labels) + block_mappings    
         self.meta_data = meta_data
-        
-        # Write new metadata array to file
-        fn = os.path.join(self.paths['data'], 'meta-data.csv')
-        self.writeMetaData(fn)
+        self.writeMetaData()
     
     
     def makeImuFigs(self, trial_id, devices):
@@ -477,10 +480,6 @@ class DuploCorpus:
         -----
         [int] trial_id:
         [list(str)] devices:
-        
-        Returns:
-        --------
-          (Nothing)
         """
         
         NUM_LABELS = 7
@@ -571,10 +570,140 @@ class DuploCorpus:
                 plt.close()
         
         return
+        
+        
+    def makeVideoLabels(self, trial_id):
+        """
+        Interactive UI for labeling the actions in a trial based on video
+        frames.
+        
+        Args:
+        -----
+        [int] trial_id:
+        """
+        
+        if self.meta_data['has_labels'][trial_id]:
+            fmtstr = 'Trial {}: Label file already exists. Delete it to re-label.'
+            self.logger.warn(fmtstr.format(trial_id))
+            return
+        
+        # Enable python 2/3 compatibility
+        if sys.version_info[0] == 2:
+            input = raw_input
+        
+        blocks = ('(none)', 'red square', 'yellow square', 'green square',
+                  'blue square', 'red rectangle', 'yellow rectangle',
+                  'green rectangle', 'blue rectangle')
+        actions = ('(inactive)', 'place above', 'place adjacent', 'rotate',
+                      'translate', 'remove', 'pick up (no placement)')
+        
+        # Get full path names for RGB frames in this trial
+        rgb_dir = os.path.join(self.paths['rgb'], str(trial_id))
+        assert(os.path.exists(rgb_dir))
+        pattern = os.path.join(rgb_dir, '*.png')
+        rgb_frame_fns = sorted(glob.glob(pattern))
+        num_frames = len(rgb_frame_fns)
+        
+        # Set up image window
+        cv2.namedWindow('Segmentation')
+        
+        label_fn = os.path.join(self.paths['labels'], '{}.csv'.format(trial_id))
+        with open(label_fn, 'w') as label_file:
+            labelwriter = csv.writer(label_file)
+        
+            action_started = False
+            frame_idx = 0
+            while True:
+                
+                # Open the current frame and display it
+                frame_path = rgb_frame_fns[frame_idx]
+                frame = cv2.imread(frame_path)
+                cv2.imshow('Segmentation', frame)
+                    
+                # Wait until we read some input from the user
+                user_in = cv2.waitKey(0)
+                    
+                # Act on the input if it's one of the recognized characters
+                if action_started and user_in == ord('e'):
+                    action_started = False
+                    end_idx = frame_idx
+                    
+                    # Prompt user to choose an action
+                    print('')
+                    print('ACTIONS')
+                    for i, a in enumerate(actions):
+                        print('  {}: {}'.format(i, a))
+                    action = int(input('Select the action: '))
+                    
+                    # Prompt user to choose object and target blocks
+                    print('')
+                    print('BLOCKS')
+                    for i, b in enumerate(blocks):
+                        print('  {}: {}'.format(i, b))
+                    objects_str = input('Select the object block(s): ')
+                    if len(objects_str.split()) > 1:
+                        objects = (int(x) for x in targets_str.split())
+                        target = 0
+                        
+                        # Write label and print to console
+                        print('')
+                        for obj in objects:
+                            row = (start_idx, end_idx, action, obj, target, '()', '()')
+                            labelwriter.writerow(row)
+                            print((start_idx, end_idx, actions[action], blocks[obj],
+                                   blocks[target]))
+                    else:
+                        obj = objects_str.split()[0]
+                        targets_str = input('Select the target blocks(s): ')
+                        targets = (int(x) for x in targets_str.split())
+                    
+                        # Write label and print to console
+                        print('')
+                        for target in targets:
+                            row = (start_idx, end_idx, action, obj, target, '()', '()')
+                            labelwriter.writerow(row)
+                            print((start_idx, end_idx, actions[action], blocks[obj],
+                                   blocks[target]))
+                    
+                    start_idx = -1
+                    end_idx = -1
+                elif user_in == ord('s'):
+                    start_idx = frame_idx
+                    action_started = True
+                elif user_in == ord('j'):
+                    if frame_idx - 1 > 0:
+                        frame_idx -= 1
+                    else:
+                        frame_idx = 0
+                        print('End of video')
+                elif user_in == ord('k'):
+                    if frame_idx + 1 < num_frames - 1:
+                        frame_idx += 1
+                    else:
+                        frame_idx = num_frames - 1
+                        print('End of video')
+                elif user_in == ord('u'):
+                    if frame_idx - 20 > 0:
+                        frame_idx -= 20
+                    else:
+                        frame_idx = 0
+                        print('End of video')
+                elif user_in == ord('i'):
+                    if frame_idx + 20 < num_frames - 1:
+                        frame_idx += 20
+                    else:
+                        frame_idx = num_frames - 1
+                        print('End of video')
+                elif user_in == ord('q'):   # Exit
+                    break
+            
+        self.meta_data['has_labels'][trial_id] = 1    
+        self.writeMetaData()
 
 
 if __name__ == '__main__':
     c = DuploCorpus()
-    devs = ('WAX9-08F1', 'WAX9-0949', 'WAX9-095D', 'WAX9-090F')
-    imu_data, rgb_timestamps, sample_len = c.parseRawData(3, devs, ('IMG-RGB',))
+    #c.makeVideoLabels(1)
+    #devs = ('WAX9-08F1', 'WAX9-0949', 'WAX9-095D', 'WAX9-090F')
+    #imu_data, rgb_timestamps, sample_len = c.parseRawData(3, devs, ('IMG-RGB',))
     #c.makeImuFigs(4, devs)

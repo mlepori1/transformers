@@ -101,7 +101,7 @@ def streamImu(devices, die, path):
     [str] path: Path to raw IMU output file
     """
     
-    SAMPLE_RATE = 30
+    SAMPLE_RATE = 15
     TIMEOUT = 1.5 * (1.0 / SAMPLE_RATE)
     
     # Set up output files
@@ -124,7 +124,7 @@ def streamImu(devices, die, path):
         for dev_id, imu_socket in devices.items():   
             
             # Read bytes from the current sensor until we have a complete
-            # packet of hang on a timeout
+            # packet or hang on a timeout
             prev_escaped = False
             packet_ready = False
             frame = ''
@@ -236,6 +236,7 @@ if __name__ == "__main__":
     else:
         block_colors = ('red', 'yellow', 'blue', 'green')
     
+    imu2block = {}
     imu_devs = {}
     imu_settings = {}
     mac_prefix = ['00', '17', 'E9', 'D7']
@@ -254,6 +255,8 @@ if __name__ == "__main__":
                 imus_in_use.append(imu_id)
                 break
             print('That sensor is already in use!')
+        
+        imu2block[imu_id] = block_color
         
         # Compute the device's MAC address
         mac_bytes = mac_prefix + [imu_id[0:2], imu_id[2:4]]
@@ -297,6 +300,11 @@ if __name__ == "__main__":
         f = plot3dof(norm_data, np.array([0]), np.array([0, test_data.shape[0] - 1]), fig_text)
         plt.show()
         """
+    # Record which IMUs weren't used
+    for imu_id in imu_ids:
+        if not imu_id in imus_in_use:
+            imu2block[imu_id] = 'UNUSED'
+    assert(len(imu2block) == len(imu_ids))
     
     corpus = DuploCorpus()
     
@@ -341,7 +349,7 @@ if __name__ == "__main__":
     print((t_end - t_start) * SAMPLE_FREQ)
     
     child_id = '_'.join((str(child_age), child_gender))
-    corpus.postprocess(child_id, trial_id, imu_devs, imu_settings, img_dev_name)        
+    corpus.postprocess(child_id, trial_id, imu_devs, imu_settings, img_dev_name, imu2block)        
         
     # Show IMU data (for validation)
     ids = [x[-4:] for x in imu_devs.keys()]  # Grab hex ID from WAX9 ID
