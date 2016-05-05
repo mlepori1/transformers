@@ -570,6 +570,28 @@ class DuploCorpus:
                 plt.close()
         
         return
+    
+    
+    def makeStateVisualizations(self, trial_id):
+        """
+        Write a series of graph images representing the block state sequence.
+        
+        Args:
+        -----
+        [int] trial_id:
+        """
+        
+        labels = self.readLabels(trial_id)
+        states = parseActions(labels)
+        
+        # Make a directory for the block state figures in this trial
+        trial_dir = os.path.join(self.paths['figures'], 'block-states',
+                                 str(trial_id))
+        if not os.path.exists(trial_dir):
+            os.makedirs(trial_dir)
+        
+        for i, state in enumerate(states):
+            state.render(filename=str(i), directory=trial_dir)
         
         
     def makeVideoLabels(self, trial_id):
@@ -703,6 +725,7 @@ class DuploCorpus:
 
 if __name__ == '__main__':
     c = DuploCorpus()
+    c.makeStateVisualizations(1)
     #c.makeVideoLabels(1)
     #devs = ('WAX9-08F1', 'WAX9-0949', 'WAX9-095D', 'WAX9-090F')
     #imu_data, rgb_timestamps, sample_len = c.parseRawData(3, devs, ('IMG-RGB',))

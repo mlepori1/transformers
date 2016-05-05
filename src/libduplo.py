@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 libduplo.py
-  Miscellaneous utilities for the block project
+  Library of helper functions for the duplo corpus
 
 AUTHOR
   Jonathan D. Jones
@@ -359,18 +359,35 @@ def parseActions(labels):
     Args:
     -----
     [np array] labels: (See loadlabels in duplocorpus.py)
+    
+    Returns:
+    --------
+    [list(gv Digraph)] states: List of graphviz graphs representing the
+      progression of block states
     """
     
     import graphviz as gv
     
+    # Return the state sequence in this list
+    states = []
+    
+    # Sort actions in increasing order by their end index
+    labels = np.sort(labels, order='end')
+    
     # Create a directed graph representing the block construction and add all
     # 8 blocks as nodes
-    state = gv.Digraph(name='state', format='svg')
-    num_blocks = 8
-    for block_id in range(num_blocks):
-        state.node(str(block_id+1))
-        
-    # TODO: Sort labels by end index
+    state = gv.Digraph(name=str(len(states)), format='png')
+    colors = ('red', 'yellow', 'green', 'blue')
+    shapes = ('Msquare', 'box')
+    widths = ('0.5', '1')
+    block_id = 0
+    for cur_width, cur_shape in zip(widths, shapes):
+        for cur_color in colors:
+            block_id += 1
+            state.node(str(block_id), height='0.5', width=cur_width,
+                       color=cur_color, shape=cur_shape, style='filled')
+    
+    states.append(state)
     
     # LABELS
     #   0 -- (inactive)
@@ -381,34 +398,48 @@ def parseActions(labels):
     #   5 -- remove [object]
     #   6 -- pick up [object]
     relevant_actions = (1, 2, 5)    # These actions change the state
+    prev_state = states[-1]
+    prev_end = -1
     for label in labels:
-        action = label['action']
-        object_block = str(label['object'])
-        target_block = str(label['target'])
         
+        action = label['action']        
         if not action in relevant_actions:
             continue
         
-        if action == 1:     # Add a directed edge
-            state.edge(object_block, target_block)
-        elif action == 2:   # Add an undirected edge
-            state.edge(object_block, target_block, dir='none')
-        elif action == 5:
-            # Delete every directed edge emanating from the removed block
-            # FIXME: Delete undirected edges too
-            new_body = []
-            for entry in state.body:
-                # Fixme: match using a more robust regex
-                if len(entry) >= 5 and not entry[5] == '\t\t{}'.format(object_block):
-                    new_body.append(entry)
-            state.body = new_body
+        end = label['end']; assert(end >= prev_end)        
+        object_block = str(label['object'])
+        target_block = str(label['target'])
         
-        directory = '/Users/jonathan/'
-        fn = 'state'
-        state.render(filename=fn, directory=directory)
-        print(state.body)
-        user_in = raw_input('Press RETURN to continue: ')
-        if user_in:
-            break
+        # Initialize a new state graph with the contents of the previous state.
+        # I do it this way because the Digraph class doesn't have a copy
+        # constructor.
+        cur_state = gv.Digraph(name=str(len(states)), format='png')
+        cur_state.body = list(prev_state.body)
+        
+        if action == 1:     # Add a directed edge
+            cur_state.edge(object_block, target_block)
+        elif action == 2:   # Add an undirected edge
+            cur_state.edge(object_block, target_block, dir='none')
+        elif action == 5:
+            new_body = []
+            for entry in cur_state.body:
+                # Matches all edges originating from the removed block
+                start_pattern = '\t\t{}'.format(object_block)
+                # Matches all undirected edges leading to the removed block
+                end_pattern = '-> {} [dir=none]'.format(object_block)
+                if not (entry.startswith(start_pattern) or
+                   entry.endswith(end_pattern)):
+                    new_body.append(entry)
+            cur_state.body = new_body
+        
+        # By only adding states with strictly increasing end indices, we ensure
+        # that simultaneous actions are displayed simultaneously.
+        if end > prev_end:
+            states.append(cur_state)
+        
+        prev_state = cur_state
+        prev_end = end
+    
+    return states
 
     
