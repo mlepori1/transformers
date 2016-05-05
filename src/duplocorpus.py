@@ -382,7 +382,8 @@ class DuploCorpus:
           corpus metadata array.
         """
         
-        imu_data, rgb_timestamps, sample_len = self.parseRawData(trial_id, imu_devs.keys(), (img_dev_name,))
+        imu_data, rgb_timestamps, sample_len = self.parseRawData(trial_id,
+                                               imu_devs.keys(),(img_dev_name,))
         
         self.writeImuSettings(trial_id, imu_settings)
         self.writeImuData(trial_id, imu_data, len(imu_devs), sample_len)
@@ -393,7 +394,8 @@ class DuploCorpus:
         has_labels = int(os.path.exists(label_path))
 
         # Update metadata array and write to file
-        block_mappings = (imu2block['08F1'], imu2block['095D'], imu2block['090F'], imu2block['0949'])
+        block_mappings = (imu2block['08F1'], imu2block['095D'],
+                          imu2block['090F'], imu2block['0949'])
         num_rows = max(self.meta_data.shape[0], trial_id + 1)
         meta_data = np.zeros(num_rows, dtype=self.meta_data.dtype)
         meta_data[self.meta_data['trial_id']] = self.meta_data

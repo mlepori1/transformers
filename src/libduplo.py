@@ -368,6 +368,8 @@ def parseActions(labels):
     
     import graphviz as gv
     
+    IMG_FORMAT = 'svg'
+    
     # Return the state sequence in this list
     states = []
     
@@ -376,7 +378,7 @@ def parseActions(labels):
     
     # Create a directed graph representing the block construction and add all
     # 8 blocks as nodes
-    state = gv.Digraph(name=str(len(states)), format='png')
+    state = gv.Digraph(name=str(len(states)), format=IMG_FORMAT)
     colors = ('red', 'yellow', 'green', 'blue')
     shapes = ('Msquare', 'box')
     widths = ('0.5', '1')
@@ -399,21 +401,24 @@ def parseActions(labels):
     #   6 -- pick up [object]
     relevant_actions = (1, 2, 5)    # These actions change the state
     prev_state = states[-1]
-    prev_end = -1
-    for label in labels:
+    for i, label in enumerate(labels):
         
         action = label['action']        
         if not action in relevant_actions:
             continue
         
-        end = label['end']; assert(end >= prev_end)        
+        print(label)
+        
+        end = label['end']
         object_block = str(label['object'])
         target_block = str(label['target'])
+        
+        next_end = end + 1 if i == len(labels)-1 else labels[i+1]['end']
         
         # Initialize a new state graph with the contents of the previous state.
         # I do it this way because the Digraph class doesn't have a copy
         # constructor.
-        cur_state = gv.Digraph(name=str(len(states)), format='png')
+        cur_state = gv.Digraph(name=str(len(states)), format=IMG_FORMAT)
         cur_state.body = list(prev_state.body)
         
         if action == 1:     # Add a directed edge
@@ -434,7 +439,7 @@ def parseActions(labels):
         
         # By only adding states with strictly increasing end indices, we ensure
         # that simultaneous actions are displayed simultaneously.
-        if end > prev_end:
+        if end < next_end:
             states.append(cur_state)
         
         prev_state = cur_state

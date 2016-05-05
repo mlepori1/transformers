@@ -104,6 +104,11 @@ def streamImu(devices, die, path):
     SAMPLE_RATE = 15
     TIMEOUT = 1.5 * (1.0 / SAMPLE_RATE)
     
+    # If we see more than this many timeouts, it means we've dropped samples
+    # for three seconds consecutively. The IMU is probably stalled in this
+    # case, so stop data collection and prompt user to cycle the device.
+    MAX_NUM_TIMEOUTS = 3 * SAMPLE_RATE
+    
     # Set up output files
     f_imu = open(path, 'w')
     imu_writer = csv.writer(f_imu)
@@ -113,6 +118,10 @@ def streamImu(devices, die, path):
     SLIP_ESC = '\xdb'
     SLIP_ESC_END = '\xdc'
     SLIP_ESC_ESC = '\xdd'
+    
+    # This dictionary is used to track the number of consecutive dropped
+    # samples for each IMU device
+    num_consec_timeouts = {dev_name: 0 for dev_name in devices.keys()}
 
     # Tell the imu devices to start streaming
     for imu_socket in devices.values():
@@ -133,6 +142,10 @@ def streamImu(devices, die, path):
                 # read from the socket
                 ready = select.select([imu_socket], [], [], TIMEOUT)
                 if ready[0]:
+                    # Reset the number of consecutive dropped samples once we
+                    # successfully read one
+                    num_consec_timeouts[dev_id] = 0
+                    
                     # Read and process one byte from the IMU
                     byte = imu_socket.recv(1)
                     if prev_escaped:
@@ -162,6 +175,14 @@ def streamImu(devices, die, path):
                     frame = ''
                     packet_ready = True
                     prev_escaped = False
+                    
+                    num_consec_timeouts[dev_id] += 1
+                    if num_consec_timeouts[dev_id] > MAX_NUM_TIMEOUTS:
+                        die.set()
+                        fmtstr = '\nDevice {} is unresponsive. Data collection' \
+                                 'halted. Cycle devices and restart software.'
+                        print(fmtstr.format(dev_id))
+                        #sys.exit()
                 
             # Once we read a complete packet, unpack the bytes and queue the data
             # to be written
@@ -244,33 +265,44 @@ if __name__ == "__main__":
     imus_in_use = []
     for block_color in block_colors:
         
-        # Match IMUs to block colors
-        while True:
-            msg_str = "Place a sensor in the {} block. What is the sensor's ID?\n>> "
-            imu_id = input(msg_str.format(block_color))
-            while not imu_id in imu_ids:
-                msg_str = "That isn't a valid ID. Sensor IDs are: {}\n>> "
-                imu_id = input(msg_str.format(imu_ids))
-            if not imu_id in imus_in_use:
-                imus_in_use.append(imu_id)
-                break
-            print('That sensor is already in use!')
+        name = None
+        while name is None:
         
-        imu2block[imu_id] = block_color
-        
-        # Compute the device's MAC address
-        mac_bytes = mac_prefix + [imu_id[0:2], imu_id[2:4]]
-        address = ':'.join(mac_bytes)
-        
-        # Connect to devices and print settings
-        print('Connecting to device at {}...'.format(address))
-        imu_socket, name = connect(address)
-        while name is None:     # Sometimes we get an empty connection
-            print('Bad connection. Trying again...')
-            imu_socket, name = connect(address)
+            # Match IMUs to block colors
+            while True:
+                msg_str = "Place a sensor in the {} block. "\
+                          "What is the sensor's ID?\n>> "
+                imu_id = input(msg_str.format(block_color))
+                while not imu_id in imu_ids:
+                    msg_str = "That isn't a valid ID. Sensor IDs are: {}\n>> "
+                    imu_id = input(msg_str.format(imu_ids))
+                if not imu_id in imus_in_use:
+                    imus_in_use.append(imu_id)
+                    break
+                print('That sensor is already in use!')
+            
+            imu2block[imu_id] = block_color
+            
+            # Compute the device's MAC address
+            mac_bytes = mac_prefix + [imu_id[0:2], imu_id[2:4]]
+            address = ':'.join(mac_bytes)
+            
+            # Connect to devices and print settings
+            try:
+                print('Connecting to device at {}...'.format(address))
+                imu_socket, name = connect(address)
+            except BluetoothError:
+                name = None
+            while name is None:     # Sometimes we get an empty connection
+                user_in = input('Bad connection. Try again? Enter y or n.\n>>').lower()
+                if user_in == 'n':
+                    break
+                try:
+                    imu_socket, name = connect(address)
+                except BluetoothError:
+                    name = None
         print('Connected, device ID {}'.format(name))
         settings = getSettings(imu_socket)
-        #print(settings)
         imu_devs[name] = imu_socket
         imu_settings[name] = settings
         
