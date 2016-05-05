@@ -350,3 +350,65 @@ def trackIMU(imu_data):
         a_global_prev = a_global
         
     return (R, A_g, V, S)
+
+
+def parseActions(labels):
+    """
+    Re-construct the progression of block states from action label sequence.
+    
+    Args:
+    -----
+    [np array] labels: (See loadlabels in duplocorpus.py)
+    """
+    
+    import graphviz as gv
+    
+    # Create a directed graph representing the block construction and add all
+    # 8 blocks as nodes
+    state = gv.Digraph(name='state')
+    num_blocks = 8
+    for block_id in range(num_blocks):
+        state.node(str(block_id))
+        
+    # TODO: Sort labels by end index
+    
+    # LABELS
+    #   0 -- (inactive)
+    #   1 -- place [object] above [target]
+    #   2 -- place [object] adjacent to [target]
+    #   3 -- rotate [object]
+    #   4 -- translate [object]
+    #   5 -- remove [object]
+    #   6 -- pick up [object]
+    relevant_actions = (1, 2, 5)    # These actions change the state
+    for label in labels:
+        action = label['action']
+        object_block = str(label['object'])
+        target_block = str(label['target'])
+        
+        if not action in relevant_actions:
+            continue
+        
+        if action == 1:     # Add a directed edge
+            state.edge(object_block, target_block)
+        elif action == 2:   # Add an undirected edge
+            state.edge(object_block, target_block, dir='none')
+        elif action == 5:
+            # Delete every directed edge emanating from the removed block
+            # FIXME: Delete undirected edges too
+            new_body = []
+            for entry in state.body:
+                # Fixme: match using a more robust regex
+                if len(entry) >= 5 and not entry[5] == '\t\t{}'.format(object_block):
+                    new_body.append(entry)
+            state.body = new_body
+        
+        directory = '/Users/jonathan/'
+        fn = 'state'
+        state.render(filename=fn, directory=directory)
+        print(state.body)
+        user_in = raw_input('Press RETURN to continue: ')
+        if user_in:
+            break
+
+    
