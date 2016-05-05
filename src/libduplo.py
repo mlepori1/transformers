@@ -365,10 +365,10 @@ def parseActions(labels):
     
     # Create a directed graph representing the block construction and add all
     # 8 blocks as nodes
-    state = gv.Digraph(name='state')
+    state = gv.Digraph(name='state', format='svg')
     num_blocks = 8
     for block_id in range(num_blocks):
-        state.node(str(block_id))
+        state.node(str(block_id+1))
         
     # TODO: Sort labels by end index
     
