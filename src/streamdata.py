@@ -21,6 +21,7 @@ import struct
 from libwax9 import *
 from libduplo import *
 from duplocorpus import DuploCorpus
+from bluetooth import BluetoothError    # Thrown when devices are busy
 
 
 def streamVideo(dev_name, die, path):
@@ -136,6 +137,7 @@ def streamImu(devices, die, path):
             # packet or hang on a timeout
             prev_escaped = False
             packet_ready = False
+            timeout = False
             frame = ''
             while not packet_ready:                
                 # Time out if we spend longer than the sample period waiting to
@@ -171,10 +173,11 @@ def streamImu(devices, die, path):
                 # the data frame.
                 else:
                     packet = frame
-                    print('ERR | timeout | {}'.format(frame.encode('hex')))
+                    
                     frame = ''
                     packet_ready = True
                     prev_escaped = False
+                    timeout = True
                     
                     num_consec_timeouts[dev_id] += 1
                     if num_consec_timeouts[dev_id] > MAX_NUM_TIMEOUTS:
@@ -184,11 +187,20 @@ def streamImu(devices, die, path):
                         print(fmtstr.format(dev_id))
                         #sys.exit()
                 
-            # Once we read a complete packet, unpack the bytes and queue the data
-            # to be written
+            # Once we read a complete packet, unpack the bytes and write the
+            # sample to file
             cur_time = time.time()
             
-            if len(packet) == 28:   # Standard packet
+            if timeout:
+                timeouts = num_consec_timeouts[dev_id]
+                error = 1
+                fmtstr = 'ERR | timeout  ({} consecutive) | {} | {}'
+                print(fmtstr.format(timeouts, dev_id, packet.encode('hex')))
+                data = [0] * 14
+                data[1] = error
+                data[-1] = dev_id
+                timeout = False
+            elif len(packet) == 28:   # Standard packet
                 error = 0
                 # Convert data from hex representation (see p. 7, 'WAX9
                 # application developer's guide')
@@ -205,7 +217,8 @@ def streamImu(devices, die, path):
             else:
                 error = 1
                 # Record an error
-                print('ERR | {} | {} | {}'.format(dev_id, len(packet), packet.encode('hex')))
+                fmtstr = 'ERR | Bad packet | {} | {}'
+                print(fmtstr.format(dev_id, packet.encode('hex')))
                 data = [0] * 14
                 data[1] = error
                 data[-1] = dev_id
@@ -291,16 +304,18 @@ if __name__ == "__main__":
             try:
                 print('Connecting to device at {}...'.format(address))
                 imu_socket, name = connect(address)
-            except BluetoothError:
+            except BluetoothError as e:
                 name = None
+                print(e)
             while name is None:     # Sometimes we get an empty connection
                 user_in = input('Bad connection. Try again? Enter y or n.\n>>').lower()
                 if user_in == 'n':
                     break
                 try:
                     imu_socket, name = connect(address)
-                except BluetoothError:
+                except BluetoothError as e:
                     name = None
+                    print(e)
         print('Connected, device ID {}'.format(name))
         settings = getSettings(imu_socket)
         imu_devs[name] = imu_socket
@@ -347,9 +362,7 @@ if __name__ == "__main__":
     raw_file_path = os.path.join(corpus.paths['imu-raw'], '{}.csv'.format(trial_id))
     rgb_trial_path = os.path.join(corpus.paths['rgb'], str(trial_id))
     if not os.path.exists(rgb_trial_path):
-        os.makedirs(rgb_trial_path)
-    
-    t_start = time.time()               
+        os.makedirs(rgb_trial_path)             
     
     # Start receiving and writing data
     img_dev_name = 'IMG-RGB'
@@ -375,10 +388,6 @@ if __name__ == "__main__":
     for dev_name, imu_socket in imu_devs.items():
         print('Disconnecting from {}'.format(dev_name))
         imu_socket.close()
-    
-    # Estimate number of samples from duration of data collection
-    t_end = time.time()
-    print((t_end - t_start) * SAMPLE_FREQ)
     
     child_id = '_'.join((str(child_age), child_gender))
     corpus.postprocess(child_id, trial_id, imu_devs, imu_settings, img_dev_name, imu2block)        

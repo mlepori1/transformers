@@ -13,6 +13,30 @@ import matplotlib as mpl
 from mpl_toolkits.mplot3d import Axes3D
 
 
+def fractionDropped(imus):
+    """
+    Calculate the percent of missing samples (per device) in the specified
+    trial.
+    
+    Args:
+    -----
+    [list(np array)] imus: List of IMU samples
+    
+    Returns:
+    --------
+    [np vector] fraction_dropped: The i-th element is the ratio of missing
+      samples in the i-th IMU.
+    """
+    
+    fraction_dropped = np.zeros(len(imus))
+    for i, imu in enumerate(imus):
+        num_samples = float(imu.shape[0])
+        num_dropped = float(imu[:,1].sum())
+        fraction_dropped[i] = num_dropped / num_samples
+    
+    return fraction_dropped
+
+
 def rgbFrame2imuFrame(rgb_timestamps, imu_timestamps):
     """
     Find the indices of the IMU timestamps that most closely

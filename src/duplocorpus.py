@@ -727,8 +727,11 @@ class DuploCorpus:
 
 if __name__ == '__main__':
     c = DuploCorpus()
-    c.makeStateVisualizations(1)
+    devs = ('WAX9-08F1', 'WAX9-0949', 'WAX9-095D', 'WAX9-090F')
+    imus = c.readImuData(4, devs)
+    dropped = fractionDropped(imus)
+    #c.makeStateVisualizations(1)
     #c.makeVideoLabels(1)
-    #devs = ('WAX9-08F1', 'WAX9-0949', 'WAX9-095D', 'WAX9-090F')
+    
     #imu_data, rgb_timestamps, sample_len = c.parseRawData(3, devs, ('IMG-RGB',))
     #c.makeImuFigs(4, devs)
