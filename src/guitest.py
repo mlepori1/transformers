@@ -6,6 +6,7 @@ AUTHOR
   Jonathan D. Jones
 """
 
+from __future__ import print_function
 from Tkinter import *
 #from PIL import Image, ImageTk
 
@@ -85,9 +86,6 @@ class Application:
         submit = Button(master, text="Next", command=self.forward, default=ACTIVE)
         submit.grid(sticky=E, row=4, column=2)
         
-        back = Button(master, text="Back", command=self.back)
-        back.grid(sticky=W, row=4, column=0)
-        
         master.place(relx=0.5, rely=0.5, anchor='center')
     
     
@@ -132,29 +130,41 @@ class Application:
         # Metadata category labels
         user_text = "Place IMUs in the following blocks and select their IDs."
         instructions = Label(master, text=user_text)
-        instructions.grid(sticky=W, row=0, columnspan=2)
+        instructions.grid(sticky=W, row=0, columnspan=3)
     
         # Set up widgets and define layout
         self.dev_ids = {}
+        menus = []
+        buttons = []
+        commands = []
         for i, block in enumerate(self.active_blocks):
             
-            id_label = Label(master, text='{} block'.format(block))
+            id_label = Label(master, text='{} rectangle'.format(block))
             id_label.grid(sticky=E, row=i+1, column=0)
             
-            dev_id = StringVar(master)
-            dev_id.set(self.imu_ids[0])
-            id_menu = apply(OptionMenu, (master, dev_id) + self.imu_ids)
-            id_menu.grid(sticky=W, row=i+1, column=1)
+            self.dev_ids[block] = StringVar(master)
+            self.dev_ids[block].set(self.imu_ids[i])
             
-            self.dev_ids[block] = dev_id
+            menus.append(apply(OptionMenu, (master, self.dev_ids[block]) + self.imu_ids))
+            menus[-1].grid(sticky=W, row=i+1, column=1)
+            
+            commands.append(lambda b=str(block): self.connect(b))
+            buttons.append(Button(master, text='Connect', command=commands[-1]))
+            buttons[-1].grid(sticky=W, row=i+1, column=2)
+            
+        submit = Button(master, text='Next', command=self.forward, default=ACTIVE)
+        submit.grid(sticky=E, row=len(self.dev_ids)+1, column=2)
         
-        submit = Button(master, text="Next", command=self.forward, default=ACTIVE)
-        submit.grid(sticky=E, row=len(self.dev_ids)+1, column=1)
-        
-        back = Button(master, text="Back", command=self.back)
+        back = Button(master, text='Back', command=self.back)
         back.grid(sticky=W, row=len(self.dev_ids)+1, column=0)
         
         master.place(relx=0.5, rely=0.5, anchor='center')
+    
+    
+    def connect(self, block):
+        dev_id = self.dev_ids[block]
+        imu_id = dev_id.get()
+        print('Pretending to connect to {}'.format(imu_id))
     
     
     def back(self):
