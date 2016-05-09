@@ -8,7 +8,7 @@ AUTHOR
 
 from __future__ import print_function
 from Tkinter import *
-#from PIL import Image, ImageTk
+from PIL import Image, ImageTk
 
 
 class Application:
@@ -16,6 +16,9 @@ class Application:
     def __init__(self, parent):
         
         self.parent = parent
+        
+        # Handle for a popup window (we only want one at a time)
+        self.popup = None
         
         self.cur_position = 0
         self.controlflow = (self.drawInfoContent, self.drawTaskContent,
@@ -162,9 +165,25 @@ class Application:
     
     
     def connect(self, block):
+        
+        if not self.popup is None:
+            return
+        
         dev_id = self.dev_ids[block]
         imu_id = dev_id.get()
-        print('Pretending to connect to {}'.format(imu_id))
+        
+        self.popup = Toplevel(self.parent)
+        fmtstr = 'Pretending to connect to {}...'
+        l = Label(self.popup, text=fmtstr.format(imu_id))
+        l.pack()
+        
+        c = Button(self.popup, text='cancel', command=self.cancel)
+        c.pack()
+    
+    
+    def cancel(self):
+        self.popup.destroy()
+        self.popup = None
     
     
     def back(self):
@@ -230,7 +249,13 @@ class Application:
 if __name__ == '__main__':
     
     root = Tk()
-    app = Application(root)
+    #app = Application(root)
+    
+    image = Image.open('/Users/jonathan/0.png')
+    photo = ImageTk.PhotoImage(image)
+    label = Label(image=photo)
+    label.image = photo
+    label.pack()
     
     root.mainloop()
     
