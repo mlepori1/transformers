@@ -251,7 +251,7 @@ if __name__ == '__main__':
     root = Tk()
     #app = Application(root)
     
-    image = Image.open('/Users/jonathan/0.png')
+    image = Image.open('/home/jdjones/state.png')
     photo = ImageTk.PhotoImage(image)
     label = Label(image=photo)
     label.image = photo

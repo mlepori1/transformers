@@ -392,7 +392,7 @@ def parseActions(labels):
     
     import graphviz as gv
     
-    IMG_FORMAT = 'svg'
+    IMG_FORMAT = 'png'
     
     # Return the state sequence in this list
     states = []
@@ -405,13 +405,14 @@ def parseActions(labels):
     state = gv.Digraph(name=str(len(states)), format=IMG_FORMAT)
     colors = ('red', 'yellow', 'green', 'blue')
     shapes = ('Msquare', 'box')
-    widths = ('0.5', '1')
+    widths = ('0.25', '0.5')
     block_id = 0
     for cur_width, cur_shape in zip(widths, shapes):
         for cur_color in colors:
             block_id += 1
-            state.node(str(block_id), height='0.5', width=cur_width,
-                       color=cur_color, shape=cur_shape, style='filled')
+            state.node(str(block_id), height='0.25', width=cur_width,
+                       color=cur_color, shape=cur_shape, style='filled',
+                       body='size=4,4')
     
     states.append(state)
     

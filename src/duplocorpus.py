@@ -594,6 +594,30 @@ class DuploCorpus:
         
         for i, state in enumerate(states):
             state.render(filename=str(i), directory=trial_dir)
+    
+    
+    def getRgbFrameFns(self, trial_id):
+        """
+        Return a sorted list of the RGB frame filenames for the specified
+        trial.
+        
+        Args:
+        -----
+        [int] trial_id:
+        
+        Returns:
+        --------
+        [list(str)] rgb_frame_fns:
+        """
+        
+        # Get full path names for RGB frames in this trial
+        rgb_dir = os.path.join(self.paths['rgb'], str(trial_id))
+        if not os.path.exists(rgb_dir):
+            return []
+        
+        pattern = os.path.join(rgb_dir, '*.png')
+        rgb_frame_fns = sorted(glob.glob(pattern))
+        return rgb_frame_fns
         
         
     def makeVideoLabels(self, trial_id):
@@ -622,10 +646,7 @@ class DuploCorpus:
                       'translate', 'remove', 'pick up (no placement)')
         
         # Get full path names for RGB frames in this trial
-        rgb_dir = os.path.join(self.paths['rgb'], str(trial_id))
-        assert(os.path.exists(rgb_dir))
-        pattern = os.path.join(rgb_dir, '*.png')
-        rgb_frame_fns = sorted(glob.glob(pattern))
+        rgb_frame_fns = self.getRgbFrameFns(trial_id)
         num_frames = len(rgb_frame_fns)
         
         # Set up image window
@@ -727,9 +748,10 @@ class DuploCorpus:
 
 if __name__ == '__main__':
     c = DuploCorpus()
-    devs = ('WAX9-08F1', 'WAX9-0949', 'WAX9-095D', 'WAX9-090F')
-    imus = c.readImuData(4, devs)
-    dropped = fractionDropped(imus)
+    c.makeStateVisualizations(1)
+    #devs = ('WAX9-08F1', 'WAX9-0949', 'WAX9-095D', 'WAX9-090F')
+    #imus = c.readImuData(4, devs)
+    #dropped = fractionDropped(imus)
     #c.makeStateVisualizations(1)
     #c.makeVideoLabels(1)
     
