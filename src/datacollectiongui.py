@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-guitest.py
+datacollectiongui.py
 
 AUTHOR
   Jonathan D. Jones
@@ -10,8 +10,22 @@ from __future__ import print_function
 from Tkinter import *
 from PIL import Image, ImageTk
 
+import multiprocessing as mp
+import select
+
+import csv
+import os
+import sys
+import time
+import struct
+
+from primesense import openni2
+import cv2
+import numpy as np
+
 #import streamdata as sd
-#import libwax9 as wax9
+import libwax9 as wax9
+from duplocorpus import DuploCorpus
 
 
 class Application:
@@ -34,11 +48,26 @@ class Application:
         self.parent.geometry('{}x{}'.format(self.window_w, self.window_h))
         
         # This is updated after prompting user for input
-        self.connected_devices = []
+        self.connected_devices = {}
         self.imu_ids = ('08F1', '0949', '090F', '095D')
-        self.block2imu = {x: 'UNUSED' for x in self.imu_ids}
+        self.imu2block = {x: 'UNUSED' for x in self.imu_ids}
         self.frame_vars = ()
         self.active_blocks = ()
+        self.metadata = {}
+        self.imu_settings = {}
+        
+        # For streaming in parallel
+        self.die = mp.Event()
+        self.corpus = DuploCorpus()
+        self.trial_id = self.corpus.meta_data.shape[0]
+        raw_file_path = os.path.join(self.corpus.paths['imu-raw'], '{}.csv'.format(self.trial_id))
+        rgb_trial_path = os.path.join(self.corpus.paths['rgb'], str(self.trial_id))
+        if not os.path.exists(rgb_trial_path):
+            os.makedirs(rgb_trial_path)
+        self.streamProcesses = (mp.Process(target=self.streamImu,
+                                           args=(raw_file_path,)),
+                                mp.Process(target=self.streamVideo,
+                                           args=('IMG-RGB', rgb_trial_path)))
         
         self.content = self.defaultFrame()
         
@@ -140,7 +169,7 @@ class Application:
         instructions = Label(master, text=user_text)
         instructions.grid(sticky=W, row=0, columnspan=3)
     
-        # Set up widgets and define layout
+        # Set up widgets and define layoutdev_id.get()
         self.dev_ids = {}
         menus = []
         buttons = []
@@ -171,15 +200,29 @@ class Application:
     
     def drawStreamContent(self):
         
-        # TODO
+        # TODO: 
         
         master = self.content
         
         l = Label(master, text='Streaming data...')
-        l.pack()
+        l.grid(row=0, column=0, columnspan=2)
         
-        c = Button(master, text='Quit', command=self.quitStream)
-        c.pack()
+        q = Button(master, text='Quit', command=self.closeStream)
+        q.grid(row=1, column=1)
+        
+        p = Button(master, text='Pause', command=self.stopStream)
+        p.grid(row=1, column=0)
+        
+        master.place(relx=0.5, rely=0.5, anchor='center')
+        
+        for dev_id, imu_socket in self.connected_devices.items():
+            print(dev_id)
+            settings = wax9.getSettings(imu_socket)
+            self.imu_settings[dev_id] = settings
+            print(settings)
+        
+        for p in self.streamProcesses:
+            p.start()
     
     
     def connectionAttemptDialog(self, block):
@@ -192,7 +235,7 @@ class Application:
         
         self.popup = Toplevel(self.parent)
         
-        if imu_id in self.connected_devices:
+        if imu_id in self.connected_devices.keys():
             fmtstr = 'Device {} is already in use! Choose a different device.'
             l = Label(self.popup, text=fmtstr.format(imu_id))
             l.pack()
@@ -200,7 +243,7 @@ class Application:
             ok = Button(self.popup, text='OK', command=self.cancel)
             ok.pack()
         else:
-            fmtstr = 'Pretending to connect to {}...'
+            fmtstr = 'Connecting to {}...'
             l = Label(self.popup, text=fmtstr.format(imu_id))
             l.pack()
             
@@ -210,13 +253,12 @@ class Application:
             # Actually try to connect
             mac_prefix = ['00', '17', 'E9', 'D7']
             imu_address = ':'.join(mac_prefix + [imu_id[0:2], imu_id[2:4]])
-            # FIXME: Do something with socket
-            socket, name = None, None #wax9.connect(imu_address)
+            socket, name = wax9.connect(imu_address)
             if name is None:
                 self.connectionFailureDialog(block)
             else:
-                self.connected_devices.append(imu_id)
-                self.connectionSuccessDialog(imu_id)
+                self.connected_devices[imu_id] = socket
+                self.connectionSuccessDialog(name)
     
     
     def connectionFailureDialog(self, block):
@@ -229,10 +271,10 @@ class Application:
         
         func = lambda b=str(block): self.connectionAttemptDialog(b)
         y = Button(self.popup, text='Yes', command=func)
-        #n = Button(self.popup, text='No', command=cancel)
+        n = Button(self.popup, text='No', command=self.cancel)
         
-        y.pack()#grid(row=1, column=0)
-        #n.grid(row=1, column=1)
+        y.grid(row=1, column=0)
+        n.grid(row=1, column=1)
     
     
     def connectionSuccessDialog(self, imu_id):
@@ -278,20 +320,44 @@ class Application:
         cur_frame()
     
     
-    def quitStream(self):
-        # TODO
-        print('Pretending to quit...')
+    def closeStream(self):
+        
+        if not self.die.is_set():
+            self.stopStream()
+        
+        for name, socket in self.connected_devices.items():
+            print('Disconnecting from {}...'.format(name))
+            socket.close()
+        
+        meta = (self.metadata['pnum'], self.metadata['dob_month'],
+                self.metadata['dob_year'], self.metadata['gender'])
+        child_id = '_'.join(meta)
+        self.corpus.postprocess(child_id, self.trial_id, self.connected_devices,
+                                self.imu_settings, 'IMG-RGB', self.imu2block)
+        
+        ids = [x[-4:] for x in self.connected_devices.keys()]  # Grab hex ID from WAX9 ID
+        self.corpus.makeImuFigs(self.trial_id, ids)
+        
+        self.parent.destroy()
+    
+    
+    def stopStream(self):
+        
+        self.die.set()
+        for p in self.streamProcesses:
+            p.join()
     
     
     def getMetaData(self):
-        pnum = self.participant_num.get()
-        dob_month = self.dob_month.get()
-        dob_year = self.dob_year.get()
-        gender = self.gender.get()
+        self.metadata['pnum'] = self.participant_num.get()
+        self.metadata['dob_month'] = self.dob_month.get()
+        self.metadata['dob_year'] = self.dob_year.get()
+        self.metadata['gender'] = self.gender.get()
         
-        print('Participant ID: {}'.format(pnum))
-        print('Birth date: {} / {}'.format(dob_month, dob_year))
-        print('Gender: {}'.format(gender))
+        print('Participant ID: {}'.format(self.metadata['pnum']))
+        print('Birth date: {} / {}'.format(self.metadata['dob_month'],
+                                           self.metadata['dob_year']))
+        print('Gender: {}'.format(self.metadata['gender']))
     
     
     def getTaskData(self):
@@ -309,12 +375,222 @@ class Application:
     def getImuData(self):
         
         for block, dev_id in self.dev_ids.items():
-            self.block2imu[block] = dev_id.get()
-            print('{}: {}'.format(block, self.block2imu[block]))
+            imu = dev_id.get()
+            self.imu2block[imu] = block
+            print('{}: {}'.format(block, self.imu2block[imu]))
+    
     
     def getStreamData(self):
         # TODO
         print('I am a fake method!')
+    
+    
+    def streamImu(self, path):
+        """
+        Stream data from WAX9 devices until die is set
+    
+        Args:
+        -----
+        [str] path: Path to raw IMU output file
+        """
+        
+        SAMPLE_RATE = 15
+        TIMEOUT = 1.5 * (1.0 / SAMPLE_RATE)
+        
+        # If we see more than this many timeouts, it means we've dropped samples
+        # for three seconds consecutively. The IMU is probably stalled in this
+        # case, so stop data collection and prompt user to cycle the device.
+        MAX_NUM_TIMEOUTS = 3 * SAMPLE_RATE
+        
+        # Set up output files
+        f_imu = open(path, 'w')
+        imu_writer = csv.writer(f_imu)
+        
+        # Special SLIP bytes
+        SLIP_END = '\xc0'
+        SLIP_ESC = '\xdb'
+        SLIP_ESC_END = '\xdc'
+        SLIP_ESC_ESC = '\xdd'
+        
+        # This dictionary is used to track the number of consecutive dropped
+        # samples for each IMU device
+        num_consec_timeouts = {dev_name: 0 for dev_name in self.connected_devices.keys()}
+    
+        # Tell the imu devices to start streaming
+        for imu_socket in self.connected_devices.values():
+            imu_socket.sendall('stream\r\n')
+        
+        while True:
+            
+            # Read data sequentially from sensors until told to terminate
+            for dev_id, imu_socket in self.connected_devices.items():
+                
+                # Read bytes from the current sensor until we have a complete
+                # packet or hang on a timeout
+                prev_escaped = False
+                packet_ready = False
+                timeout = False
+                frame = ''
+                while not packet_ready:                
+                    # Time out if we spend longer than the sample period waiting to
+                    # read from the socket
+                    ready = select.select([imu_socket], [], [], TIMEOUT)
+                    if ready[0]:
+                        # Reset the number of consecutive dropped samples once we
+                        # successfully read one
+                        num_consec_timeouts[dev_id] = 0
+                        
+                        # Read and process one byte from the IMU
+                        byte = imu_socket.recv(1)
+                        if prev_escaped:
+                            prev_escaped = False
+                            if byte == SLIP_ESC_END:
+                                frame += SLIP_END
+                            elif byte == SLIP_ESC_ESC:
+                                frame += SLIP_ESC
+                            else:
+                                # Anything else means we received an unexpected escaped byte
+                                print('ERR | {} | unexpected byte'.format(byte.encode('hex')))
+                        elif byte == SLIP_END and len(frame) > 0:
+                            frame += byte
+                            packet = frame
+                            frame = ''
+                            packet_ready = True
+                        elif byte == SLIP_ESC:
+                            prev_escaped = True
+                        else:
+                            frame += byte
+                    # If select times out, we've waited longer than a sample
+                    # period. This sample must be bad, so throw it out by resetting
+                    # the data frame.
+                    else:
+                        packet = frame
+                        
+                        frame = ''
+                        packet_ready = True
+                        prev_escaped = False
+                        timeout = True
+                        
+                        num_consec_timeouts[dev_id] += 1
+                        if num_consec_timeouts[dev_id] > MAX_NUM_TIMEOUTS:
+                            self.die.set()
+                            fmtstr = '\nDevice {} is unresponsive. Data collection' \
+                                     ' halted. Cycle devices and restart software.'
+                            print(fmtstr.format(dev_id))
+                    
+                # Once we read a complete packet, unpack the bytes and write the
+                # sample to file
+                cur_time = time.time()
+                
+                if timeout:
+                    timeouts = num_consec_timeouts[dev_id]
+                    error = 1
+                    fmtstr = 'ERR | timeout  ({} consecutive) | {} | {}'
+                    print(fmtstr.format(timeouts, dev_id, packet.encode('hex')))
+                    data = [0] * 14
+                    data[1] = error
+                    data[-1] = dev_id
+                    timeout = False
+                elif len(packet) == 28:   # Standard packet
+                    error = 0
+                    # Convert data from hex representation (see p. 7, 'WAX9
+                    # application developer's guide')
+                    fmtstr = '<' + 3 * 'B' + 'h' + 'I' + 9 * 'h' + 'B'
+                    unpacked = list(struct.unpack(fmtstr, packet))
+                    data = [cur_time, error] + unpacked[3:14] + [dev_id]
+                elif len(packet) == 36: # Long packet
+                    error = 0
+                    # Convert data from hex representation (see p. 7, 'WAX9
+                    # application developer's guide')
+                    fmtstr = '<' + 3 * 'B' + 'h' + 'I' + 11 * 'h' + 'I' + 'B'
+                    unpacked = list(struct.unpack(fmtstr, packet))
+                    data = [cur_time, error] + unpacked[3:14] + [dev_id]
+                else:
+                    error = 1
+                    # Record an error
+                    fmtstr = 'ERR | Bad packet | {} | {}'
+                    print(fmtstr.format(dev_id, packet.encode('hex')))
+                    data = [0] * 14
+                    data[1] = error
+                    data[-1] = dev_id
+                    
+                # Queue the packet to be written
+                imu_writer.writerow(data)
+            
+            # Terminate when main tells us to -- but only after we finish
+            # reading the current set of packets
+            if self.die.is_set():
+                # Tell the devices to stop streaming
+                for imu_socket in self.connected_devices.values():
+                    imu_socket.sendall('\r\n')
+                break
+        
+        f_imu.close()
+
+
+    def streamVideo(self, dev_name, path):
+        """
+        Stream data from camera until die is set
+    
+        Args:
+        -----
+        [dict(str->cv stream)] dev_name:
+        [str] path: Path (full or relative) to image output directory
+        """
+        
+        f_rgb = open(os.path.join(path, 'frame_timestamps.csv'), 'w')
+        rgb_writer = csv.writer(f_rgb)
+        
+        # Open video streams
+        print("Opening RGB camera...")
+        openni2.initialize()
+        dev = openni2.Device.open_any()
+        stream = dev.create_color_stream()
+        print("RGB camera opened")
+        
+        frame_index = 0
+        
+        print("Starting RGB stream...")
+        stream.start()
+        print("RGB stream started")
+        
+        while not self.die.is_set():
+            """
+            # Read depth frame data, convert to image matrix, write to file,
+            # record frame timestamp
+            frametime = time.time()
+            depth_frame = depth_stream.read_frame()
+            depth_data = depth_frame.get_buffer_as_uint16()
+            depth_array = np.ndarray((depth_frame.height, depth_frame.width),
+                                     dtype=np.uint16, buffer=depth_data)
+            filename = "depth_" + str(i) + ".png"
+            cv2.imwrite(os.path.join(dirname, filename), depth_array)
+            q.put((i, frametime, "IMG_DEPTH"))
+            """
+            
+            # Read frame data, record frame timestamp
+            frame = stream.read_frame()
+            frametime = time.time()
+            
+            # Convert to image array
+            data = frame.get_buffer_as_uint8()
+            img_array = np.ndarray((frame.height, 3*frame.width),
+                                   dtype=np.uint8, buffer=data)
+            img_array = np.dstack((img_array[:,2::3], img_array[:,1::3], img_array[:,0::3]))
+            
+            # Write to file
+            filename = '{:06d}.png'.format(frame_index)
+            cv2.imwrite(os.path.join(path, filename), img_array)
+            rgb_writer.writerow((frametime, frame_index, dev_name))
+    
+            frame_index += 1
+    
+        # Stop streaming
+        print("Closing RGB camera")    
+        stream.stop()
+        openni2.unload()
+        
+        f_rgb.close()
 
 
 if __name__ == '__main__':

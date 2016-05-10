@@ -183,7 +183,7 @@ def streamImu(devices, die, path):
                     if num_consec_timeouts[dev_id] > MAX_NUM_TIMEOUTS:
                         die.set()
                         fmtstr = '\nDevice {} is unresponsive. Data collection' \
-                                 'halted. Cycle devices and restart software.'
+                                 ' halted. Cycle devices and restart software.'
                         print(fmtstr.format(dev_id))
                         #sys.exit()
                 

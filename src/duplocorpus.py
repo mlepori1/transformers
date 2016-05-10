@@ -388,7 +388,7 @@ class DuploCorpus:
         self.writeImuSettings(trial_id, imu_settings)
         self.writeImuData(trial_id, imu_data, len(imu_devs), sample_len)
         self.writeRgbTimestamps(trial_id, rgb_timestamps)
-        #self.makeRgbVideo(trial_id)
+        self.makeRgbVideo(trial_id)
         
         label_path = os.path.join(self.paths['labels'], str(trial_id) + '.csv')
         has_labels = int(os.path.exists(label_path))
