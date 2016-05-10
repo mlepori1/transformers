@@ -10,6 +10,9 @@ from __future__ import print_function
 from Tkinter import *
 from PIL import Image, ImageTk
 
+#import streamdata as sd
+#import libwax9 as wax9
+
 
 class Application:
     
@@ -22,14 +25,16 @@ class Application:
         
         self.cur_position = 0
         self.controlflow = (self.drawInfoContent, self.drawTaskContent,
-                            self.drawImuContent)
-        self.getters = (self.getMetaData, self.getTaskData, self.getImuData)
+                            self.drawImuContent, self.drawStreamContent)
+        self.getters = (self.getMetaData, self.getTaskData, self.getImuData,
+                        self.getStreamData)
         
         self.window_w = 768
         self.window_h = 576
         self.parent.geometry('{}x{}'.format(self.window_w, self.window_h))
         
         # This is updated after prompting user for input
+        self.connected_devices = []
         self.imu_ids = ('08F1', '0949', '090F', '095D')
         self.block2imu = {x: 'UNUSED' for x in self.imu_ids}
         self.frame_vars = ()
@@ -151,7 +156,7 @@ class Application:
             menus.append(apply(OptionMenu, (master, self.dev_ids[block]) + self.imu_ids))
             menus[-1].grid(sticky=W, row=i+1, column=1)
             
-            commands.append(lambda b=str(block): self.connect(b))
+            commands.append(lambda b=str(block): self.connectionAttemptDialog(b))
             buttons.append(Button(master, text='Connect', command=commands[-1]))
             buttons[-1].grid(sticky=W, row=i+1, column=2)
             
@@ -164,7 +169,20 @@ class Application:
         master.place(relx=0.5, rely=0.5, anchor='center')
     
     
-    def connect(self, block):
+    def drawStreamContent(self):
+        
+        # TODO
+        
+        master = self.content
+        
+        l = Label(master, text='Streaming data...')
+        l.pack()
+        
+        c = Button(master, text='Quit', command=self.quitStream)
+        c.pack()
+    
+    
+    def connectionAttemptDialog(self, block):
         
         if not self.popup is None:
             return
@@ -173,12 +191,60 @@ class Application:
         imu_id = dev_id.get()
         
         self.popup = Toplevel(self.parent)
-        fmtstr = 'Pretending to connect to {}...'
+        
+        if imu_id in self.connected_devices:
+            fmtstr = 'Device {} is already in use! Choose a different device.'
+            l = Label(self.popup, text=fmtstr.format(imu_id))
+            l.pack()
+            
+            ok = Button(self.popup, text='OK', command=self.cancel)
+            ok.pack()
+        else:
+            fmtstr = 'Pretending to connect to {}...'
+            l = Label(self.popup, text=fmtstr.format(imu_id))
+            l.pack()
+            
+            c = Button(self.popup, text='cancel', command=self.cancel)
+            c.pack()
+            
+            # Actually try to connect
+            mac_prefix = ['00', '17', 'E9', 'D7']
+            imu_address = ':'.join(mac_prefix + [imu_id[0:2], imu_id[2:4]])
+            # FIXME: Do something with socket
+            socket, name = None, None #wax9.connect(imu_address)
+            if name is None:
+                self.connectionFailureDialog(block)
+            else:
+                self.connected_devices.append(imu_id)
+                self.connectionSuccessDialog(imu_id)
+    
+    
+    def connectionFailureDialog(self, block):
+        self.popup.destroy()
+        self.popup = Toplevel(self.parent)
+        
+        fmtstr = 'Connection attempt failed! Try again?'
+        l = Label(self.popup, text=fmtstr)
+        l.grid(row=0, columnspan=2)
+        
+        func = lambda b=str(block): self.connectionAttemptDialog(b)
+        y = Button(self.popup, text='Yes', command=func)
+        #n = Button(self.popup, text='No', command=cancel)
+        
+        y.pack()#grid(row=1, column=0)
+        #n.grid(row=1, column=1)
+    
+    
+    def connectionSuccessDialog(self, imu_id):
+        self.popup.destroy()
+        self.popup = Toplevel(self.parent)
+        
+        fmtstr = 'Successfully connected to {}!'
         l = Label(self.popup, text=fmtstr.format(imu_id))
         l.pack()
         
-        c = Button(self.popup, text='cancel', command=self.cancel)
-        c.pack()
+        ok = Button(self.popup, text='OK', command=self.cancel)
+        ok.pack()
     
     
     def cancel(self):
@@ -212,6 +278,11 @@ class Application:
         cur_frame()
     
     
+    def quitStream(self):
+        # TODO
+        print('Pretending to quit...')
+    
+    
     def getMetaData(self):
         pnum = self.participant_num.get()
         dob_month = self.dob_month.get()
@@ -240,22 +311,16 @@ class Application:
         for block, dev_id in self.dev_ids.items():
             self.block2imu[block] = dev_id.get()
             print('{}: {}'.format(block, self.block2imu[block]))
-
-
-    def dummy(self):
-        print('submitted')
+    
+    def getStreamData(self):
+        # TODO
+        print('I am a fake method!')
 
 
 if __name__ == '__main__':
     
     root = Tk()
-    #app = Application(root)
-    
-    image = Image.open('/home/jdjones/state.png')
-    photo = ImageTk.PhotoImage(image)
-    label = Label(image=photo)
-    label.image = photo
-    label.pack()
+    app = Application(root)
     
     root.mainloop()
     

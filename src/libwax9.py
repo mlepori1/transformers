@@ -57,7 +57,13 @@ def connect(target_address):
 
     name = bluetooth.lookup_name(target_address)
     socket = bluetooth.BluetoothSocket(bluetooth.RFCOMM)
-    socket.connect((target_address, channel))
+    
+    try:
+        socket.connect((target_address, channel))
+    except bluetooth.BluetoothError as e:
+        print(e)
+        socket = None
+        name = None
 
     return (socket, name)
 
