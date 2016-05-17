@@ -45,6 +45,11 @@ class Application:
         self.window_h = 576
         self.parent.geometry('{}x{}'.format(self.window_w, self.window_h))
         
+        # For streaming in parallel
+        self.die = mp.Event()
+        self.corpus = DuploCorpus()
+        self.trial_id = self.corpus.meta_data.shape[0]
+        
         # This is updated after prompting user for input
         self.connected_devices = {}
         self.camera_ids = ('rgb',) #'depth')
@@ -54,22 +59,17 @@ class Application:
         self.trial_metadata = ()
         self.imu_settings = []
         
-        # For streaming in parallel
-        self.die = mp.Event()
-        self.corpus = DuploCorpus()
-        self.trial_id = self.corpus.meta_data.shape[0]
-        
         fn = '{}-imu.csv'.format(self.trial_id)
         path = os.path.join(self.corpus.paths['raw'], fn)
         frame_path = os.path.join(self.corpus.paths['video-frames'],
                                   '{}-rgb'.format(self.trial_id))
         timestamp_fn = '{}-timestamps.csv'.format(self.trial_id)
-        timestamp_path = os.path.join(self.corpus.paths['frame-timestamps'],
+        timestamp_path = os.path.join(self.corpus.paths['raw'],
                                       timestamp_fn)
-        self.processes = (mp.Process(target=wax9.stream,
-                                     args=(self.connected_devices, path, self.die)),
-                          mp.Process(target=ps.stream,
-                                     args=(frame_path, timestamp_path, self.die)))
+        self.processes = (mp.Process(target=ps.stream,
+                                     args=(frame_path, timestamp_path, self.die)),
+                          mp.Process(target=wax9.stream,
+                                     args=(self.connected_devices, path, self.die)),)
         
         self.content = self.defaultFrame()
         
@@ -234,7 +234,7 @@ class Application:
         
         master.place(relx=0.5, rely=0.5, anchor='center')
         
-        for p in self.streamProcesses:
+        for p in self.processes:
             p.start()
     
     
@@ -315,16 +315,12 @@ class Application:
         self.popup.destroy()
         self.popup = tk.Toplevel(self.parent)
         
-        fmtstr = 'Connection attempt failed! Try again?'
+        fmtstr = 'Connection attempt failed! Cycle the device and try again.'
         l = tk.Label(self.popup, text=fmtstr)
-        l.grid(row=0, columnspan=2)
+        l.grid(row=0)
         
-        func = lambda b=str(block): self.connectionAttemptDialog(b)
-        y = tk.Button(self.popup, text='Yes', command=func)
-        n = tk.Button(self.popup, text='No', command=self.cancel)
-        
-        y.grid(row=1, column=0)
-        n.grid(row=1, column=1)
+        ok = tk.Button(self.popup, text='OK', command=self.cancel)
+        ok.grid(row=1)
     
     
     def connectionSuccessDialog(self, imu_id):
@@ -403,7 +399,7 @@ class Application:
             socket.close()
         
         self.corpus.postprocess(self.trial_id, self.trial_metadata,
-                                self.imu_settings, self.imu2block)
+                                self.imu2block, self.imu_settings)
         self.corpus.makeImuFigs(self.trial_id)
         
         self.parent.destroy()
@@ -415,7 +411,7 @@ class Application:
         """
         
         self.die.set()
-        for p in self.streamProcesses:
+        for p in self.processes:
             p.join()
     
     
@@ -461,6 +457,10 @@ class Application:
             imu = dev_id.get()
             self.imu2block[imu] = block
             print('{}: {}'.format(block, self.imu2block[imu]))
+    
+    def getStreamData(self):
+        # TODO:
+        print("I am a dummy function!")
     
 
 if __name__ == '__main__':

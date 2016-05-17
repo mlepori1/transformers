@@ -14,7 +14,7 @@ import time
 import numpy as np
 import cv2
 
-import openni2
+from primesense import openni2
 
 
 def stream(frame_path, timestamp_path, die):
@@ -32,8 +32,8 @@ def stream(frame_path, timestamp_path, die):
         os.makedirs(frame_path)
     
     # Set up file for writing timestamps
-    f_rgb = open(timestamp_path, 'w')
-    rgb_writer = csv.writer(f_rgb)
+    f_timestamp = open(timestamp_path, 'w')
+    timestamp_writer = csv.writer(f_timestamp)
     
     # Open video streams
     print("Opening RGB camera...")
@@ -76,7 +76,7 @@ def stream(frame_path, timestamp_path, die):
         # Write to file
         fn = '{:06d}.png'.format(frame_index)
         cv2.imwrite(os.path.join(frame_path, fn), img_array)
-        rgb_writer.writerow((frametime, 0, frame_index, 'rgb'))
+        timestamp_writer.writerow((frametime, 0, frame_index, 'rgb'))
 
         frame_index += 1
 
@@ -85,5 +85,5 @@ def stream(frame_path, timestamp_path, die):
     stream.stop()
     openni2.unload()
     
-    f_rgb.close()
+    f_timestamp.close()
 

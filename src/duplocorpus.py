@@ -37,7 +37,7 @@ class DuploCorpus:
         self.initTypestructs()
         
         # Load metadata array
-        self.meta_data = self.readMetadata()
+        self.meta_data = self.readMetaData()
     
     
     def initTypestructs(self):
@@ -48,8 +48,7 @@ class DuploCorpus:
         self.metadata_types = [('trial id', 'i4'), ('participant id', 'U10'), 
                                ('birth month', 'U3'), ('birth year', 'U4'),
                                ('gender', 'U15'), ('has labels', 'i4')]       \
-                            + [(name, 'U10') for name in self.imu_ids]        \
-                            + [(name, 'i4') for name in self.camera_ids]
+                            + [(name, 'U10') for name in self.imu_ids]
         
         self.label_types = [('start', 'i'), ('end', 'i'), ('action', 'i'),
                             ('object', 'i'), ('target', 'i'),
@@ -106,7 +105,7 @@ class DuploCorpus:
                 os.makedirs(self.paths[key])
     
     
-    def readMetadata(self):
+    def readMetaData(self):
         """
         Read metadata from file and return as a numpy structured
         array.
@@ -182,10 +181,10 @@ class DuploCorpus:
         
         Returns:
         --------
-        [list(np array)] imus:
+        [dict(str->np array)] imus:
         """
         
-        imus = []
+        imus = {}
         for imu_id in self.imu_ids:
             
             if self.meta_data[imu_id][trial_id] == 'UNUSED':
@@ -236,7 +235,7 @@ class DuploCorpus:
         """
         
         for camera_id in self.camera_ids:
-            fn = '{}-{}'.format(trial_id, camera_id)
+            fn = '{}-{}.csv'.format(trial_id, camera_id)
             path = os.path.join(self.paths['frame-timestamps'], fn)
             frame_timestamps = np.loadtxt(path, delimiter=',')
         
@@ -346,7 +345,7 @@ class DuploCorpus:
                 # Append rows of zeros to the data matrix until the last row
                 # is the sample index. Then write the current sample to its
                 # place in the sample index.
-                for i in range(sample_idx - (len(imu_data) - 1)):
+                for i in range(sample_idx - (len(imu_data[dev_name]) - 1)):
                     dummy = [0.0] * len(sample)
                     dummy[1] = 1
                     imu_data[dev_name].append(dummy)
@@ -373,7 +372,7 @@ class DuploCorpus:
                 # Append rows of zeros to the data matrix until the last row
                 # is the sample index. Then write the current sample to its
                 # place in the sample index.
-                for i in range(sample_idx - (len(frame_timestamps) - 1)):
+                for i in range(sample_idx - (len(frame_timestamps[dev_name]) - 1)):
                     dummy = [0.0] * len(sample)
                     dummy[1] = 1
                     frame_timestamps[dev_name].append(dummy)
@@ -399,7 +398,7 @@ class DuploCorpus:
         print('')
         frame_fmt = os.path.join(self.paths['video-frames'], '{}-rgb'.format(trial_id), '%6d.png')
         video_path = os.path.join(self.paths['video-frames'], '{}-rgb.avi'.format(trial_id))
-        make_video = ['avconv', '-f', 'image2', '-i', frame_fmt, '-r', '30', video_path]
+        make_video = ['avconv', '-y', '-f', 'image2', '-i', frame_fmt, '-r', '30', video_path]
         subprocess.call(make_video)
         print('')
     
@@ -426,12 +425,13 @@ class DuploCorpus:
         self.writeImuSettings(trial_id, imu_settings)
         self.writeImuData(trial_id, imu_data)
         self.writeFrameTimestamps(trial_id, frame_timestamps)
-        self.makeVideo(trial_id)
-        
+                
         self.updateMetaData(trial_id, trial_metadata, imu2block)
+        
+        self.makeVideo(trial_id)
     
     
-    def updateMetadata(self, trial_id, trial_metadata=None, imu2block=None):
+    def updateMetaData(self, trial_id, trial_metadata=None, imu2block=None):
         """
         Append or revise a row in the metadata array, then save the new array.
         When this method is called with only one argument, it only updates the
@@ -444,6 +444,8 @@ class DuploCorpus:
         [dict(str->str)] imu2block:
         """
         
+        print(imu2block)
+        
         label_path = os.path.join(self.paths['labels'], str(trial_id) + '.csv')
         has_labels = int(os.path.exists(label_path))
 
@@ -451,10 +453,9 @@ class DuploCorpus:
         # haven't seen before
         if self.meta_data.shape[0] <= trial_id:
             assert(not trial_metadata is None and not imu2block is None)
-            block_mappings = (imu2block[imu_id] for imu_id in self.imu_ids)
-            meta_data = np.zeros(self.meta_data.shape[0],
-                                 dtype=self.meta_data.dtype)
-            meta_data[self.meta_data['trial_id']] = self.meta_data
+            block_mappings = tuple(imu2block[imu_id] for imu_id in self.imu_ids)
+            meta_data = np.zeros(trial_id + 1, dtype=self.meta_data.dtype)
+            meta_data[self.meta_data['trial id']] = self.meta_data
             meta_data[trial_id] = (trial_id,) + trial_metadata + (has_labels,) \
                                 + block_mappings  
             self.meta_data = meta_data
@@ -462,11 +463,11 @@ class DuploCorpus:
         else:
             self.meta_data[trial_id]['has labels'] = has_labels
             if not trial_metadata is None and not imu2block is None:
-                block_mappings = (imu2block[imu_id] for imu_id in self.imu_ids)
+                block_mappings = tuple(imu2block[imu_id] for imu_id in self.imu_ids)
                 self.meta_data[trial_id] = (trial_id,) + trial_metadata \
                                          + (has_labels,) + block_mappings
         
-        self.writeMetadata()
+        self.writeMetaData()
     
     
     def makeImuFigs(self, trial_id):
@@ -481,7 +482,7 @@ class DuploCorpus:
         
         # Load IMU data, RGB frame timestamps, and labels (empty list if no labels)
         imus = self.readImuData(trial_id)
-        rgb_timestamps = self.readRgbTimestamps(trial_id)
+        rgb_timestamps = self.readFrameTimestamps(trial_id)
         labels = self.readLabels(trial_id)
         
         # Define the output directory (for saving figures) and create it if it
@@ -504,7 +505,7 @@ class DuploCorpus:
             bad_data = imu[:,1] == 1
             imu = imu[np.logical_not(bad_data),:]
             
-            actions, imu_bounds = imuActionBounds(labels, rgb_timestamps, imu[:,0])
+            actions, imu_bounds = imuActionBounds(labels, rgb_timestamps[:,0], imu[:,0])
             
             # Plot accelerometer, gyroscope, magnetometer readings
             norm_data = imu[:,0:1]
