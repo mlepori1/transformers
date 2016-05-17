@@ -30,10 +30,31 @@ class DuploCorpus:
         self.initPaths()
         self.initLogger()
         
+        # ID strings for the recording devices
+        self.imu_ids = ('08F1', '095D', '090F', '0949')
+        self.camera_ids = ('rgb',) # 'depth')
+        
+        self.initTypestructs()
+        
         # Load metadata array
-        fn = os.path.join(self.paths['data'], 'meta-data.csv')
-        self.meta_data = self.readMetadata(fn)
-
+        self.meta_data = self.readMetadata()
+    
+    
+    def initTypestructs(self):
+        """
+        Set up typestruct variables for saving and loading data
+        """
+        
+        self.metadata_types = [('trial id', 'i4'), ('participant id', 'U10'), 
+                               ('birth month', 'U3'), ('birth year', 'U4'),
+                               ('gender', 'U15'), ('has labels', 'i4')]       \
+                            + [(name, 'U10') for name in self.imu_ids]        \
+                            + [(name, 'i4') for name in self.camera_ids]
+        
+        self.label_types = [('start', 'i'), ('end', 'i'), ('action', 'i'),
+                            ('object', 'i'), ('target', 'i'),
+                            ('obj_studs', 'S18'), ('tgt_studs', 'S18')]
+    
     
     def initLogger(self):
         """
@@ -72,32 +93,32 @@ class DuploCorpus:
         self.paths['figures'] = os.path.join(self.paths['root'], 'figures')
         self.paths['working'] = os.path.join(self.paths['root'], 'working')
         self.paths['data'] = os.path.join(self.paths['root'], 'data')
-        self.paths['imu'] = os.path.join(self.paths['data'], 'imu')
+        self.paths['imu-samples'] = os.path.join(self.paths['data'], 'imu-samples')
         self.paths['imu-settings'] = os.path.join(self.paths['data'], 'imu-settings')
-        self.paths['rgb'] = os.path.join(self.paths['data'], 'rgb')
-        self.paths['imu-raw'] = os.path.join(self.paths['data'], 'imu-raw')
+        self.paths['video-frames'] = os.path.join(self.paths['data'], 'video-frames')
+        self.paths['frame-timestamps'] = os.path.join(self.paths['data'], 'frame-timestamps')
+        self.paths['raw'] = os.path.join(self.paths['data'], 'raw')
         self.paths['labels'] = os.path.join(self.paths['data'], 'labels')
         
-        # Make directories that do not surely exist already
+        # Make directories if they don't exist
         for key in self.paths.keys():
             if not os.path.exists(self.paths[key]):
                 os.makedirs(self.paths[key])
     
     
-    def readMetadata(self, fn):
+    def readMetadata(self):
         """
-        Read metadata from specified file and return as a numpy structured
+        Read metadata from file and return as a numpy structured
         array.
-        
-        Args:
-        -----
-        [str] fn: Path to metadata file
         
         Returns:
         --------
         [np array] meta_data: Numpy structured array with the following fields
-          [int] trial_id:
-          [str] child_id:
+          [int] trial id:
+          [str] participant id:
+          [str] birth month:
+          [str] birth year:
+          [str] gender:
           [int] has_labels:
           [str] 08F1:
           [str] 095D:
@@ -106,13 +127,11 @@ class DuploCorpus:
         """
 
         meta_data = []
-        typestruct = [('trial_id', 'i4'), ('child_id', 'U10'),
-                      ('has_labels', 'i4'), ('08F1', 'U10'), ('095D', 'U10'),
-                      ('090F', 'U10'), ('0949', 'U10')]
         
         # Start a new, empty metadata array if a file doesn't already exist
+        fn = os.path.join(self.paths['data'], 'meta-data.csv')
         if not os.path.exists(fn):
-            return np.array(meta_data, dtype=typestruct)
+            return np.array(meta_data, dtype=self.metadata_types)
         
         # Read contents of the metadata file line-by-line
         with open(fn, 'r') as metafile:
@@ -120,7 +139,7 @@ class DuploCorpus:
             for row in metareader:
                 meta_data.append(tuple(row))
         
-        return np.array(meta_data, dtype=typestruct)
+        return np.array(meta_data, dtype=self.metadata_types)
     
     
     def writeMetaData(self):
@@ -131,30 +150,30 @@ class DuploCorpus:
         
         # Write contents of the metadata array to file line-by-line
         fn = os.path.join(self.paths['data'], 'meta-data.csv')
-        with open(fn, 'wb') as metafile:
+        with open(fn, 'w') as metafile:
             metawriter = csv.writer(metafile)
             for row in self.meta_data:
                 metawriter.writerow(row)
     
     
-    def writeImuSettings(self, trial_id, dev_settings):
+    def writeImuSettings(self, trial_id, imu_settings):
         """        
         Args:
         -----
         [int] trial_id: Trial identifier. This is the trial's index in the
           corpus metadata array.
-        [dict(str->str)] dev_settings: Dict mapping device IDs to recorded
-          settings 
+        [np array] dev_settings:
         """
         
-        fn = os.path.join(self.paths['imu-settings'], '{}.txt'.format(trial_id))
-        with open(fn, 'wb') as settings_file:
-            for settings in dev_settings.values():
-                settings_file.write(settings)
-                settings_file.write('\n')
+        # Write settings array to CSV line-by-line
+        fn = os.path.join(self.paths['imu-settings'], '{}.csv'.format(trial_id))
+        with open(fn, 'w') as settings_file:
+            settings_writer = csv.writer(settings_file)
+            for row in imu_settings:
+                settings_writer.writerow(row)
     
     
-    def readImuData(self, trial_id, devices):
+    def readImuData(self, trial_id):
         """
         Args:
         -----
@@ -166,42 +185,45 @@ class DuploCorpus:
         [list(np array)] imus:
         """
         
-        fn = os.path.join(self.paths['imu'], '{}.csv'.format(trial_id))
-        imu_data = np.loadtxt(fn, delimiter=',')
-        
-        # FIXME: Assert len devices evenly divides number samples
         imus = []
-        sample_len = int(imu_data.shape[1] / len(devices))
-        for i, device in enumerate(devices):
-            start = i * sample_len
-            end = (i + 1) * sample_len
-            imu = imu_data[:,start:end]
+        for imu_id in self.imu_ids:
             
-            imu[:,3] = imu[:,3] / 65536.0   # Convert sample timestamp to seconds
-            imu[:,4:7] = imu[:,4:7] / 4096.0    # Convert acceleration samples to g
-            imu[:,7:10] = imu[:,7:10] * 0.07  # Convert angular velocity samples to deg/s
-            imu[:,10:13] = imu[:,10:13] * 1e-3  # Convert magnetic field to units of mGauss
+            if self.meta_data[imu_id][trial_id] == 'UNUSED':
+                continue
             
-            imus.append(imu)
+            fn = '{}-{}.csv'.format(trial_id, imu_id)
+            path = os.path.join(self.paths['imu-samples'], fn)
+            imu_data = np.loadtxt(path, delimiter=',')
+            
+            # FIXME: convert intelligently
+            imu_data[:,3] = imu_data[:,3] / 65536.0   # Convert sample timestamp to seconds
+            imu_data[:,4:7] = imu_data[:,4:7] / 4096.0    # Convert acceleration samples to g
+            imu_data[:,7:10] = imu_data[:,7:10] * 0.07  # Convert angular velocity samples to deg/s
+            imu_data[:,10:13] = imu_data[:,10:13] * 1e-3  # Convert magnetic field to units of mGauss
+            
+            imus[imu_id] = imu_data
         
         return imus
 
 
-    def writeImuData(self, trial_id, imu_data, num_imus, sample_len):
+    def writeImuData(self, trial_id, imu_data):
         """
         Args:
         -----
         [int] trial_id: Trial identifier. This is the trial's index in the
           corpus metadata array.
-        [np array] imu_data:
+        [dict(str->np array)] imu_data:
         """
         
-        fn = os.path.join(self.paths['imu'], '{}.csv'.format(trial_id))
-        fmtstr = num_imus * (['%15f'] + (sample_len - 1) * ['%i'])
-        np.savetxt(fn, imu_data, delimiter=',', fmt=fmtstr)
+        for name, data in imu_data.items():
+            fn = '{}-{}.csv'.format(trial_id, name)
+            path = os.path.join(self.paths['imu-samples'], fn)
+            sample_len = data.shape[1]
+            fmtstr = ['%15f'] + (sample_len - 1) * ['%i']
+            np.savetxt(path, data, delimiter=',', fmt=fmtstr)
     
     
-    def readRgbTimestamps(self, trial_id):
+    def readFrameTimestamps(self, trial_id):
         """
         Args:
         -----
@@ -210,26 +232,32 @@ class DuploCorpus:
                 
         Returns:
         --------
-        [np array] rgb_timestamps:
+        [dict(str->np array)] frame_timestamps:
         """
         
-        fn = os.path.join(self.paths['rgb'], str(trial_id), 'frame-timestamps.csv')
-        rgb_timestamps = np.loadtxt(fn, delimiter=',')
+        for camera_id in self.camera_ids:
+            fn = '{}-{}'.format(trial_id, camera_id)
+            path = os.path.join(self.paths['frame-timestamps'], fn)
+            frame_timestamps = np.loadtxt(path, delimiter=',')
         
-        return rgb_timestamps
+        return frame_timestamps
         
     
-    def writeRgbTimestamps(self, trial_id, rgb_timestamps):
+    def writeFrameTimestamps(self, trial_id, frame_timestamps):
         """
         Args:
         -----
         [int] trial_id: Trial identifier. This is the trial's index in the
           corpus metadata array.
-        [np array] rgb_timestamps:
+        [dict(np array)] img_timestamps:
         """
         
-        fn = os.path.join(self.paths['rgb'], str(trial_id), 'frame-timestamps.csv')
-        np.savetxt(fn, rgb_timestamps, delimiter=',', fmt='%15f')
+        for name, timestamps in frame_timestamps.items():
+            fn = '{}-{}.csv'.format(trial_id, name)
+            path = os.path.join(self.paths['frame-timestamps'], fn)
+            sample_len = timestamps.shape[1]
+            fmtstr = ['%15f'] + (sample_len - 1) * ['%i']
+            np.savetxt(path, timestamps, delimiter=',', fmt=fmtstr)
     
     
     def readLabels(self, trial_id):
@@ -266,14 +294,11 @@ class DuploCorpus:
         
         # 'studs' are length-18 strings because 18 is an upper bound on the
         # description length for this attribute: max 8 studs + 8 spaces + 2 parens
-        typestruct = [('start', 'i'), ('end', 'i'), ('action', 'i'),
-                      ('object', 'i'), ('target', 'i'), ('obj_studs', 'S18'),
-                      ('tgt_studs', 'S18')]
-        labels = np.loadtxt(fn, delimiter=',', dtype=typestruct)
+        labels = np.loadtxt(fn, delimiter=',', dtype=self.label_types)
         return labels
     
     
-    def parseRawData(self, trial_id, imu_dev_names, img_dev_names):
+    def parseRawData(self, trial_id):
         """
         Read raw data from file and convert to numpy arrays
     
@@ -287,7 +312,7 @@ class DuploCorpus:
     
         Returns:
         --------
-        [np array] imu_data: Size n-by-p*d, where n is the number of IMU
+        [dict(str->np array)] imu_data: Size n-by-p*d, where n is the number of IMU
           samples, p is the number of IMU devices, and d is the length of one IMU
           sample. Each holds p length-d IMU samples, concatenated in the order
           seen in imu_dev_names
@@ -296,22 +321,22 @@ class DuploCorpus:
         [int] sample_len: Length of one IMU sample (d)
         """
         
-        num_imu_devs = len(imu_dev_names)
-        imu_name2idx = {imu_dev_names[i]: i for i in range(num_imu_devs)}
-        path = os.path.join(self.paths['imu-raw'], '{}.csv'.format(trial_id))
-        imu_data = []
+        imu_data = {}
+        path = os.path.join(self.paths['raw'], '{}-imu.csv'.format(trial_id))
         with open(path, 'r') as csvfile:
             csvreader = csv.reader(csvfile)
             for row in csvreader:
                 
                 timestamp = float(row[0])
                 dev_name = row[-1]
+                
+                if not dev_name in imu_data:
+                    imu_data[dev_name] = []
     
                 # IMU samples are one-indexed, so subtract 1 to convert to
                 # python's zero-indexing
                 sample_idx = int(row[2]) - 1
                 sample = [timestamp] + [int(x) for x in row[1:-1]]
-                sample_len = len(sample)
                 
                 # Don't try to interpret rows that represent bad samples
                 error = int(row[1])
@@ -321,41 +346,48 @@ class DuploCorpus:
                 # Append rows of zeros to the data matrix until the last row
                 # is the sample index. Then write the current sample to its
                 # place in the sample index.
-                imu_dev_idx = imu_name2idx[row[-1]]
                 for i in range(sample_idx - (len(imu_data) - 1)):
-                    dummy = [0.0] * sample_len
+                    dummy = [0.0] * len(sample)
                     dummy[1] = 1
-                    imu_data.append([dummy] * num_imu_devs)
-                imu_data[sample_idx][imu_dev_idx] = sample
+                    imu_data[dev_name].append(dummy)
+                imu_data[dev_name][sample_idx] = sample
         
-        num_img_devs = len(img_dev_names)
-        img_name2idx = {img_dev_names[i]: i for i in range(num_img_devs)}
-        path = os.path.join(self.paths['rgb'], str(trial_id), 'frame_timestamps.csv')
-        img_timestamps = []
+        for key, entry in imu_data.items():
+            imu_data[key] = np.array(entry)
+        
+        path = os.path.join(self.paths['raw'], '{}-timestamps.csv'.format(trial_id))
+        frame_timestamps = {}
         with open(path, 'r') as csvfile:
             csvreader = csv.reader(csvfile)
             for row in csvreader:
                 timestamp = float(row[0])
                 dev_name = row[-1]
                 
-                sample_idx = int(row[1])
+                if not dev_name in frame_timestamps:
+                    frame_timestamps[dev_name] = []
+                
+                # Video frames are zero-indexed
+                sample_idx = int(row[2])
+                sample = [timestamp] + [int(x) for x in row[1:-1]]
                 
                 # Append rows of zeros to the data matrix until the last row
                 # is the sample index. Then write the current sample to its
                 # place in the sample index.
-                img_dev_idx = img_name2idx[dev_name]
-                for i in range(sample_idx - (len(img_timestamps) - 1)):
-                    img_timestamps.append([0.0] * num_img_devs)
-                img_timestamps[sample_idx][img_dev_idx] = timestamp
+                for i in range(sample_idx - (len(frame_timestamps) - 1)):
+                    dummy = [0.0] * len(sample)
+                    dummy[1] = 1
+                    frame_timestamps[dev_name].append(dummy)
+                frame_timestamps[dev_name][sample_idx] = sample
         
-        # Flatten nested lists in each row of IMU data
-        imu_data = [[datum for sample in row for datum in sample] for row in imu_data]
-        return (np.array(imu_data), np.array(img_timestamps), sample_len)
+        for key, entry in frame_timestamps.items():
+            frame_timestamps[key] = np.array(entry)
+        
+        return (imu_data, frame_timestamps)
     
     
-    def makeRgbVideo(self, trial_id):
+    def makeVideo(self, trial_id):
         """
-        Convert RGB frames to avi video
+        Convert frames to avi video
         
         Args:
         -----
@@ -365,14 +397,14 @@ class DuploCorpus:
         
         # NOTE: This depends on the avconv utility for now
         print('')
-        frame_fmt = os.path.join(self.paths['rgb'], str(trial_id), '%6d.png')
-        video_path = os.path.join(self.paths['rgb'], '{}.avi'.format(trial_id))
+        frame_fmt = os.path.join(self.paths['video-frames'], '{}-rgb'.format(trial_id), '%6d.png')
+        video_path = os.path.join(self.paths['video-frames'], '{}-rgb.avi'.format(trial_id))
         make_video = ['avconv', '-f', 'image2', '-i', frame_fmt, '-r', '30', video_path]
         subprocess.call(make_video)
         print('')
     
     
-    def postprocess(self, child_id, trial_id, imu_devs, imu_settings, img_dev_name, imu2block):
+    def postprocess(self, trial_id, trial_metadata, imu2block, imu_settings):
         """
         []
         
@@ -380,31 +412,64 @@ class DuploCorpus:
         -----
         [int] trial_id: Trial identifier. This is the trial's index in the
           corpus metadata array.
+        [tuple(str)] trial_metadata:
+          [0] participant id
+          [1] birth month
+          [2] birth year
+          [3] gender
+        [dict(str->str)] imu_settings:
+        [dict(str->str)] imu2block:
         """
         
-        imu_data, rgb_timestamps, sample_len = self.parseRawData(trial_id,
-                                               imu_devs.keys(),(img_dev_name,))
+        imu_data, frame_timestamps = self.parseRawData(trial_id)
         
         self.writeImuSettings(trial_id, imu_settings)
-        self.writeImuData(trial_id, imu_data, len(imu_devs), sample_len)
-        self.writeRgbTimestamps(trial_id, rgb_timestamps)
-        self.makeRgbVideo(trial_id)
+        self.writeImuData(trial_id, imu_data)
+        self.writeFrameTimestamps(trial_id, frame_timestamps)
+        self.makeVideo(trial_id)
+        
+        self.updateMetaData(trial_id, trial_metadata, imu2block)
+    
+    
+    def updateMetadata(self, trial_id, trial_metadata=None, imu2block=None):
+        """
+        Append or revise a row in the metadata array, then save the new array.
+        When this method is called with only one argument, it only updates the
+        'has labels' field.
+        
+        Args:
+        -----
+        [int] trial_id:
+        [tuple(int)] trial_metadata:
+        [dict(str->str)] imu2block:
+        """
         
         label_path = os.path.join(self.paths['labels'], str(trial_id) + '.csv')
         has_labels = int(os.path.exists(label_path))
 
-        # Update metadata array and write to file
-        block_mappings = (imu2block['08F1'], imu2block['095D'],
-                          imu2block['090F'], imu2block['0949'])
-        num_rows = max(self.meta_data.shape[0], trial_id + 1)
-        meta_data = np.zeros(num_rows, dtype=self.meta_data.dtype)
-        meta_data[self.meta_data['trial_id']] = self.meta_data
-        meta_data[trial_id] = (trial_id, child_id, has_labels) + block_mappings    
-        self.meta_data = meta_data
-        self.writeMetaData()
+        # Append a new row to the metadata array if the trial ID is one we
+        # haven't seen before
+        if self.meta_data.shape[0] <= trial_id:
+            assert(not trial_metadata is None and not imu2block is None)
+            block_mappings = (imu2block[imu_id] for imu_id in self.imu_ids)
+            meta_data = np.zeros(self.meta_data.shape[0],
+                                 dtype=self.meta_data.dtype)
+            meta_data[self.meta_data['trial_id']] = self.meta_data
+            meta_data[trial_id] = (trial_id,) + trial_metadata + (has_labels,) \
+                                + block_mappings  
+            self.meta_data = meta_data
+        # If we've seen the trial ID before, we're revising a row
+        else:
+            self.meta_data[trial_id]['has labels'] = has_labels
+            if not trial_metadata is None and not imu2block is None:
+                block_mappings = (imu2block[imu_id] for imu_id in self.imu_ids)
+                self.meta_data[trial_id] = (trial_id,) + trial_metadata \
+                                         + (has_labels,) + block_mappings
+        
+        self.writeMetadata()
     
     
-    def makeImuFigs(self, trial_id, devices):
+    def makeImuFigs(self, trial_id):
         """
         Save plots of IMU acceleration, angular velocity, magnetic field
         (With annotations in the background, if they exist)
@@ -412,11 +477,10 @@ class DuploCorpus:
         Args:
         -----
         [int] trial_id:
-        [list(str)] devices:
         """
         
         # Load IMU data, RGB frame timestamps, and labels (empty list if no labels)
-        imus = self.readImuData(trial_id, devices)
+        imus = self.readImuData(trial_id)
         rgb_timestamps = self.readRgbTimestamps(trial_id)
         labels = self.readLabels(trial_id)
         
@@ -434,11 +498,7 @@ class DuploCorpus:
         norm_text = ('Square L2 norm', '\| \cdot \|', ' ')
         
         # Convert readings to natural units and plot, for each IMU selected
-        selected_devices = range(len(imus))
-        for i in selected_devices:
-            
-            imu = imus[i]
-            name = devices[i]
+        for name, imu in imus.items():
             
             # Check the error column for bad samples
             bad_data = imu[:,1] == 1
@@ -473,16 +533,16 @@ class DuploCorpus:
         
         return
     
-    
+    """
     def makeCorrelationFigs(self, trial_id, devices):
-        """
+        "
         Calculate pointwise cosine similarity for all pairs of devices in imus.
         
         Args:
         -----
         [int] trial_id:
         [list(str)] devices:
-        """
+        "
         
         NUM_LABELS = 7
         
@@ -572,6 +632,7 @@ class DuploCorpus:
                 plt.close()
         
         return
+        """
     
     
     def makeStateVisualizations(self, trial_id):
@@ -611,7 +672,7 @@ class DuploCorpus:
         """
         
         # Get full path names for RGB frames in this trial
-        rgb_dir = os.path.join(self.paths['rgb'], str(trial_id))
+        rgb_dir = os.path.join(self.paths['video-frames'], '{}-rgb'.format(trial_id))
         if not os.path.exists(rgb_dir):
             return []
         
@@ -687,7 +748,7 @@ class DuploCorpus:
                         print('  {}: {}'.format(i, b))
                     objects_str = input('Select the object block(s): ')
                     if len(objects_str.split()) > 1:
-                        objects = (int(x) for x in targets_str.split())
+                        objects = (int(x) for x in objects_str.split())
                         target = 0
                         
                         # Write label and print to console
@@ -748,12 +809,4 @@ class DuploCorpus:
 
 if __name__ == '__main__':
     c = DuploCorpus()
-    c.makeStateVisualizations(1)
-    #devs = ('WAX9-08F1', 'WAX9-0949', 'WAX9-095D', 'WAX9-090F')
-    #imus = c.readImuData(4, devs)
-    #dropped = fractionDropped(imus)
-    #c.makeStateVisualizations(1)
-    #c.makeVideoLabels(1)
-    
-    #imu_data, rgb_timestamps, sample_len = c.parseRawData(3, devs, ('IMG-RGB',))
-    #c.makeImuFigs(4, devs)
+        
