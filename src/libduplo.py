@@ -20,19 +20,19 @@ def fractionDropped(imus):
     
     Args:
     -----
-    [list(np array)] imus: List of IMU samples
+    [dict(str->np array)] imus: Dictionary mapping IMU IDs to data samples
     
     Returns:
     --------
-    [np vector] fraction_dropped: The i-th element is the ratio of missing
-      samples in the i-th IMU.
+    [dict(str->float)] fraction_dropped: Dictionary mapping IMU IDs to fraction
+      of missing samples
     """
     
-    fraction_dropped = np.zeros(len(imus))
-    for i, imu in enumerate(imus):
-        num_samples = float(imu.shape[0])
-        num_dropped = float(imu[:,1].sum())
-        fraction_dropped[i] = num_dropped / num_samples
+    fraction_dropped = {}
+    for imu_id, samples in imus.items():
+        num_samples = float(samples.shape[0])
+        num_dropped = float(samples[:,1].sum())
+        fraction_dropped[imu_id] = num_dropped / num_samples
     
     return fraction_dropped
 

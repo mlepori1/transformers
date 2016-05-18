@@ -135,6 +135,7 @@ class DuploCorpus:
         # Read contents of the metadata file line-by-line
         with open(fn, 'r') as metafile:
             metareader = csv.reader(metafile)
+            metareader.next()   # Skip header
             for row in metareader:
                 meta_data.append(tuple(row))
         
@@ -151,6 +152,7 @@ class DuploCorpus:
         fn = os.path.join(self.paths['data'], 'meta-data.csv')
         with open(fn, 'w') as metafile:
             metawriter = csv.writer(metafile)
+            metawriter.writerow(self.meta_data.dtype.names)
             for row in self.meta_data:
                 metawriter.writerow(row)
     
@@ -168,6 +170,7 @@ class DuploCorpus:
         fn = os.path.join(self.paths['imu-settings'], '{}.csv'.format(trial_id))
         with open(fn, 'w') as settings_file:
             settings_writer = csv.writer(settings_file)
+            settings_writer.writerow(imu_settings.dtype.names)
             for row in imu_settings:
                 settings_writer.writerow(row)
     
@@ -192,7 +195,8 @@ class DuploCorpus:
             
             fn = '{}-{}.csv'.format(trial_id, imu_id)
             path = os.path.join(self.paths['imu-samples'], fn)
-            imu_data = np.loadtxt(path, delimiter=',')
+            # Skip the first line because it's just the column names
+            imu_data = np.loadtxt(path, delimiter=',', skiprows=1)
             
             # FIXME: convert intelligently
             imu_data[:,3] = imu_data[:,3] / 65536.0   # Convert sample timestamp to seconds
@@ -219,7 +223,10 @@ class DuploCorpus:
             path = os.path.join(self.paths['imu-samples'], fn)
             sample_len = data.shape[1]
             fmtstr = ['%15f'] + (sample_len - 1) * ['%i']
-            np.savetxt(path, data, delimiter=',', fmt=fmtstr)
+            col_names = 'global timestamp,error,sample index,imu timestamp,'\
+                        'ax,ay,az,gx,gy,gz,mx,my,mz,voltage,temp,pressure'
+            np.savetxt(path, data, delimiter=',', fmt=fmtstr, header=col_names,
+                       comments='')
     
     
     def readFrameTimestamps(self, trial_id):
@@ -237,7 +244,8 @@ class DuploCorpus:
         for camera_id in self.camera_ids:
             fn = '{}-{}.csv'.format(trial_id, camera_id)
             path = os.path.join(self.paths['frame-timestamps'], fn)
-            frame_timestamps = np.loadtxt(path, delimiter=',')
+            # Skip the first line because it's just the column names
+            frame_timestamps = np.loadtxt(path, delimiter=',', skiprows=1)
         
         return frame_timestamps
         
@@ -256,7 +264,9 @@ class DuploCorpus:
             path = os.path.join(self.paths['frame-timestamps'], fn)
             sample_len = timestamps.shape[1]
             fmtstr = ['%15f'] + (sample_len - 1) * ['%i']
-            np.savetxt(path, timestamps, delimiter=',', fmt=fmtstr)
+            col_names = 'global timestamp,error,sample index'
+            np.savetxt(path, timestamps, delimiter=',', fmt=fmtstr,
+                       header=col_names, comments='')
     
     
     def readLabels(self, trial_id):
@@ -293,7 +303,9 @@ class DuploCorpus:
         
         # 'studs' are length-18 strings because 18 is an upper bound on the
         # description length for this attribute: max 8 studs + 8 spaces + 2 parens
-        labels = np.loadtxt(fn, delimiter=',', dtype=self.label_types)
+        # the first row is the column names, so skip it
+        labels = np.loadtxt(fn, delimiter=',', dtype=self.label_types,
+                            skiprows=1)
         return labels
     
     
@@ -443,9 +455,7 @@ class DuploCorpus:
         [tuple(int)] trial_metadata:
         [dict(str->str)] imu2block:
         """
-        
-        print(imu2block)
-        
+                
         label_path = os.path.join(self.paths['labels'], str(trial_id) + '.csv')
         has_labels = int(os.path.exists(label_path))
 
@@ -717,6 +727,10 @@ class DuploCorpus:
         label_fn = os.path.join(self.paths['labels'], '{}.csv'.format(trial_id))
         with open(label_fn, 'w') as label_file:
             labelwriter = csv.writer(label_file)
+            
+            col_names = ('start index', 'end index', 'action', 'object',
+                         'target', 'object studs', 'target studs')
+            labelwriter.writerow(col_names)
         
             action_started = False
             frame_idx = 0
@@ -803,9 +817,8 @@ class DuploCorpus:
                         print('End of video')
                 elif user_in == ord('q'):   # Exit
                     break
-            
-        self.meta_data['has_labels'][trial_id] = 1    
-        self.writeMetaData()
+        
+        self.updateMetaData(trial_id)
 
 
 if __name__ == '__main__':
