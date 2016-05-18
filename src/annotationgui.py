@@ -82,9 +82,9 @@ class Application:
         cur_fn = self.rgb_frame_fns[self.cur_frame]
         image = Image.open(cur_fn)
         photo = ImageTk.PhotoImage(image)
-        label = Label(rgb_frame, image=photo)
-        label.image = photo
-        label.pack()
+        self.label = Label(rgb_frame, image=photo)
+        self.label.image = photo
+        self.label.pack()
         
         if not self.action_started:
             button_text = 'Action started'
@@ -92,9 +92,9 @@ class Application:
         else:
             button_text = 'Action ended'
             button_cmd = self.endAction
-        start_end = Button(rgb_frame, text=button_text, command=button_cmd,
+        self.start_end = Button(rgb_frame, text=button_text, command=button_cmd,
                            default=ACTIVE)
-        start_end.pack()
+        self.start_end.pack()
         
         rgb_frame.pack(side=LEFT)
         
@@ -164,9 +164,11 @@ class Application:
         else:
             self.cur_frame = 0
         
-        self.content.destroy()
-        self.content = self.defaultFrame()
-        self.drawAnnotator()
+        cur_fn = self.rgb_frame_fns[self.cur_frame]
+        image = Image.open(cur_fn)
+        photo = ImageTk.PhotoImage(image)
+        self.label.configure(image=photo)
+        self.label.image = photo
     
     
     def forward(self, event=None):
@@ -175,28 +177,26 @@ class Application:
         else:
             self.cur_frame = len(self.rgb_frame_fns) - 1
         
-        self.content.destroy()
-        self.content = self.defaultFrame()
-        self.drawAnnotator()
+        cur_fn = self.rgb_frame_fns[self.cur_frame]
+        image = Image.open(cur_fn)
+        photo = ImageTk.PhotoImage(image)
+        self.label.configure(image=photo)
+        self.label.image = photo
     
     def startAction(self):
         print('Action started')
         self.action_started = True
         
-        # Redraw frame
-        self.content.destroy()
-        self.content = self.defaultFrame()
-        self.drawAnnotator()
+        # Redraw button
+        self.start_end.configure(text='End action', command=self.endAction)
     
     
     def endAction(self):
         print('Action ended')
         self.action_started = False
         
-        # Redraw frame
-        self.content.destroy()
-        self.content = self.defaultFrame()
-        self.drawAnnotator()
+        # Redraw button
+        self.start_end.configure(text='Start action', command=self.startAction)
         
 
 if __name__ == '__main__':

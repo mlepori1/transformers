@@ -119,7 +119,6 @@ def parseSettings(settings_str):
       [int] threshold:
     """
     
-    str_labels = ('name', 'mac')
     int_labels = ('ratex', 'data mode', 'sleep mode', 'threshold')
     sensors = ('accel', 'gyro', 'mag')
     
@@ -139,7 +138,10 @@ def parseSettings(settings_str):
     for line in lines:
         var_type = line[0].lower()
         
-        if var_type in str_labels:
+        if var_type == 'name':
+            data = line[1].split(', ')[0]
+            parsed_settings[var_type] = data
+        elif var_type == 'mac':
             data = line[1]
             parsed_settings[var_type] = data
         elif var_type in int_labels:
