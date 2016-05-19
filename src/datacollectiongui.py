@@ -152,12 +152,13 @@ class Application:
         block_image_fns = sorted(glob.glob(os.path.join('img', '*.png')))
         for i, filename in enumerate(block_image_fns):
             # filename format is [4,6,8]block-[1,2].png
-            name = os.path.splitext(filename)[0]
+            name = os.path.splitext(os.path.basename(filename))[0]
             button_row = int(name[-1])
-            button_column = int(name[0]) / 2 - 1
+            button_column = int(name[0]) / 2 - 2
             block_image = ImageTk.PhotoImage(Image.open(filename))
             b = tk.Radiobutton(master, image=block_image, variable=self.task,
-                               value=i)
+                               value=i+1)
+            b.image = block_image
             b.grid(row=button_row, column=button_column)
         
         # Navigation buttons: next, back
@@ -189,8 +190,9 @@ class Application:
         commands = []
         for i, block in enumerate(self.active_blocks):
             
-            id_label = tk.Label(master, text='{} rectangle'.format(block))
-            id_label.grid(sticky=tk.E, row=i+1, column=0)
+            #id_label = tk.Label(master, text='{} rectangle'.format(block))
+            id_label = tk.Label(master, text='\t\t', background=block)
+            id_label.grid(row=i+1, column=0)
             
             self.dev_ids[block] = tk.StringVar(master)
             self.dev_ids[block].set(self.corpus.imu_ids[i])
@@ -320,7 +322,7 @@ class Application:
         imu_address = ':'.join(mac_prefix + [imu_id[0:2], imu_id[2:4]])
         socket, name = wax9.connect(imu_address)
         if name is None:
-            self.connectionFailureDialog(block)
+            self.connectionFailureDialog()
         else:
             self.connected_devices[imu_id] = socket
             self.block2connectedIMU[block] = imu_id
