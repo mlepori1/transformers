@@ -30,125 +30,174 @@ class Application:
         [tk window] parent: Parent tkinter object
         """
         
+        # Define parent window and resize
         self.parent = parent
+        self.parent.geometry('{}x{}'.format(768, 576))
         
-        # Handle for a popup window (we only want one at a time)
+        # Window content
+        self.content_frame = tk.Frame(self.parent)
+        self.navigation_frame = tk.Frame(self.parent)
         self.popup = None
         
-        self.cur_position = 0
-        self.controlflow = (self.drawInfoContent, self.drawTaskContent,
-                            self.drawImuContent, self.drawStreamContent)
+        # These structures define how the data collection screens progress
+        self.interface_index = 0
+        self.interfaces = (self.defineInfoInterface, self.defineTaskInterface,
+                           self.defineImuInterface, self.defineStreamInterface)
         self.getters = (self.getMetaData, self.getTaskData, self.getImuData,
                         self.getStreamData)
         
-        self.window_w = 768
-        self.window_h = 576
-        self.parent.geometry('{}x{}'.format(self.window_w, self.window_h))
-        
-        # For streaming in parallel
-        self.die = mp.Event()
-        self.q = mp.Queue()
+        # Define some constants        
         self.corpus = DuploCorpus()
-        self.trial_id = self.corpus.meta_data.shape[0]
-        self.stream_stopped_by_user = False
+        blocks = ('red', 'yellow', 'green', 'blue')
+        self.task2block = {1: blocks[:2], 2: blocks[2:], 3: blocks,
+                           4:blocks, 5: blocks, 6: blocks}
+        self.imu2block = {imu: 'UNUSED' for imu in self.corpus.imu_ids}
         
-        # This is updated after prompting user for input
-        self.connected_devices = {}
-        self.camera_ids = ('rgb',) #'depth')
-        self.imu2block = {x: 'UNUSED' for x in self.corpus.imu_ids}
-        self.block2connectedIMU = {}
-        self.frame_vars = ()
-        self.active_blocks = ()
-        self.trial_metadata = ()
+        #===[DATA FIELDS]======================================================
+        self.participant_id_field = None
+        self.birth_month_field = None
+        self.birth_year_field = None
+        self.gender_field = None
+        
+        self.task_field = None
+        
+        self.block2imu_id_field = {}
+        
+        #===[DATA GATHERED FROM FIELDS]========================================
+        self.participant_id = None
+        self.birth_month = None
+        self.birth_year = None
+        self.gender = None
+        
+        self.task = None
+        self.active_blocks = None
+        
+        self.block2imu_id = {}
+        self.block2connected_imu = {}
+        self.imu_id2socket = {}
         self.imu_settings = []
         
-        fn = '{}-imu.csv'.format(self.trial_id)
-        path = os.path.join(self.corpus.paths['raw'], fn)
-        self.frame_path = os.path.join(self.corpus.paths['video-frames'],
-                                  '{}-rgb'.format(self.trial_id))
+        # For streaming in parallel: die tells all streaming processes to quit,
+        # q is used to communicate between rgb stream and main process
+        self.die = mp.Event()
+        self.die_set_by_user = False
+        self.q = mp.Queue()
+        
+        # Define paths used for file I/O when streaming data
+        self.trial_id = self.corpus.meta_data.shape[0]
+        raw_imu_fn = '{}-imu.csv'.format(self.trial_id)
+        raw_imu_path = os.path.join(self.corpus.paths['raw'], raw_imu_fn)
+        frame_fn = '{}-rgb'.format(self.trial_id)
+        frame_path = os.path.join(self.corpus.paths['video-frames'], frame_fn)
         timestamp_fn = '{}-timestamps.csv'.format(self.trial_id)
-        timestamp_path = os.path.join(self.corpus.paths['raw'],
-                                      timestamp_fn)
-        self.processes = (mp.Process(target=ps.stream,
-                                     args=(self.frame_path, timestamp_path, self.die, self.q)),
-                          mp.Process(target=wax9.stream,
-                                     args=(self.connected_devices, path, self.die)),)
+        timestamp_path = os.path.join(self.corpus.paths['raw'], timestamp_fn)
         
-        self.content = self.defaultFrame()
+        # Define processes that stream from IMUs and camera
+        videostream_args = (frame_path, timestamp_path, self.die, self.q)
+        imustream_args = (self.imu_id2socket, raw_imu_path, self.die)
+        self.processes = (mp.Process(target=ps.stream, args=videostream_args),
+                          mp.Process(target=wax9.stream, args=imustream_args),)
+                          
+        # Start drawing interfaces
+        interface = self.interfaces[self.interface_index]
+        interface()
+    
+    
+    def drawInterface(self):
+        """
+        Draw main content and navigation frames onto the parent
+        """
         
-        cur_frame = self.controlflow[self.cur_position]
-        cur_frame()
+        self.content_frame.place(relx=0.5, rely=0.5, anchor='center')
+        self.navigation_frame.pack(fill=tk.X, anchor=tk.S)
     
     
-    def defaultFrame(self):
-        return tk.Frame(self.parent)
+    def clearInterface(self):
+        """
+        Destroy and re-initialize main content and navigation frames.
+        """
+        
+        self.content_frame.destroy()
+        self.navigation_frame.destroy()
+        
+        self.content_frame = tk.Frame(self.parent)
+        self.navigation_frame = tk.Frame(self.parent)
     
     
-    def drawInfoContent(self):
+    def defineInfoInterface(self):
         """
         Draw the metadata collection window.
         """
         
-        master = self.content
+        master = self.content_frame
         
-        # Metadata category labels
-        user_text = "Please fill in the following fields for this child."
+        # Draw instructions
+        user_text = 'Please enter the following information for this child.'
         instructions = tk.Label(master, text=user_text)
-        pnum_label = tk.Label(master, text="Participant number")
-        dob_label = tk.Label(master, text="Date of birth")
-        gender_label = tk.Label(master, text="Gender")
+        instructions.grid(row=0, columnspan=3)
         
-        # Set up widgets for metadata collection
-        self.participant_num = tk.Entry(master)
+        # Draw participant ID field
+        participant_id_label = tk.Label(master, text='Participant ID')
+        participant_id_label.grid(sticky=tk.E, row=1, column=0)
+        self.participant_id_field = tk.Entry(master)
+        self.participant_id_field.grid(sticky=tk.W, row=1, column=1, columnspan=2)
         
+        # Draw birth month field
+        birth_date_label = tk.Label(master, text='Date of birth')
+        birth_date_label.grid(sticky=tk.E, row=2, column=0)
         months = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug',
                   'Sep', 'Oct', 'Nov', 'Dec')
-        self.dob_month = tk.StringVar(master)
-        self.dob_month.set(months[0])
-        month_menu = apply(tk.OptionMenu, (master, self.dob_month) + months)
-        
-        years = (2010, 2011, 2013, 2014)
-        self.dob_year = tk.StringVar(master)
-        self.dob_year.set(years[0])
-        year_menu = apply(tk.OptionMenu, (master, self.dob_year) + years)
-        
-        genders = ('Male', 'Female', 'Not disclosed')
-        self.gender = tk.StringVar(master)
-        self.gender.set(genders[0])
-        gender_menu = apply(tk.OptionMenu, (master, self.gender) + genders)
-        
-        # Define widget layout
-        instructions.grid(row=0, columnspan=3)
-        pnum_label.grid(sticky=tk.E, row=1)
-        dob_label.grid(sticky=tk.E, row=2)
-        gender_label.grid(sticky=tk.E, row=3)
-        self.participant_num.grid(sticky=tk.W, row=1, column=1, columnspan=2)
+        self.birth_month_field = tk.StringVar(master)
+        if not self.birth_month:
+            self.birth_month_field.set(months[0])
+        else:
+            self.birth_month_field.set(self.birth_month)
+        month_menu = apply(tk.OptionMenu, (master, self.birth_month_field) + months)
         month_menu.grid(sticky=tk.W, row=2, column=1)
+        
+        # Draw birth year field
+        years = (2010, 2011, 2013, 2014)
+        self.birth_year_field = tk.StringVar(master)
+        if not self.birth_year:
+            self.birth_year_field.set(years[0])
+        else:
+            self.birth_year_field.set(self.birth_year)
+        year_menu = apply(tk.OptionMenu, (master, self.birth_year_field) + years)
         year_menu.grid(sticky=tk.W, row=2, column=2)
+        
+        # Draw gender field
+        gender_label = tk.Label(master, text='Gender')
+        gender_label.grid(sticky=tk.E, row=3, column=0)
+        genders = ('Male', 'Female', 'Not disclosed')
+        self.gender_field = tk.StringVar(master)
+        if not self.gender:
+            self.gender_field.set(genders[0])
+        else:
+            self.gender_field.set(self.gender)
+        gender_menu = apply(tk.OptionMenu, (master, self.gender) + genders)
         gender_menu.grid(sticky=tk.W, row=3, column=1)
             
-        # Add 'submit' box
-        submit = tk.Button(master, text="Next", command=self.forward,
-                           default=tk.ACTIVE)
-        submit.grid(sticky=tk.E, row=4, column=2)
-        
-        master.place(relx=0.5, rely=0.5, anchor='center')
+        # Draw navigation buttons
+        master = self.navigation_frame
+        forward = tk.Button(master, text='Next', command=self.forward,
+                            default=tk.ACTIVE)
+        forward.grid(sticky=tk.E, row=0, column=1)
     
     
-    def drawTaskContent(self):
+    def defineTaskInterface(self):
         """
         Draw the block task selection window.
         """
         
-        master = self.content
+        master = self.content_frame
         
-        # User instructions
+        # Draw instructions
         user_text = "Select the current block construction."
         instructions = tk.Label(master, text=user_text)
         instructions.grid(row=0, columnspan=3)
         
-        # Set up radio button widgets
-        self.task = tk.IntVar()
+        # Draw block construction choices
+        self.task_field = tk.IntVar()
         block_image_fns = sorted(glob.glob(os.path.join('img', '*.png')))
         for i, filename in enumerate(block_image_fns):
             # filename format is [4,6,8]block-[1,2].png
@@ -156,115 +205,111 @@ class Application:
             button_row = int(name[-1])
             button_column = int(name[0]) / 2 - 2
             block_image = ImageTk.PhotoImage(Image.open(filename))
-            b = tk.Radiobutton(master, image=block_image, variable=self.task,
-                               value=i+1)
+            b = tk.Radiobutton(master, image=block_image,
+                               variable=self.task_field, value=i+1)
             b.image = block_image
             b.grid(row=button_row, column=button_column)
         
-        # Navigation buttons: next, back
-        submit = tk.Button(master, text="Next", command=self.forward,
+        # Draw navigaton buttons
+        master = self.navigation_frame
+        forward = tk.Button(master, text="Next", command=self.forward,
                            default=tk.ACTIVE)
-        submit.grid(sticky=tk.E, row=3, column=2)
+        forward.grid(sticky=tk.E, row=0, column=1)
         back = tk.Button(master, text="Back", command=self.back)
-        back.grid(sticky=tk.W, row=3, column=0)
-        
-        master.place(relx=0.5, rely=0.5, anchor='center')
+        back.grid(sticky=tk.W, row=0, column=0)
+                
 
-
-    def drawImuContent(self):
+    def defineImuInterface(self):
         """
         Draw the IMU connection window.
         """
         
-        master = self.content
+        master = self.content_frame
         
-        # Metadata category labels
+        # Draw instructions
         user_text = "Place IMUs in the following blocks and select their IDs."
         instructions = tk.Label(master, text=user_text)
         instructions.grid(sticky=tk.W, row=0, columnspan=3)
     
-        # Set up widgets and define layoutdev_id.get()
-        self.dev_ids = {}
-        menus = []
-        buttons = []
-        commands = []
+        # Draw IMU-block connection interface
         for i, block in enumerate(self.active_blocks):
             
-            #id_label = tk.Label(master, text='{} rectangle'.format(block))
-            id_label = tk.Label(master, text='\t\t', background=block)
+            id_label = tk.Label(master, text='  \t  ', background=block)
             id_label.grid(row=i+1, column=0)
             
-            self.dev_ids[block] = tk.StringVar(master)
-            self.dev_ids[block].set(self.corpus.imu_ids[i])
+            self.block2imu_id_field[block] = tk.StringVar(master)
+            self.block2imu_id_field[block].set(self.corpus.imu_ids[i])
             
-            menus.append(apply(tk.OptionMenu,
-                               (master, self.dev_ids[block]) + self.corpus.imu_ids))
-            menus[-1].grid(sticky=tk.W, row=i+1, column=1)
+            menu_args = (master, self.block2imu_id_field[block]) \
+                      + self.corpus.imu_ids
+            imu_menu = apply(tk.OptionMenu, menu_args)
+            imu_menu.grid(sticky=tk.W, row=i+1, column=1)
             
-            commands.append(lambda b=str(block): self.connectionAttemptDialog(b))
-            buttons.append(tk.Button(master, text='Connect', command=commands[-1]))
-            buttons[-1].grid(sticky=tk.W, row=i+1, column=2)
-            
-        submit = tk.Button(master, text='Next', command=self.forward,
+            func = lambda b=str(block): self.connectionAttemptDialog(b)
+            button = tk.Button(master, text='Connect', command=func)
+            button.grid(sticky=tk.W, row=i+1, column=2)
+        
+        # Draw navigation buttons
+        master = self.navigation_frame
+        forward = tk.Button(master, text='Next', command=self.forward,
                            default=tk.ACTIVE)
-        submit.grid(sticky=tk.E, row=len(self.dev_ids)+1, column=2)
-        
+        forward.grid(sticky=tk.E, row=0, column=1)
         back = tk.Button(master, text='Back', command=self.back)
-        back.grid(sticky=tk.W, row=len(self.dev_ids)+1, column=0)
-        
-        master.place(relx=0.5, rely=0.5, anchor='center')
+        back.grid(sticky=tk.W, row=0, column=0)
     
     
-    def drawStreamContent(self):
+    def defineStreamInterface(self):
         """
         Draw the data streaming window.
         """
         
+        # Start streaming data
         for p in self.processes:
             p.start()
         
         master = self.content
         
+        # Draw video stream
         if self.q.empty():
-            self.rgb_video = tk.Label(master, text="Waiting for video...")
+            self.rgb_video = tk.Label(master, text='Waiting for video...')
         else:
             newest_frame_path = os.path.join(self.frame_path, self.q.get())
             newest_frame = ImageTk.PhotoImage(Image.open(newest_frame_path))
             self.rgb_video = tk.Label(master, image=newest_frame)
             self.rgb_video.image = newest_frame
         self.rgb_video.grid(row=0, columnspan=2)
-        
         l = tk.Label(master, text='Streaming data...')
         l.grid(row=1, columnspan=2)
         
+        # Draw navigation buttons
+        master = self.navigation_frame
         q = tk.Button(master, text='Quit', command=self.closeStream)
-        q.grid(row=2, column=1)
-        
+        q.grid(sticky=tk.E, row=0, column=1)
         p = tk.Button(master, text='Pause', command=self.stopStream)
-        p.grid(row=2, column=0)
-        
-        master.place(relx=0.5, rely=0.5, anchor='center')
-        
-        self.parent.after(50, self.refreshVideo)
+        p.grid(sticky=tk.W, row=0, column=0)
+                
+        self.parent.after(75, self.refreshVideo)
     
     
     def refreshVideo(self):
         """
+        Update frame on the RGB video monitor and check to make sure none of
+        the IMUs has died.
         """
         
-        if self.die.is_set() and not self.stream_stopped_by_user:
+        # Check if an IMU has died and notify the user if it has
+        if self.die.is_set() and not self.die_set_by_user:
             self.imuFailureDialog()
             return
         
-        if self.q.empty():
-            self.rgb_video.configure(text="Waiting for video...")
-        else:
+        # Draw a new frame if one has been sent by the video stream
+        if not self.q.empty():
             newest_frame_path = os.path.join(self.frame_path, self.q.get())
             newest_frame = ImageTk.PhotoImage(Image.open(newest_frame_path))
             self.rgb_video.configure(image=newest_frame)
             self.rgb_video.image = newest_frame
         
-        self.parent.after(50, self.refreshVideo)
+        self.parent.after(75, self.refreshVideo)
     
     
     def connectionAttemptDialog(self, block):
@@ -281,19 +326,19 @@ class Application:
         if not self.popup is None:
             return
         
-        imu_id = self.dev_ids[block].get()
+        imu_id = self.block2imu_id_field.get()
         
         self.popup = tk.Toplevel(self.parent)
         
-        if imu_id in self.connected_devices.keys():
+        if imu_id in self.imu2block:
             fmtstr = 'Device {} is already in use! Choose a different device.'
             l = tk.Label(self.popup, text=fmtstr.format(imu_id))
             l.pack()
             
             ok = tk.Button(self.popup, text='OK', command=self.cancel)
             ok.pack()
-        elif block in self.block2connectedIMU:
-            block_dev = self.block2connectedIMU[block]
+        elif block in self.block2imu_id:
+            block_dev = self.block2imu_id[block]
             fmtstr = 'This block is already associated with device {}!'
             l = tk.Label(self.popup, text=fmtstr.format(block_dev))
             l.pack()
@@ -315,7 +360,8 @@ class Application:
         
         Args:
         -----
-        [str] imu_id: 4-digit hex ID of the IMU, as a string
+        [str] imu_id: 4-digit hex ID of the IMU
+        [str] block: Color of the current block
         """
         
         mac_prefix = ['00', '17', 'E9', 'D7']
@@ -324,8 +370,8 @@ class Application:
         if name is None:
             self.connectionFailureDialog()
         else:
-            self.connected_devices[imu_id] = socket
-            self.block2connectedIMU[block] = imu_id
+            self.imu_id2socket[imu_id] = socket
+            self.block2imu_id[block] = imu_id
             self.imu2block[imu_id] = block
             print('{}: {}'.format(block, imu_id))
             
@@ -364,7 +410,7 @@ class Application:
         
         Args:
         -----
-        [imu_id]: 4-digit hex ID of the IMU, as a string
+        [str] imu_id: 4-digit hex ID of the IMU, as a string
         """
         
         self.popup.destroy()
@@ -380,6 +426,7 @@ class Application:
     
     def imuFailureDialog(self):
         """
+        Warn the user that one or more IMUs has failed.
         """
         
         # die was set, so the data streaming processes have stopped
@@ -409,7 +456,7 @@ class Application:
     
     def back(self):
         """
-        Go back to the previous stage of data collection.
+        Go back to the previous interface.
         """
         
         # Do nothing if there's an active popup window
@@ -419,40 +466,46 @@ class Application:
         if self.cur_position > 0:
             self.cur_position -= 1
         
-        self.content.destroy()
-        self.content = self.defaultFrame()
-        
-        cur_frame = self.controlflow[self.cur_position]
-        cur_frame()
+        self.clearInterface()
+        interface = self.interfaces[self.interface_index]
+        interface()
+        self.drawInterface()
 
     
     def forward(self):
         """
-        Go to the next stage of data collection.
+        Get data, check if it's valid, and go to the next interface if it is.
         """
         
         # Do nothing if there's an active popup window
         if not self.popup is None:
             return
         
-        getter = self.getters[self.cur_position]
+        # Get data from the current interface and validate
+        getter = self.getters[self.interface_index]
         error_string = getter()
         
+        # Alert user if data didn't pass validation, otherwise go to next
+        # interface
         if error_string:
             self.badInputDialog(error_string)
         else:
-            if self.cur_position < len(self.controlflow) - 1:
-                self.cur_position += 1
+            if self.interface_index < len(self.interfaces) - 1:
+                self.interface_index += 1
             
-            self.content.destroy()
-            self.content = self.defaultFrame()
-            
-            cur_frame = self.controlflow[self.cur_position]
-            cur_frame()
+            self.clearInterface()
+            interface = self.interfaces[self.interface_index]
+            interface()
+            self.drawInterface()
     
     
     def badInputDialog(self, error_string):
         """
+        Alert user of malformed input
+        
+        Args:
+        -----
+        [str] error_string: Message that will be displayed in popup window
         """
         
         # It shouldn't be possible to get here if a popup window is active
@@ -479,8 +532,10 @@ class Application:
             print('Disconnecting from {}...'.format(name))
             socket.close()
         
-        self.corpus.postprocess(self.trial_id, self.trial_metadata,
-                                self.imu2block, self.imu_settings)
+        metadata = (self.participant_id, self.birth_month, self.birth_year,
+                    self.gender)
+        self.corpus.postprocess(self.trial_id, metadata, self.imu2block,
+                                self.imu_settings)
         self.corpus.makeImuFigs(self.trial_id)
         
         self.parent.destroy()
@@ -491,8 +546,7 @@ class Application:
         Stop streaming from IMUs and camera.
         """
         
-        self.stream_stopped_by_user = True
-        
+        self.die_set_by_user = True
         self.die.set()
         for p in self.processes:
             p.join()
@@ -501,17 +555,24 @@ class Application:
     def getMetaData(self):
         """
         Read metadata from tkinter widgets.
+        
+        Returns:
+        --------
+        [str] error_string: Data validation error message. Empty string if
+          user input passes validation.
         """
         
-        self.trial_metadata = (self.participant_num.get(), self.dob_month.get(),
-                               self.dob_year.get(), self.gender.get())
-        if not self.trial_metadata[0]:
+        self.participant_id = self.participant_id_field.get()
+        self.birth_month = self.birth_month_field.get()
+        self.birth_year = self.birth_year_field.get()
+        self.gender = self.gender_field.get()
+        
+        if not self.participant_id:
             return 'Please enter a participant ID.'
         
-        print('Participant ID: {}'.format(self.trial_metadata[0]))
-        print('Birth date: {} / {}'.format(self.trial_metadata[1],
-                                           self.trial_metadata[2]))
-        print('Gender: {}'.format(self.trial_metadata[3]))
+        print('Participant ID: {}'.format(self.participant_id))
+        print('Birth date: {} / {}'.format(self.birth_month, self.birth_year))
+        print('Gender: {}'.format(self.gender))
         
         return ''
     
@@ -519,19 +580,21 @@ class Application:
     def getTaskData(self):
         """
         Read the block construction task from tkinter widgets.
+        
+        Returns:
+        --------
+        [str] error_string: Data validation error message. Empty string if
+          user input passes validation.
         """
         
-        self.task_num = self.task.get()
-        if not self.task_num:
+        self.task = self.task_field.get()
+        if not self.task:
             return 'Please make a selection.'
-        print('Task: {}'.format(self.task_num))
         
-        if self.task_num == 1:
-            self.active_blocks = ('red', 'yellow')
-        elif self.task_num == 2:
-            self.active_blocks = ('green', 'blue')
-        elif self.task_num in (3, 4, 5, 6):
-            self.active_blocks = ('red', 'yellow', 'green', 'blue')
+        self.active_blocks = self.task2block[self.task]
+        
+        print('Task: {}'.format(self.task))
+        print('Active blocks: {}'.format(self.active_blocks))
         
         return ''
         
@@ -540,10 +603,10 @@ class Application:
         """
         Read block to IMU mappings from tkinter widgets.
         """
-        
+                
         # Make sure there is a connected IMU associated with every block
         for block in self.active_blocks:
-            if not block in self.block2connectedIMU:
+            if not block in self.block2imu_id:
                 fmtstr = 'Please put an IMU in the {} block and click connect.'
                 return fmtstr.format(block)
         
