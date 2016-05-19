@@ -142,32 +142,28 @@ class Application:
         
         master = self.content
         
+        # User instructions
         user_text = "Select the current block construction."
         instructions = tk.Label(master, text=user_text)
+        instructions.grid(row=0, columnspan=3)
         
         # Set up radio button widgets
-        # TODO: Add images to radio buttons
         self.task = tk.IntVar()
-        b1 = tk.Radiobutton(master, text='1', variable=self.task, value=1)
-        b2 = tk.Radiobutton(master, text='2', variable=self.task, value=2)
-        b3 = tk.Radiobutton(master, text='3', variable=self.task, value=3)
-        b4 = tk.Radiobutton(master, text='4', variable=self.task, value=4)
-        b5 = tk.Radiobutton(master, text='5', variable=self.task, value=5)
-        b6 = tk.Radiobutton(master, text='6', variable=self.task, value=6)
+        block_image_fns = sorted(glob.glob(os.path.join('img', '*.png')))
+        for i, filename in enumerate(block_image_fns):
+            # filename format is [4,6,8]block-[1,2].png
+            name = os.path.splitext(filename)[0]
+            button_row = int(name[-1])
+            button_column = int(name[0]) / 2 - 1
+            block_image = ImageTk.PhotoImage(Image.open(filename))
+            b = tk.Radiobutton(master, image=block_image, variable=self.task,
+                               value=i)
+            b.grid(row=button_row, column=button_column)
         
-        instructions.grid(row=0, columnspan=3)
-        b1.grid(row=1, column=0)
-        b2.grid(row=1, column=1)
-        b3.grid(row=1, column=2)
-        b4.grid(row=2, column=0)
-        b5.grid(row=2, column=1)
-        b6.grid(row=2, column=2)
-        
-        # Add 'submit' box
+        # Navigation buttons: next, back
         submit = tk.Button(master, text="Next", command=self.forward,
                            default=tk.ACTIVE)
         submit.grid(sticky=tk.E, row=3, column=2)
-        
         back = tk.Button(master, text="Back", command=self.back)
         back.grid(sticky=tk.W, row=3, column=0)
         

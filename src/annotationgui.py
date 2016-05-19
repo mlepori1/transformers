@@ -146,7 +146,7 @@ class Application:
         frame1.pack(side=TOP)
         
         frame2 = Frame(master)
-        state_fn = '/home/jdjones/state.png'
+        state_fn = '0.png'
         state_image = Image.open(state_fn)
         state_photo = ImageTk.PhotoImage(state_image)
         state_label = Label(frame2, image=state_photo)
