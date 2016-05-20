@@ -247,6 +247,7 @@ class DuploCorpus:
             imu_data[:,4:7] = imu_data[:,4:7] / 4096.0    # Convert acceleration samples to g
             imu_data[:,7:10] = imu_data[:,7:10] * 0.07  # Convert angular velocity samples to deg/s
             imu_data[:,10:13] = imu_data[:,10:13] * 1e-3  # Convert magnetic field to units of mGauss
+            imu_data[:,12] = - imu_data[:,12]   # Field is measured along -z instead of +z
             
             imus[imu_id] = imu_data
         
@@ -268,7 +269,7 @@ class DuploCorpus:
             sample_len = data.shape[1]
             fmtstr = ['%15f'] + (sample_len - 1) * ['%i']
             col_names = 'global timestamp,error,sample index,imu timestamp,'\
-                        'ax,ay,az,gx,gy,gz,mx,my,mz,voltage,temp,pressure'
+                        'ax,ay,az,gx,gy,gz,mx,my,-mz,voltage,temp,pressure'
             np.savetxt(path, data, delimiter=',', fmt=fmtstr, header=col_names,
                        comments='')
     
