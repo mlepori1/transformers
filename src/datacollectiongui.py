@@ -32,7 +32,6 @@ class Application:
         
         # Define parent window and resize
         self.parent = parent
-        self.parent.geometry('{}x{}'.format(768, 576))
         
         # Window content
         self.content_frame = tk.Frame(self.parent)
@@ -81,9 +80,24 @@ class Application:
         # q is used to communicate between rgb stream and main process
         self.die = mp.Event()
         self.die_set_by_user = False
-        self.q = mp.Queue()
+        self.video_q = mp.Queue()
+        self.imu_q = mp.Queue()
+        
+        self.defineStreamProcesses()
+         
+        # Start drawing interfaces
+        interface = self.interfaces[self.interface_index]
+        interface()
+        self.drawInterface()
+    
+    
+    def defineStreamProcesses(self):
+        """
+        """
         
         # Define paths used for file I/O when streaming data
+        # NOTE: The trial id will increase after a call to corpus.postprocess!!!
+        #   (which happens in chooseNewTask and closeStream)
         self.trial_id = self.corpus.meta_data.shape[0]
         raw_imu_fn = '{}-imu.csv'.format(self.trial_id)
         raw_imu_path = os.path.join(self.corpus.paths['raw'], raw_imu_fn)
@@ -93,14 +107,10 @@ class Application:
         timestamp_path = os.path.join(self.corpus.paths['raw'], timestamp_fn)
         
         # Define processes that stream from IMUs and camera
-        videostream_args = (frame_path, timestamp_path, self.die, self.q)
-        imustream_args = (self.imu_id2socket, raw_imu_path, self.die)
+        videostream_args = (frame_path, timestamp_path, self.die, self.video_q)
+        imustream_args = (self.imu_id2socket, raw_imu_path, self.die, self.imu_q)
         self.processes = (mp.Process(target=ps.stream, args=videostream_args),
                           mp.Process(target=wax9.stream, args=imustream_args),)
-                          
-        # Start drawing interfaces
-        interface = self.interfaces[self.interface_index]
-        interface()
     
     
     def drawInterface(self):
@@ -109,7 +119,7 @@ class Application:
         """
         
         self.content_frame.place(relx=0.5, rely=0.5, anchor='center')
-        self.navigation_frame.pack(fill=tk.X, anchor=tk.S)
+        self.navigation_frame.place(relx=0.5, rely=0.9, anchor='center')
     
     
     def clearInterface(self):
@@ -137,13 +147,13 @@ class Application:
         instructions.grid(row=0, columnspan=3)
         
         # Draw participant ID field
-        participant_id_label = tk.Label(master, text='Participant ID')
+        participant_id_label = tk.Label(master, text='Participant ID: ')
         participant_id_label.grid(sticky=tk.E, row=1, column=0)
         self.participant_id_field = tk.Entry(master)
         self.participant_id_field.grid(sticky=tk.W, row=1, column=1, columnspan=2)
         
         # Draw birth month field
-        birth_date_label = tk.Label(master, text='Date of birth')
+        birth_date_label = tk.Label(master, text='Date of birth: ')
         birth_date_label.grid(sticky=tk.E, row=2, column=0)
         months = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug',
                   'Sep', 'Oct', 'Nov', 'Dec')
@@ -166,7 +176,7 @@ class Application:
         year_menu.grid(sticky=tk.W, row=2, column=2)
         
         # Draw gender field
-        gender_label = tk.Label(master, text='Gender')
+        gender_label = tk.Label(master, text='Gender: ')
         gender_label.grid(sticky=tk.E, row=3, column=0)
         genders = ('Male', 'Female', 'Not disclosed')
         self.gender_field = tk.StringVar(master)
@@ -174,7 +184,7 @@ class Application:
             self.gender_field.set(genders[0])
         else:
             self.gender_field.set(self.gender)
-        gender_menu = apply(tk.OptionMenu, (master, self.gender) + genders)
+        gender_menu = apply(tk.OptionMenu, (master, self.gender_field) + genders)
         gender_menu.grid(sticky=tk.W, row=3, column=1)
             
         # Draw navigation buttons
@@ -234,7 +244,7 @@ class Application:
         # Draw IMU-block connection interface
         for i, block in enumerate(self.active_blocks):
             
-            id_label = tk.Label(master, text='  \t  ', background=block)
+            id_label = tk.Label(master, text=' \t ', background=block)
             id_label.grid(row=i+1, column=0)
             
             self.block2imu_id_field[block] = tk.StringVar(master)
@@ -267,31 +277,45 @@ class Application:
         for p in self.processes:
             p.start()
         
-        master = self.content
+        master = self.content_frame
         
-        # Draw video stream
-        if self.q.empty():
-            self.rgb_video = tk.Label(master, text='Waiting for video...')
-        else:
-            newest_frame_path = os.path.join(self.frame_path, self.q.get())
-            newest_frame = ImageTk.PhotoImage(Image.open(newest_frame_path))
-            self.rgb_video = tk.Label(master, image=newest_frame)
-            self.rgb_video.image = newest_frame
-        self.rgb_video.grid(row=0, columnspan=2)
+        # Draw placeholder for video monitor
+        self.rgb_video = tk.Label(master, text='Waiting for video...')
+        self.rgb_video.grid(row=0, column=0)
+        
         l = tk.Label(master, text='Streaming data...')
-        l.grid(row=1, columnspan=2)
+        l.grid(row=1, column=0)
         
+        # Draw placeholders for IMU monitors
+        self.imu_id2activity_color = {}
+        imu_monitor_frame = tk.Frame(master)
+        for i, imu_id in enumerate(self.imu_id2socket.keys()):
+            # Label text
+            block_color = self.imu2block[imu_id]
+            color_label = tk.Label(imu_monitor_frame, text=' \t ',
+                                   background=block_color)
+            color_label.grid(row=i, column=0)
+            id_label = tk.Label(imu_monitor_frame, text=' active: ')
+            id_label.grid(row=i, column=1)
+            # Activity indicator
+            self.imu_id2activity_color[imu_id] = tk.Label(imu_monitor_frame,
+                                                          text='    ',
+                                                          background='yellow')
+            self.imu_id2activity_color[imu_id].grid(row=i, column=2)
+        imu_monitor_frame.grid(row=2, column=0)
+            
+
         # Draw navigation buttons
         master = self.navigation_frame
         q = tk.Button(master, text='Quit', command=self.closeStream)
         q.grid(sticky=tk.E, row=0, column=1)
-        p = tk.Button(master, text='Pause', command=self.stopStream)
+        p = tk.Button(master, text='New task', command=self.chooseNewTask)
         p.grid(sticky=tk.W, row=0, column=0)
                 
-        self.parent.after(75, self.refreshVideo)
+        self.parent.after(75, self.refreshStreamInterface)
     
     
-    def refreshVideo(self):
+    def refreshStreamInterface(self):
         """
         Update frame on the RGB video monitor and check to make sure none of
         the IMUs has died.
@@ -302,14 +326,54 @@ class Application:
             self.imuFailureDialog()
             return
         
+        if not self.imu_q.empty():
+            samples = self.imu_q.get()
+            for sample in samples:
+                imu_id = sample[-1]
+                # Calculate (unitless) l1 norm of acceleration
+                # (4096 bits in 1 g --> why we use 5000 as the threshold)
+                accel_mag = abs(sample[4]) + abs(sample[5]) + abs(sample[6])
+                bg_color = 'green' if accel_mag > 5000 else 'yellow'
+                self.imu_id2activity_color[imu_id].configure(background=bg_color)
+        
         # Draw a new frame if one has been sent by the video stream
-        if not self.q.empty():
-            newest_frame_path = os.path.join(self.frame_path, self.q.get())
+        if not self.video_q.empty():
+            newest_frame_path = self.video_q.get()
             newest_frame = ImageTk.PhotoImage(Image.open(newest_frame_path))
             self.rgb_video.configure(image=newest_frame)
             self.rgb_video.image = newest_frame
         
-        self.parent.after(75, self.refreshVideo)
+        self.parent.after(75, self.refreshStreamInterface)
+    
+    
+    def chooseNewTask(self):
+        """
+        Stop streaming, write data,  and go back to the task selection
+        interface.
+        """
+        
+        if not self.die.is_set():
+            self.stopStream()
+        
+        metadata = (self.participant_id, self.birth_month, self.birth_year,
+                    self.gender, self.task)
+        imu_settings_array = np.hstack(tuple(self.imu_settings))
+        self.corpus.postprocess(self.trial_id, metadata, self.imu2block,
+                                imu_settings_array)
+        
+        # Reset die so we don't immediately quit streaming data in the next
+        # round
+        self.die.clear()
+        
+        # Re-define streaming processes
+        self.defineStreamProcesses()
+        
+        # task selection interface is at position 1
+        self.clearInterface()
+        self.interface_index = 1
+        interface = self.interfaces[self.interface_index]
+        interface()
+        self.drawInterface()
     
     
     def connectionAttemptDialog(self, block):
@@ -326,11 +390,11 @@ class Application:
         if not self.popup is None:
             return
         
-        imu_id = self.block2imu_id_field.get()
+        imu_id = self.block2imu_id_field[block].get()
         
         self.popup = tk.Toplevel(self.parent)
         
-        if imu_id in self.imu2block:
+        if imu_id in self.imu_id2socket:
             fmtstr = 'Device {} is already in use! Choose a different device.'
             l = tk.Label(self.popup, text=fmtstr.format(imu_id))
             l.pack()
@@ -463,8 +527,8 @@ class Application:
         if not self.popup is None:
             return
         
-        if self.cur_position > 0:
-            self.cur_position -= 1
+        if self.interface_index > 0:
+            self.interface_index -= 1
         
         self.clearInterface()
         interface = self.interfaces[self.interface_index]
@@ -528,15 +592,16 @@ class Application:
         if not self.die.is_set():
             self.stopStream()
         
-        for name, socket in self.connected_devices.items():
+        for name, socket in self.imu_id2socket.items():
             print('Disconnecting from {}...'.format(name))
             socket.close()
         
         metadata = (self.participant_id, self.birth_month, self.birth_year,
-                    self.gender)
+                    self.gender, self.task)
+        imu_settings_array = np.hstack(tuple(self.imu_settings))
         self.corpus.postprocess(self.trial_id, metadata, self.imu2block,
-                                self.imu_settings)
-        self.corpus.makeImuFigs(self.trial_id)
+                                imu_settings_array)
+        #self.corpus.makeImuFigs(self.trial_id)
         
         self.parent.destroy()
     
@@ -610,9 +675,6 @@ class Application:
                 fmtstr = 'Please put an IMU in the {} block and click connect.'
                 return fmtstr.format(block)
         
-        # FIXME: this converts imu_settings from a list to a numpy array (bad)
-        self.imu_settings = np.hstack(tuple(self.imu_settings))
-        
         return ''
             
     
@@ -624,6 +686,11 @@ class Application:
 if __name__ == '__main__':
     
     root = tk.Tk()
+    screen_width = root.winfo_screenwidth()
+    screen_height = root.winfo_screenheight()
+    #root.geometry('{0}x{1}+0+0'.format(screen_width, screen_height))
+    root.geometry('800x600')
+    
     app = Application(root)
     
     root.mainloop()

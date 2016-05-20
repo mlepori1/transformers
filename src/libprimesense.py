@@ -75,11 +75,12 @@ def stream(frame_path, timestamp_path, die, q):
         
         # Write to file
         fn = '{:06d}.png'.format(frame_index)
-        cv2.imwrite(os.path.join(frame_path, fn), img_array)
+        path = os.path.join(frame_path, fn)
+        cv2.imwrite(path, img_array)
         timestamp_writer.writerow((frametime, 0, frame_index, 'rgb'))
         
         if q.empty():
-            q.put(fn)
+            q.put(path)
 
         frame_index += 1
 

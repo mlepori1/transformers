@@ -180,7 +180,7 @@ def sample(socket):
     return sample
 
 
-def stream(connected_devices, path, die):
+def stream(connected_devices, path, die, q):
     """
     Stream data from WAX9 devices until die is set
 
@@ -189,6 +189,7 @@ def stream(connected_devices, path, die):
     [dict(str->socket)] connected_devices:
     [str] path: Path to raw IMU output file
     [mp event] die:
+    [mp queue] q:
     """
     
     SAMPLE_RATE = 15
@@ -220,6 +221,10 @@ def stream(connected_devices, path, die):
     # Terminate when main tells us to -- but only after we finish reading
     # the current set of packets
     while not die.is_set():
+        
+        # Use this list to store samples that are sent over the multiprocessing
+        # queue
+        samples = []
         
         # Read data sequentially from sensors until told to terminate
         for dev_id, imu_socket in connected_devices.items():
@@ -313,12 +318,19 @@ def stream(connected_devices, path, die):
                 # Record an error
                 fmtstr = 'ERR | Bad packet | {} | {}'
                 print(fmtstr.format(dev_id, packet.encode('hex')))
-                data = [0] * 14
+                data = [0] * 17
                 data[1] = error
                 data[-1] = dev_id
-                
+            
+            samples.append(data)
+            
             # Write the packet
             imu_writer.writerow(data)
+        
+        # Put a new sample set on the queue if the previous one has been
+        # consumed
+        if q.empty():
+            q.put(samples)
         
         
     # Tell the devices to stop streaming and close the file we were writing

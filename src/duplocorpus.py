@@ -47,8 +47,9 @@ class DuploCorpus:
         
         self.metadata_types = [('trial id', 'i4'), ('participant id', 'U10'), 
                                ('birth month', 'U3'), ('birth year', 'U4'),
-                               ('gender', 'U15'), ('has labels', 'i4')]       \
-                            + [(name, 'U10') for name in self.imu_ids]
+                               ('gender', 'U15'), ('task id', 'i4')]        \
+                            + [(name, 'U10') for name in self.imu_ids]        \
+                            + [('has labels', 'i4')] 
         
         self.label_types = [('start', 'i'), ('end', 'i'), ('action', 'i'),
                             ('object', 'i'), ('target', 'i'),
@@ -118,11 +119,12 @@ class DuploCorpus:
           [str] birth month:
           [str] birth year:
           [str] gender:
-          [int] has_labels:
+          [int] task id:
           [str] 08F1:
           [str] 095D:
           [str] 090F:
           [str] 0949:
+          [int] has_labels:
         """
 
         meta_data = []
@@ -428,6 +430,7 @@ class DuploCorpus:
           [1] birth month
           [2] birth year
           [3] gender
+          [4] block task ID
         [dict(str->str)] imu_settings:
         [dict(str->str)] imu2block:
         """
@@ -440,7 +443,7 @@ class DuploCorpus:
                 
         self.updateMetaData(trial_id, trial_metadata, imu2block)
         
-        self.makeVideo(trial_id)
+        #self.makeVideo(trial_id)
     
     
     def updateMetaData(self, trial_id, trial_metadata=None, imu2block=None):
@@ -453,6 +456,11 @@ class DuploCorpus:
         -----
         [int] trial_id:
         [tuple(int)] trial_metadata:
+          [0] participant id
+          [1] birth month
+          [2] birth year
+          [3] gender
+          [4] block task ID
         [dict(str->str)] imu2block:
         """
                 
@@ -466,16 +474,16 @@ class DuploCorpus:
             block_mappings = tuple(imu2block[imu_id] for imu_id in self.imu_ids)
             meta_data = np.zeros(trial_id + 1, dtype=self.meta_data.dtype)
             meta_data[self.meta_data['trial id']] = self.meta_data
-            meta_data[trial_id] = (trial_id,) + trial_metadata + (has_labels,) \
-                                + block_mappings  
+            meta_data[trial_id] = (trial_id,) + trial_metadata + block_mappings \
+                                + (has_labels,)                        
             self.meta_data = meta_data
         # If we've seen the trial ID before, we're revising a row
         else:
             self.meta_data[trial_id]['has labels'] = has_labels
             if not trial_metadata is None and not imu2block is None:
                 block_mappings = tuple(imu2block[imu_id] for imu_id in self.imu_ids)
-                self.meta_data[trial_id] = (trial_id,) + trial_metadata \
-                                         + (has_labels,) + block_mappings
+                self.meta_data[trial_id] = (trial_id,) + trial_metadata       \
+                                         + block_mappings + (has_labels,)
         
         self.writeMetaData()
     
