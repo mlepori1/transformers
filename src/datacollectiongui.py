@@ -72,7 +72,6 @@ class Application:
         self.active_blocks = None
         
         self.block2imu_id = {}
-        self.block2connected_imu = {}
         self.imu_id2socket = {}
         self.imu_settings = []
         
@@ -312,7 +311,7 @@ class Application:
         p = tk.Button(master, text='New task', command=self.chooseNewTask)
         p.grid(sticky=tk.W, row=0, column=0)
                 
-        self.parent.after(75, self.refreshStreamInterface)
+        #self.parent.after(75, self.refreshStreamInterface)
     
     
     def refreshStreamInterface(self):
@@ -414,7 +413,6 @@ class Application:
             l = tk.Label(self.popup, text=fmtstr.format(imu_id))
             l.pack()
             
-            # connection attempt
             self.attemptConnection(imu_id, block)
     
     
@@ -447,7 +445,11 @@ class Application:
             parsed_settings = wax9.parseSettings(settings)
             # TODO: Correct settings if they aren't what we expect
             self.imu_settings.append(parsed_settings)
-            self.connectionSuccessDialog(name)
+            
+            sample_str = wax9.sample(socket)
+            data_str = sample_str.strip().split('\r\n')[1]
+            battery = int(data_str.split(',')[-4])  # Battery voltage in mV
+            self.connectionSuccessDialog(name, battery)
         
     
     def connectionFailureDialog(self):
@@ -467,7 +469,7 @@ class Application:
         ok.grid(row=1)
     
     
-    def connectionSuccessDialog(self, imu_id):
+    def connectionSuccessDialog(self, imu_id, battery):
         """
         Draw a popup window informing the user that the connection attempt was
         successful.
@@ -475,13 +477,24 @@ class Application:
         Args:
         -----
         [str] imu_id: 4-digit hex ID of the IMU, as a string
+        [int] battery: IMU battery voltage in mV
         """
         
         self.popup.destroy()
         self.popup = tk.Toplevel(self.parent)
         
-        fmtstr = 'Successfully connected to {}!'
-        l = tk.Label(self.popup, text=fmtstr.format(imu_id))
+        # Battery discharge curve has a sharp knee around 3300 mV, so take that
+        # as zero. Max charge is about 4200 mV.
+        # (see WAX9 developer's guide, p. 17)
+        min_charge = 3300
+        max_charge = 4200        
+        charge_percent = float(battery - min_charge) / (max_charge - min_charge)
+        # Battery can't be more than 100% charged, but it could look that way
+        # because the max capacity is only approximate
+        charge_percent = int(min(charge_percent, 1) * 100)
+        
+        fmtstr = '\nSuccessfully connected to {}!\n\nBattery: {}%\n'
+        l = tk.Label(self.popup, text=fmtstr.format(imu_id, charge_percent))
         l.pack()
         
         ok = tk.Button(self.popup, text='OK', command=self.cancel)

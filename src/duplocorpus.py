@@ -159,6 +159,48 @@ class DuploCorpus:
                 metawriter.writerow(row)
     
     
+    def updateMetaData(self, trial_id, trial_metadata=None, imu2block=None):
+        """
+        Append or revise a row in the metadata array, then save the new array.
+        When this method is called with only one argument, it only updates the
+        'has labels' field.
+        
+        Args:
+        -----
+        [int] trial_id:
+        [tuple(int)] trial_metadata:
+          [0] participant id
+          [1] birth month
+          [2] birth year
+          [3] gender
+          [4] block task ID
+        [dict(str->str)] imu2block:
+        """
+                
+        label_path = os.path.join(self.paths['labels'], str(trial_id) + '.csv')
+        has_labels = int(os.path.exists(label_path))
+
+        # Append a new row to the metadata array if the trial ID is one we
+        # haven't seen before
+        if self.meta_data.shape[0] <= trial_id:
+            assert(not trial_metadata is None and not imu2block is None)
+            block_mappings = tuple(imu2block[imu_id] for imu_id in self.imu_ids)
+            meta_data = np.zeros(trial_id + 1, dtype=self.meta_data.dtype)
+            meta_data[self.meta_data['trial id']] = self.meta_data
+            meta_data[trial_id] = (trial_id,) + trial_metadata + block_mappings \
+                                + (has_labels,)                        
+            self.meta_data = meta_data
+        # If we've seen the trial ID before, we're revising a row
+        else:
+            self.meta_data[trial_id]['has labels'] = has_labels
+            if not trial_metadata is None and not imu2block is None:
+                block_mappings = tuple(imu2block[imu_id] for imu_id in self.imu_ids)
+                self.meta_data[trial_id] = (trial_id,) + trial_metadata       \
+                                         + block_mappings + (has_labels,)
+        
+        self.writeMetaData()
+    
+    
     def writeImuSettings(self, trial_id, imu_settings):
         """        
         Args:
@@ -444,48 +486,6 @@ class DuploCorpus:
         self.updateMetaData(trial_id, trial_metadata, imu2block)
         
         #self.makeVideo(trial_id)
-    
-    
-    def updateMetaData(self, trial_id, trial_metadata=None, imu2block=None):
-        """
-        Append or revise a row in the metadata array, then save the new array.
-        When this method is called with only one argument, it only updates the
-        'has labels' field.
-        
-        Args:
-        -----
-        [int] trial_id:
-        [tuple(int)] trial_metadata:
-          [0] participant id
-          [1] birth month
-          [2] birth year
-          [3] gender
-          [4] block task ID
-        [dict(str->str)] imu2block:
-        """
-                
-        label_path = os.path.join(self.paths['labels'], str(trial_id) + '.csv')
-        has_labels = int(os.path.exists(label_path))
-
-        # Append a new row to the metadata array if the trial ID is one we
-        # haven't seen before
-        if self.meta_data.shape[0] <= trial_id:
-            assert(not trial_metadata is None and not imu2block is None)
-            block_mappings = tuple(imu2block[imu_id] for imu_id in self.imu_ids)
-            meta_data = np.zeros(trial_id + 1, dtype=self.meta_data.dtype)
-            meta_data[self.meta_data['trial id']] = self.meta_data
-            meta_data[trial_id] = (trial_id,) + trial_metadata + block_mappings \
-                                + (has_labels,)                        
-            self.meta_data = meta_data
-        # If we've seen the trial ID before, we're revising a row
-        else:
-            self.meta_data[trial_id]['has labels'] = has_labels
-            if not trial_metadata is None and not imu2block is None:
-                block_mappings = tuple(imu2block[imu_id] for imu_id in self.imu_ids)
-                self.meta_data[trial_id] = (trial_id,) + trial_metadata       \
-                                         + block_mappings + (has_labels,)
-        
-        self.writeMetaData()
     
     
     def makeImuFigs(self, trial_id):
