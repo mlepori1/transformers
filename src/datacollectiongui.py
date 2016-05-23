@@ -332,7 +332,7 @@ class Application:
                 # Calculate (unitless) l1 norm of acceleration
                 # (4096 bits in 1 g --> why we use 5000 as the threshold)
                 accel_mag = abs(sample[4]) + abs(sample[5]) + abs(sample[6])
-                bg_color = 'green' if accel_mag > 5000 else 'yellow'
+                bg_color = 'green' if accel_mag > 4950 else 'yellow'
                 self.imu_id2activity_color[imu_id].configure(background=bg_color)
         
         # Draw a new frame if one has been sent by the video stream
@@ -540,8 +540,7 @@ class Application:
         if not self.popup is None:
             return
         
-        if self.interface_index > 0:
-            self.interface_index -= 1
+        self.interface_index = max(self.interface_index - 1, 0)
         
         self.clearInterface()
         interface = self.interfaces[self.interface_index]
@@ -567,8 +566,8 @@ class Application:
         if error_string:
             self.badInputDialog(error_string)
         else:
-            if self.interface_index < len(self.interfaces) - 1:
-                self.interface_index += 1
+            self.interface_index = min(self.interface_index + 1,
+                                       len(self.interfaces) - 1)
             
             self.clearInterface()
             interface = self.interfaces[self.interface_index]
