@@ -311,7 +311,7 @@ class Application:
         p = tk.Button(master, text='New task', command=self.chooseNewTask)
         p.grid(sticky=tk.W, row=0, column=0)
                 
-        #self.parent.after(75, self.refreshStreamInterface)
+        self.parent.after(75, self.refreshStreamInterface)
     
     
     def refreshStreamInterface(self):

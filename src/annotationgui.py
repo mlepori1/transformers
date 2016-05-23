@@ -39,7 +39,6 @@ class Application:
         self.action_started = False
         self.cur_frame = 0
         self.states = []
-        self.states.append(self.initState)
         self.labels = []
         
         # User input (to be read from interface later)
@@ -49,8 +48,10 @@ class Application:
         self.trial_field = None
         
         # Start drawing annotation interface
-        self.content = tk.Frame()
-        self.drawAnnotator()
+        self.content_frame = tk.Frame(self.parent)
+        self.navigation_frame = tk.Frame(self.parent)
+        self.defineTrialSelectionInterface()
+        self.drawInterface()
     
     
     def initState(self):
@@ -69,7 +70,8 @@ class Application:
         
         # Create a directed graph representing the block construction and add
         # all blocks as nodes
-        state = gv.Digraph(name=str(len(self.states)), format='png')
+        state = gv.Digraph(name=str(len(self.states)), format='png',
+                           directory=self.state_fig_path)
         for i, block in enumerate(self.blocks):
             color, shape = block.split(' ')
             width = height if shape == 'square' else 2 * height
@@ -78,7 +80,32 @@ class Application:
                        color=color, shape=gv_shape, style='filled',
                        body='size=4,4')
         
+        # Save state image to file
+        print(state.render(filename=str(len(self.states)),
+                           directory=self.state_fig_path))
+        
         return state
+
+
+    def drawInterface(self):
+        """
+        Draw main content and navigation frames onto the parent
+        """
+        
+        self.content_frame.place(relx=0.5, rely=0.5, anchor='center')
+        self.navigation_frame.place(relx=0.5, rely=0.9, anchor='center')
+    
+    
+    def clearInterface(self):
+        """
+        Destroy and re-initialize main content and navigation frames.
+        """
+        
+        self.content_frame.destroy()
+        self.navigation_frame.destroy()
+        
+        self.content_frame = tk.Frame(self.parent)
+        self.navigation_frame = tk.Frame(self.parent)
     
     
     def defineTrialSelectionInterface(self):
@@ -87,7 +114,7 @@ class Application:
         annotate.
         """
         
-        master = self.content
+        master = self.content_frame
         
         # Draw a listbox with a vertical scrollbar
         scrollbar = tk.Scrollbar(master, orient=tk.VERTICAL)
@@ -98,12 +125,16 @@ class Application:
         
         # Fill the listbox with trial data
         for entry in self.corpus.meta_data:
-            trial_info = ' '.join(entry['participant id'], entry['task id'])
+            trial_info = '{} {}'.format(entry['participant id'], entry['task id'])
             self.trial_field.insert(tk.END, trial_info)
         
         # Draw a select button
+        master = self.navigation_frame
         submit = tk.Button(master, text='Select', command=self.submit)
         submit.pack()
+        
+        self.content_frame.place(relx=0.5, rely=0.5, anchor='center')
+        self.navigation_frame.place(relx=0.5, rely=0.9, anchor='center')
     
     
     def submit(self):
@@ -121,8 +152,13 @@ class Application:
         if not os.path.exists(self.state_fig_path):
             os.makedirs(self.state_fig_path)
         
-        self.cur_frame.destroy()
+        # Draw the initial empty state
+        self.states.append(self.initState())
+        
+        # Move on to the annotation interface
+        self.clearInterface()
         self.defineAnnotationInterface()
+        self.drawInterface()
         
         
     def defineAnnotationInterface(self):
@@ -130,7 +166,7 @@ class Application:
         Draw the annotation interface with RGB frame.
         """
         
-        master = self.content
+        master = self.content_frame
         
         # Navigate forwards and backwards in RGB frames by using j and k keys
         self.parent.bind('k', self.forward)
@@ -198,13 +234,12 @@ class Application:
         # Draw visualization of annotation
         frame2 = tk.Frame(master)
         state_fn = '{}.png'.format(len(self.states) - 1)
-        state_image = ImageTk.PhotoImage(Image.open(state_fn))
+        state_path = os.path.join(self.state_fig_path, state_fn)
+        state_image = ImageTk.PhotoImage(Image.open(state_path))
         self.state_display = tk.Label(frame2, image=state_image)
         self.state_display.image = state_image
         self.state_display.pack()
         frame2.pack(side=tk.BOTTOM)
-        
-        master.place(relx=0.5, rely=0.5, anchor='center')
     
     
     def back(self, event=None):
@@ -273,7 +308,8 @@ class Application:
         
         # Redraw world state
         state_fn = '{}.png'.format(len(self.states) - 1)
-        state_image = ImageTk.PhotoImage(Image.open(state_fn))
+        state_path = os.path.join(self.state_fig_path, state_fn)
+        state_image = ImageTk.PhotoImage(Image.open(state_path))
         self.state_display.configure(image=state_image)
         self.state_display.image = state_image
         
@@ -325,7 +361,8 @@ class Application:
         
         # Save this state both to memory and to file
         self.states.append(cur_state)
-        cur_state.save()
+        cur_state.render(filename=str(len(self.states)),
+                         directory=self.state_fig_path)
         
         return 'I am a dummy function!'
     
