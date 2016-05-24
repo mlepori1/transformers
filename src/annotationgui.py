@@ -37,7 +37,8 @@ class Application:
         self.state_fig_path = None
         
         # Initial values
-        self.action_started = False
+        self.action_start_index = -1
+        self.action_end_index = -1
         self.cur_frame = 0
         self.states = []
         self.labels = []
@@ -249,6 +250,15 @@ class Application:
         Delete the previous action annotation and re-draw block configuration
         """
         
+        if not self.states:
+            error_string = 'No annotation to undo'
+            self.badInputDialog(error_string)
+        
+        # Delete all labels associated with the last annotation
+        last_label = self.labels[-1]
+        while self.labels[-1][:3] == last_label[:3]:
+            self.labels.pop()
+        
         self.states = self.states[:-1]
         self.updateWorldState()
         
@@ -291,7 +301,8 @@ class Application:
         Update start/end button when user indicates the start of an action.
         """
         
-        self.action_started = True
+        # Set the action's start to the index of the current RGB frame
+        self.action_start_index = self.cur_frame
         
         # Redraw button
         self.start_end.configure(text='End of action', command=self.endAction)
@@ -304,6 +315,9 @@ class Application:
         world state. If not, display a warning message to the user.
         """
         
+        # Set the action's end to the index of the current frame
+        self.action_end_index = self.cur_frame
+        
         # Make sure the user has selected an action and an object
         if not self.action_field.get() or not self.object_field.get():
             err_str = 'Please select and action and an object block.'
@@ -312,10 +326,14 @@ class Application:
         
         # Get action annotation (action and object fields are one-indexed, so
         # convert to zero-indexing)
-        action = self.actions[self.action_field.get() - 1]
-        object_block = self.blocks[self.object_field.get() - 1]
-        target_blocks = tuple(block for block, field in self.target_fields.items()
-                              if field.get())
+        action_index = self.action_field.get()
+        object_index = self.object_field.get()
+        target_indices = tuple(self.block2index[block] for block, field in
+                               self.target_fields.items() if field.get())
+        action = self.actions[action_index - 1]
+        object_block = self.blocks[object_index - 1]
+        target_blocks = tuple(block for block, field in
+                              self.target_fields.items() if field.get())
         
         # Make sure the user has selected targets for actions that require them
         if not target_blocks and not action in ('remove', 'rotate'):
@@ -329,11 +347,20 @@ class Application:
             self.badInputDialog(err_str)
             return
         
-        self.action_started = False
+        # Store the action annotation
+        for target_index in target_indices:
+            self.labels.append((self.action_start_index, self.action_end_index,
+                                action_index, object_index, target_index,
+                                '()', '()'))
+        
+        # Reset start and end indices
+        self.action_start_index = -1
+        self.action_end_index = -1
         
         # Redraw world state image and stard/end button
         self.updateWorldState()
-        self.start_end.configure(text='Start of action', command=self.startAction)
+        self.start_end.configure(text='Start of action',
+                                 command=self.startAction)
     
     
     def updateWorldState(self):
@@ -348,19 +375,16 @@ class Application:
         self.state_display.image = state_image
     
     
-    def parseAction(self, action, object_block, target_blocks):
+    def parseAction(self, action, object_index, target_indices):
         """
         Update the world state by interpreting an action annotation.
         
         Args:
         -----
-        [str] action: Action label -- one of self.actions
-        [str] object_block: Block that was placed -- one of self.blocks
+        [str] action: Action label (one of self.actions)
+        [str] object_block: Block that was placed (index in self.blocks)
         [list(str)] target_blocks: Blocks near the one that was placed
         """
-        
-        object_index = self.block2index[object_block]
-        target_indices = tuple(self.block2index[target] for target in target_blocks)
         
         # TODO: validate the provided action by making sure it is a possible
         #   world state configuration
