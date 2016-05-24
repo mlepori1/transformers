@@ -700,8 +700,8 @@ if __name__ == '__main__':
     root = tk.Tk()
     screen_width = root.winfo_screenwidth()
     screen_height = root.winfo_screenheight()
-    #root.geometry('{0}x{1}+0+0'.format(screen_width, screen_height))
-    root.geometry('800x600')
+    root.geometry('{0}x{1}+0+0'.format(screen_width, screen_height))
+    #root.geometry('800x600')
     
     app = Application(root)
     

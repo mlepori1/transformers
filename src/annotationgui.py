@@ -235,7 +235,7 @@ class Application:
         self.state_display.pack()
         frame2.pack(side=tk.BOTTOM)
         
-        # Draw start/end and undo buttons
+        # Draw start/end, undo, restart, and quit buttons
         master = self.navigation_frame
         self.start_end = tk.Button(master, text='Start of action',
                                    command=self.startAction, default=tk.ACTIVE)
@@ -243,11 +243,15 @@ class Application:
         undo = tk.Button(master, text="Undo annotation",
                          command=self.undoAction)
         undo.grid(sticky=tk.W, row=0, column=0)
+        restart = tk.Button(master, text="Start new trial", command=self.restart)
+        restart.grid(sticky=tk.W, row=0, column=2)
+        restart = tk.Button(master, text="Quit", command=self.close)
+        restart.grid(sticky=tk.W, row=0, column=3)
     
     
     def undoAction(self):
         """
-        Delete the previous action annotation and re-draw block configuration
+        Delete the previous action annotation and re-draw block configuration.
         """
         
         if not self.states:
@@ -263,6 +267,27 @@ class Application:
         self.updateWorldState()
         
         return
+    
+    
+    def restart(self):
+        """
+        Save labels and go back to the trial selection interface.
+        """
+        
+        if self.labels:
+            self.corpus.writeLabels(self.trial_id, self.labels)
+        self.clearInterface()
+        self.__init__(self.parent)
+    
+    
+    def close(self):
+        """
+        Save labels and exit the annotation interface.
+        """
+        
+        if self.labels:
+            self.corpus.writeLabels(self.trial_id, self.labels)
+        self.parent.destroy()
     
     
     def back(self, event=None):
@@ -318,20 +343,22 @@ class Application:
         # Set the action's end to the index of the current frame
         self.action_end_index = self.cur_frame
         
+        # Get action annotation (action and object fields are one-indexed, so
+        # convert to zero-indexing)
+        action_index = self.action_field.get() - 1
+        object_index = self.object_field.get() - 1
+        target_indices = tuple(self.block2index[block] for block, field in
+                               self.target_fields.items() if field.get())
+        
         # Make sure the user has selected an action and an object
-        if not self.action_field.get() or not self.object_field.get():
+        # (Value of -1 means original value was zero, ie empty)
+        if action_index == -1 or object_index == -1:
             err_str = 'Please select and action and an object block.'
             self.badInputDialog(err_str)
             return
         
-        # Get action annotation (action and object fields are one-indexed, so
-        # convert to zero-indexing)
-        action_index = self.action_field.get()
-        object_index = self.object_field.get()
-        target_indices = tuple(self.block2index[block] for block, field in
-                               self.target_fields.items() if field.get())
-        action = self.actions[action_index - 1]
-        object_block = self.blocks[object_index - 1]
+        action = self.actions[action_index]
+        object_block = self.blocks[object_index]
         target_blocks = tuple(block for block, field in
                               self.target_fields.items() if field.get())
         
@@ -342,7 +369,7 @@ class Application:
             return
         
         # Parse and validate annotation
-        err_str = self.parseAction(action, object_block, target_blocks)
+        err_str = self.parseAction(action, object_index, target_indices)
         if err_str:
             self.badInputDialog(err_str)
             return
@@ -399,11 +426,11 @@ class Application:
         # Add a directed edge for each target block
         if action == 'place above':
             for target_index in target_indices:
-                cur_state.edge(object_index, target_index)
+                cur_state.edge(str(object_index), str(target_index))
         # Add an undirected edge for each target block
         elif action == 'place adjacent':
             for target_index in target_indices:
-                cur_state.edge(object_index, target_index, dir='none')
+                cur_state.edge(str(object_index), str(target_index), dir='none')
         # Remove all edges associated with this node
         elif action == 'remove':
             new_body = []
@@ -463,8 +490,8 @@ if __name__ == '__main__':
     root = tk.Tk()
     screen_width = root.winfo_screenwidth()
     screen_height = root.winfo_screenheight()
-    #root.geometry('{0}x{1}+0+0'.format(screen_width, screen_height))
-    root.geometry('800x600')
+    root.geometry('{0}x{1}+0+0'.format(screen_width, screen_height))
+    #root.geometry('800x600')
     
     app = Application(root)
     

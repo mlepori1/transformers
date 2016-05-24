@@ -51,6 +51,8 @@ class DuploCorpus:
                             + [(name, 'U10') for name in self.imu_ids]        \
                             + [('has labels', 'i4')] 
         
+        # 'studs' are length-18 strings because 18 is an upper bound on the
+        # description length for this attribute: max 8 studs + 8 spaces + 2 parens
         self.label_types = [('start', 'i'), ('end', 'i'), ('action', 'i'),
                             ('object', 'i'), ('target', 'i'),
                             ('obj_studs', 'S18'), ('tgt_studs', 'S18')]
@@ -316,7 +318,7 @@ class DuploCorpus:
     
     def readLabels(self, trial_id):
         """
-        Try to load annotations from file for trial starting at time t_init. If
+        Try to load annotations from file for the given trial. If
         there are no labels, warn the user and return an empty list.
         
         Args:
@@ -346,12 +348,44 @@ class DuploCorpus:
             self.logger.warn('Trial {}: no labels found'.format(trial_id))
             return []
         
-        # 'studs' are length-18 strings because 18 is an upper bound on the
-        # description length for this attribute: max 8 studs + 8 spaces + 2 parens
         # the first row is the column names, so skip it
         labels = np.loadtxt(fn, delimiter=',', dtype=self.label_types,
                             skiprows=1)
         return labels
+    
+    
+    def writeLabels(self, trial_id, labels):
+        """
+        Write labels to file for the given trial.
+        
+        Args:
+        -----
+        [int] trial_id: Trial identifier. This is the trial's index in the
+          corpus metadata array.
+        [list(tuple)] labels: Labels to be written. Each entry (tuple) in the
+          list represents a single action. Entries are as follows
+          [int] 0: Video frame index for start of event
+          [int] 1: Video frame index for end of event
+          [int] 2: Integer event ID (0-5). See labels file for description
+          [int] 3: Integer ID for object of event. Ex: 1 in 'place 1 on
+            4'. Not all events have objects; when object N/A ID is 0
+          [int] 4: Integer ID for target of event. Ex: 4 in 'place 1 on
+            4'. Not all events have targets; when target is N/A ID is 0
+          [str] 5: Adjacent studs are recorded for placement events. The
+            i-th entry in this list is adjacent to the i-th entry in tgt_studs.
+          [str] 6: Same as above. The i-th entry in this list is adjacent
+            to the i-th entry in obj_studs.
+        """
+        
+        # Convert labels to numpy structured array
+        labels = np.array(labels, dtype=self.label_types)
+        
+        fn = os.path.join(self.paths['labels'], '{}.csv'.format(trial_id))
+        with open(fn, 'w') as labels_file:
+            labels_writer = csv.writer(labels_file)
+            labels_writer.writerow(labels.dtype.names)
+            for row in labels:
+                labels_writer.writerow(row)
     
     
     def parseRawData(self, trial_id):

@@ -297,20 +297,20 @@ def stream(connected_devices, path, die, q):
                 data[1] = error
                 data[-1] = dev_id
                 timeout = False
-            elif len(packet) == 28:   # Standard packet
+            elif packet[2] == '\x01' and len(packet) == 28:  # Standard packet
                 error = 0
                 # Convert data from hex representation (see p. 7, 'WAX9
                 # application developer's guide')
                 # Zero-pad this packet at the end so it's the same length
                 # and format as the long packet
-                fmtstr = '<' + 3 * 'B' + 'h' + 'I' + 9 * 'h' + 'B'
+                fmtstr = '<' + 3 * 'B' + 'H' + 'I' + 9 * 'h' + 'B'
                 unpacked = list(struct.unpack(fmtstr, packet))
                 data = [cur_time, error] + unpacked[3:14] + 3 * [0] + [dev_id]
-            elif len(packet) == 36: # Long packet
+            elif packet[2] == '\x02' and len(packet) == 36:  # Long packet
                 error = 0
                 # Convert data from hex representation (see p. 7, 'WAX9
                 # application developer's guide')
-                fmtstr = '<' + 3 * 'B' + 'h' + 'I' + 11 * 'h' + 'I' + 'B'
+                fmtstr = '<' + 3 * 'B' + 'H' + 'I' + 9 * 'h' + 'H' + 'h' + 'I' + 'B'
                 unpacked = list(struct.unpack(fmtstr, packet))
                 data = [cur_time, error] + unpacked[3:17] + [dev_id]
             else:
