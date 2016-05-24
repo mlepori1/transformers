@@ -27,6 +27,7 @@ class Application:
         self.blocks = ('red square', 'yellow square', 'green square',
                        'blue square', 'red rect', 'yellow rect', 'green rect',
                        'blue rect')
+        self.block2index = {block: str(i) for i, block in enumerate(self.blocks)}
         
         # Corpus object manages file I/O -- filenames and paths are filled in
         # after reading input from trial selection interface
@@ -81,8 +82,8 @@ class Application:
                        body='size=4,4')
         
         # Save state image to file
-        print(state.render(filename=str(len(self.states)),
-                           directory=self.state_fig_path))
+        state.render(filename=str(len(self.states)),
+                     directory=self.state_fig_path)
         
         return state
 
@@ -116,6 +117,10 @@ class Application:
         
         master = self.content_frame
         
+        user_text = 'Select a trial to annotate:'
+        instructions = tk.Label(master, text=user_text)
+        instructions.pack()
+        
         # Draw a listbox with a vertical scrollbar
         scrollbar = tk.Scrollbar(master, orient=tk.VERTICAL)
         self.trial_field = tk.Listbox(master, yscrollcommand=scrollbar.set)
@@ -125,22 +130,26 @@ class Application:
         
         # Fill the listbox with trial data
         for entry in self.corpus.meta_data:
-            trial_info = '{} {}'.format(entry['participant id'], entry['task id'])
+            fmtstr = '{}, task {}'
+            trial_info = fmtstr.format(entry['participant id'], entry['task id'])
             self.trial_field.insert(tk.END, trial_info)
         
         # Draw a select button
         master = self.navigation_frame
         submit = tk.Button(master, text='Select', command=self.submit)
         submit.pack()
-        
-        self.content_frame.place(relx=0.5, rely=0.5, anchor='center')
-        self.navigation_frame.place(relx=0.5, rely=0.9, anchor='center')
     
     
     def submit(self):
         """
         Determine which trial the user selected for annotation.
         """
+        
+        # Prompt the user for input if no field is currently selected
+        if not self.trial_field.curselection():
+            error_string = 'Please make a selection.'
+            self.badInputDialog(error_string)
+            return
         
         # Read trial ID
         self.trial_id = self.trial_field.curselection()[0]
@@ -176,26 +185,11 @@ class Application:
         frame1 = tk.Frame(master)
         
         # RGB video
-        rgb_frame = tk.Frame(frame1)
-        
         rgb_frame_fn = self.rgb_frame_fns[self.cur_frame]
         rgb_image = ImageTk.PhotoImage(Image.open(rgb_frame_fn))
-        self.rgb_display = tk.Label(rgb_frame, image=rgb_image)
+        self.rgb_display = tk.Label(frame1, image=rgb_image)
         self.rgb_display.image = rgb_image
-        self.rgb_display.pack()
-        
-        # Action start/end button
-        if not self.action_started:
-            button_text = 'Action started'
-            button_cmd = self.startAction
-        else:
-            button_text = 'Action ended'
-            button_cmd = self.endAction
-        self.start_end = tk.Button(rgb_frame, text=button_text,
-                                   command=button_cmd, default=tk.ACTIVE)
-        self.start_end.pack()
-        
-        rgb_frame.pack(side=tk.LEFT)
+        self.rgb_display.pack(side=tk.LEFT)
         
         # Draw annotation frame
         ann_frame = tk.Frame(frame1)
@@ -204,14 +198,14 @@ class Application:
         action_label = tk.Label(ann_frame, text='Action')
         action_label.grid(row=0, column=0)
         self.action_field = tk.IntVar()
-        for i, label in enumerate(self.labels):
+        for i, label in enumerate(self.actions):
             button = tk.Radiobutton(ann_frame, text=label,
                                     variable=self.action_field, value=i+1)
             button.grid(sticky=tk.W, row=i+1, column=0)
         
         # Object label (radio buttons)
         obj_label = tk.Label(ann_frame, text='Object')
-        obj_label.grid(sticky=tk.W, row=0, column=1)
+        obj_label.grid(row=0, column=1)
         self.object_field = tk.IntVar()
         for i, block in enumerate(self.blocks):
             button = tk.Radiobutton(ann_frame, text=block,
@@ -220,15 +214,14 @@ class Application:
         
         # Target label(s) (check boxes)
         target_label = tk.Label(ann_frame, text='Target(s)')
-        target_label.grid(sticky=tk.W, row=0, column=2)
+        target_label.grid(row=0, column=2)
         for i, block in enumerate(self.blocks):
             self.target_fields[block] = tk.IntVar()
             target_box = tk.Checkbutton(ann_frame, text=block,
                                         variable=self.target_fields[block])
             target_box.grid(sticky=tk.W, row=i+1, column=2)
         
-        ann_frame.pack(side=tk.LEFT)
-        
+        ann_frame.pack(side=tk.RIGHT)
         frame1.pack(side=tk.TOP)
         
         # Draw visualization of annotation
@@ -240,6 +233,26 @@ class Application:
         self.state_display.image = state_image
         self.state_display.pack()
         frame2.pack(side=tk.BOTTOM)
+        
+        # Draw start/end and undo buttons
+        master = self.navigation_frame
+        self.start_end = tk.Button(master, text='Start of action',
+                                   command=self.startAction, default=tk.ACTIVE)
+        self.start_end.grid(sticky=tk.E, row=0, column=1)
+        undo = tk.Button(master, text="Undo annotation",
+                         command=self.undoAction)
+        undo.grid(sticky=tk.W, row=0, column=0)
+    
+    
+    def undoAction(self):
+        """
+        Delete the previous action annotation and re-draw block configuration
+        """
+        
+        self.states = self.states[:-1]
+        self.updateWorldState()
+        
+        return
     
     
     def back(self, event=None):
@@ -263,14 +276,14 @@ class Application:
         fewer than 10 frames away. Then, display the new rgb frame.
         """
         
-        self.cur_frame = min(self.cur_frame + 10, len(self.rgb_frame_fns - 1))
+        self.cur_frame = min(self.cur_frame + 10, len(self.rgb_frame_fns) - 1)
         
         # Redraw rgb frame
         cur_fn = self.rgb_frame_fns[self.cur_frame]
         rgb_image = Image.open(cur_fn)
         rgb_image = ImageTk.PhotoImage(Image.open(cur_fn))
-        self.rgb_frame.configure(image=rgb_image)
-        self.rgb_frame.image = rgb_image
+        self.rgb_display.configure(image=rgb_image)
+        self.rgb_display.image = rgb_image
     
     
     def startAction(self):
@@ -278,11 +291,10 @@ class Application:
         Update start/end button when user indicates the start of an action.
         """
         
-        print('Action started')
         self.action_started = True
         
         # Redraw button
-        self.start_end.configure(text='End action', command=self.endAction)
+        self.start_end.configure(text='End of action', command=self.endAction)
     
     
     def endAction(self):
@@ -292,29 +304,48 @@ class Application:
         world state. If not, display a warning message to the user.
         """
         
-        # Get action annotation
-        action = self.actions[self.action_field.get()]
-        object_block = self.blocks[self.object_field.get()]
+        # Make sure the user has selected an action and an object
+        if not self.action_field.get() or not self.object_field.get():
+            err_str = 'Please select and action and an object block.'
+            self.badInputDialog(err_str)
+            return
+        
+        # Get action annotation (action and object fields are one-indexed, so
+        # convert to zero-indexing)
+        action = self.actions[self.action_field.get() - 1]
+        object_block = self.blocks[self.object_field.get() - 1]
         target_blocks = tuple(block for block, field in self.target_fields.items()
                               if field.get())
+        
+        # Make sure the user has selected targets for actions that require them
+        if not target_blocks and not action in ('remove', 'rotate'):
+            err_str = 'Please select one or more target blocks.'
+            self.badInputDialog(err_str)
+            return
         
         # Parse and validate annotation
         err_str = self.parseAction(action, object_block, target_blocks)
         if err_str:
             self.badInputDialog(err_str)
+            return
         
-        print('Action ended')
         self.action_started = False
         
-        # Redraw world state
+        # Redraw world state image and stard/end button
+        self.updateWorldState()
+        self.start_end.configure(text='Start of action', command=self.startAction)
+    
+    
+    def updateWorldState(self):
+        """
+        Redraw the block configuration graph which represents the world state.
+        """
+        
         state_fn = '{}.png'.format(len(self.states) - 1)
         state_path = os.path.join(self.state_fig_path, state_fn)
         state_image = ImageTk.PhotoImage(Image.open(state_path))
         self.state_display.configure(image=state_image)
         self.state_display.image = state_image
-        
-        # Redraw button
-        self.start_end.configure(text='Start action', command=self.startAction)
     
     
     def parseAction(self, action, object_block, target_blocks):
@@ -328,6 +359,9 @@ class Application:
         [list(str)] target_blocks: Blocks near the one that was placed
         """
         
+        object_index = self.block2index[object_block]
+        target_indices = tuple(self.block2index[target] for target in target_blocks)
+        
         # TODO: validate the provided action by making sure it is a possible
         #   world state configuration
                         
@@ -340,31 +374,31 @@ class Application:
         
         # Add a directed edge for each target block
         if action == 'place above':
-            for target_block in target_blocks:
-                cur_state.edge(object_block, target_block)
+            for target_index in target_indices:
+                cur_state.edge(object_index, target_index)
         # Add an undirected edge for each target block
         elif action == 'place adjacent':
-            for target_block in target_blocks:
-                cur_state.edge(object_block, target_block, dir='none')
+            for target_index in target_indices:
+                cur_state.edge(object_index, target_index, dir='none')
         # Remove all edges associated with this node
         elif action == 'remove':
             new_body = []
             for entry in cur_state.body:
                 # Matches all edges originating from the removed block
-                start_pattern = '\t\t{}'.format(object_block)
+                start_pattern = '\t\t{}'.format(object_index)
                 # Matches all undirected edges leading to the removed block
-                end_pattern = '-> {} [dir=none]'.format(object_block)
+                end_pattern = '-> {} [dir=none]'.format(object_index)
                 if not (entry.startswith(start_pattern) or
                    entry.endswith(end_pattern)):
                     new_body.append(entry)
             cur_state.body = new_body
         
         # Save this state both to memory and to file
-        self.states.append(cur_state)
         cur_state.render(filename=str(len(self.states)),
                          directory=self.state_fig_path)
+        self.states.append(cur_state)
         
-        return 'I am a dummy function!'
+        return ''
     
     
     def badInputDialog(self, error_string):
