@@ -100,13 +100,14 @@ class Application:
         self.trial_id = self.corpus.meta_data.shape[0]
         raw_imu_fn = '{}-imu.csv'.format(self.trial_id)
         raw_imu_path = os.path.join(self.corpus.paths['raw'], raw_imu_fn)
-        frame_fn = '{}-rgb'.format(self.trial_id)
-        frame_path = os.path.join(self.corpus.paths['video-frames'], frame_fn)
+        frame_base_path = os.path.join(self.corpus.paths['video-frames'],
+                                       str(self.trial_id))
         timestamp_fn = '{}-timestamps.csv'.format(self.trial_id)
         timestamp_path = os.path.join(self.corpus.paths['raw'], timestamp_fn)
         
         # Define processes that stream from IMUs and camera
-        videostream_args = (frame_path, timestamp_path, self.die, self.video_q)
+        videostream_args = (frame_base_path, timestamp_path,
+                            self.corpus.image_types, self.die, self.video_q)
         imustream_args = (self.imu_id2socket, raw_imu_path, self.die, self.imu_q)
         self.processes = (mp.Process(target=ps.stream, args=videostream_args),
                           mp.Process(target=wax9.stream, args=imustream_args),)

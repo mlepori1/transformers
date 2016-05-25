@@ -32,7 +32,7 @@ class DuploCorpus:
         
         # ID strings for the recording devices
         self.imu_ids = ('08F1', '095D', '090F', '0949')
-        self.camera_ids = ('rgb',) # 'depth')
+        self.image_types = ('rgb', 'depth')
         
         self.initTypestructs()
         
@@ -288,8 +288,8 @@ class DuploCorpus:
         [dict(str->np array)] frame_timestamps:
         """
         
-        for camera_id in self.camera_ids:
-            fn = '{}-{}.csv'.format(trial_id, camera_id)
+        for image_type in self.image_types:
+            fn = '{}-{}.csv'.format(trial_id, image_type)
             path = os.path.join(self.paths['frame-timestamps'], fn)
             # Skip the first line because it's just the column names
             frame_timestamps = np.loadtxt(path, delimiter=',', skiprows=1)
