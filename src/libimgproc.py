@@ -16,6 +16,8 @@ import os
 import glob
 import subprocess
 
+from duplocorpus import DuploCorpus
+
 
 def drawKeyPoints(frame):
     """
@@ -118,29 +120,30 @@ def drawKeyPoints(frame):
         labeled_frame[:,:,i] = channel
     """
     
-    return contour_frame
+    return contour_frame.astype('uint8')
+
+
+def detectBlocks(frame):
+    """
+    Rectangle detection using the Hough transform.
+    """
+    
+    
 
 
 if __name__ == '__main__':
     
-    trial_id = '1460754570'
-    rgb_path = os.path.join('data', 'rgb', trial_id)
+    c = DuploCorpus()
     
-    out_path = os.path.join('output', 'rgb', trial_id)
-    if not os.path.exists(out_path):
-        os.makedirs(out_path)
+    rgb_frame_fns = c.getRgbFrameFns(1)
     
-    # Detect blocks in each video frame for the given trial
-    pattern = os.path.join(rgb_path, '*.png')
-    rgb_frame_fns = glob.glob(pattern)
-    
-    for file_path in rgb_frame_fns: #[250:255]:
+    for file_path in rgb_frame_fns[50:51]: #[250:255]:
         frame = cv2.imread(file_path)
         labeled_frame = drawKeyPoints(frame)
         
-        _, fn = os.path.split(file_path)
-        cv2.imwrite(os.path.join(out_path, fn), labeled_frame)
-        #plt.imshow(labeled_frame[:,:,[2, 1, 0]])
+        #_, fn = os.path.split(file_path)
+        #cv2.imwrite(os.path.join(out_path, fn), labeled_frame)
+        plt.imshow(labeled_frame[:,:,[2, 1, 0]])
     
     """
     frame_fmt = os.path.join(out_path, '%6d.png')
