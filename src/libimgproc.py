@@ -64,20 +64,24 @@ def drawKeyPoints(frame):
             corner_coords = tuple(corners[i][0])
             cv2.circle(frame, corner_coords, radius, color, -1)
     """
-        
-    lower_thresh = 250
+    
+    ksize = (3,3)
+    blurred = cv2.blur(frame, ksize)
+    plt.imshow(blurred[:,:,[2, 1, 0]])
+    plt.show()
+    
+    lower_thresh = 200
     ratio = 2
     upper_thresh = lower_thresh * ratio
-    
-    ksize = (2,2)
-    
-    blurred = cv2.blur(frame, ksize)
     edge_frame = cv2.Canny(blurred, upper_thresh, lower_thresh)
+    plt.imshow(edge_frame, cmap='gray')
+    plt.show()
     
     mode = cv2.RETR_TREE
     method = cv2.CHAIN_APPROX_SIMPLE
     contours, heirarchy = cv2.findContours(edge_frame, mode, method)
     
+    """
     contour_rects = []
     poly_contours = []
     eps = 3
@@ -91,9 +95,10 @@ def drawKeyPoints(frame):
         
         poly_contour = cv2.approxPolyDP(contour_pts, eps, True)
         poly_contours.append(poly_contour)
+    """
     
     contour_frame = np.zeros(frame.shape)
-    for contour_idx, contour in enumerate(poly_contours):
+    for contour_idx, contour in enumerate(contours):
         contour_pts = contours[contour_idx][:,0,:]
         
         # Determine closest color from interior of contour
@@ -107,7 +112,7 @@ def drawKeyPoints(frame):
         color = np.zeros(avg_color.shape)
         color[max_color] = 255
         
-        cv2.drawContours(contour_frame, poly_contours, contour_idx, color)
+        cv2.drawContours(contour_frame, contours, contour_idx, color)
     
     """
     edges = edge_frame == 255
@@ -136,14 +141,84 @@ if __name__ == '__main__':
     c = DuploCorpus()
     
     rgb_frame_fns = c.getRgbFrameFns(1)
+    depth_frame_fns = c.getDepthFrameFns(1)
     
-    for file_path in rgb_frame_fns[50:51]: #[250:255]:
-        frame = cv2.imread(file_path)
-        labeled_frame = drawKeyPoints(frame)
+    #for rgb_path, depth_path in zip(rgb_frame_fns, depth_frame_fns)[50:51]: #[250:255]:
+    for rgb_path in rgb_frame_fns[51:52]:
         
-        #_, fn = os.path.split(file_path)
-        #cv2.imwrite(os.path.join(out_path, fn), labeled_frame)
+        # Read in frame and plot
+        rgb_frame = cv2.imread(rgb_path)
+        rgb_frame = rgb_frame[:,:,[2, 1, 0]] # BGR to RGB
+        #plt.imshow(rgb_frame)
+        #plt.show()
+        
+        """
+        depth_frame = cv2.imread(depth_path, cv2.IMREAD_ANYDEPTH)
+        plt.imshow(depth_frame, cmap=plt.get_cmap('gray'))
+        plt.show()
+        """
+        
+        zero = np.zeros(rgb_frame[:,:,0].shape)
+        yellow_channel = rgb_frame[:,:,0:2].sum(axis=2) / 2.0
+        gray_channel = rgb_frame.sum(axis=2) / 3.0
+        
+        # Components along subspaces orthogonal to r/g/b/y/gray color subspaces
+        orth_red = rgb_frame - np.dstack((rgb_frame[:,:,0], zero, zero))
+        orth_green = rgb_frame - np.dstack((zero, rgb_frame[:,:,1], zero))
+        orth_blue = rgb_frame - np.dstack((zero, zero, rgb_frame[:,:,2]))
+        orth_yellow = rgb_frame - np.dstack((yellow_channel, yellow_channel, zero))
+        orth_gray = rgb_frame - np.dstack((gray_channel, gray_channel, gray_channel))
+        
+        # Distance to r/g/b/y/gray subspaces for each pixel (euclidean norm
+        # in color space)
+        dist_red = (orth_red ** 2).sum(axis=2) ** 0.5
+        dist_green = (orth_green ** 2).sum(axis=2) ** 0.5
+        dist_blue = (orth_blue ** 2).sum(axis=2) ** 0.5
+        dist_yellow = (orth_yellow ** 2).sum(axis=2) ** 0.5
+        dist_gray = (orth_gray ** 2).sum(axis=2) ** 0.5
+        
+        extended = np.dstack((dist_red, dist_green, dist_blue, dist_yellow,
+                              dist_gray))
+        min_index = extended.argmin(axis=2)
+        
+        color_frame = np.zeros(rgb_frame.shape)
+        color_frame[min_index == 0,:] = np.array([255, 0, 0])
+        color_frame[min_index == 1,:] = np.array([0, 255, 0])
+        color_frame[min_index == 2,:] = np.array([0, 0, 255])
+        color_frame[min_index == 3,:] = np.array([255, 255, 0])
+        color_frame[min_index == 4,:] = np.array([128, 128, 128])
+        color_frame = color_frame.astype('uint8')
+        
+        #plt.imshow(color_frame)
+        #plt.show()
+        
+        """
+        # Calculate and plot color space representation
+        # Unravel along dimension 0 and 1
+        f = frame[0::5,0::5,:]
+        t = tuple(f[i,j,:] for i in range(f.shape[0]) for j in range(f.shape[1]))
+        X = np.vstack(t)
+        fig = plt.figure()
+        ax = fig.add_subplot(1, 1, 1, projection='3d')
+        ax.scatter(X[:,0], X[:,1], X[:,2])
+        plt.show()
+        """
+        
+        width = 3
+        kernel = np.ones((width,width),np.uint8)
+        closed = cv2.morphologyEx(color_frame, cv2.MORPH_CLOSE, kernel)
+        plt.imshow(closed)
+        plt.show()
+        plt.imshow(color_frame)
+        plt.show()
+        
+        labeled_frame = drawKeyPoints(color_frame[:,:,[2, 1, 0]])
         plt.imshow(labeled_frame[:,:,[2, 1, 0]])
+        plt.show()
+        
+        _, fn = os.path.split(rgb_path)
+        #cv2.imwrite(os.path.join(c.paths['working'], fn), color_frame[:,:,[2, 1, 0]])
+        
     
     """
     frame_fmt = os.path.join(out_path, '%6d.png')

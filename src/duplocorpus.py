@@ -733,6 +733,30 @@ class DuploCorpus:
         pattern = os.path.join(rgb_dir, '*.png')
         rgb_frame_fns = sorted(glob.glob(pattern))
         return rgb_frame_fns
+    
+    
+    def getDepthFrameFns(self, trial_id):
+        """
+        Return a sorted list of the depth frame filenames for the specified
+        trial.
+        
+        Args:
+        -----
+        [int] trial_id:
+        
+        Returns:
+        --------
+        [list(str)] depth_frame_fns:
+        """
+        
+        # Get full path names for RGB frames in this trial
+        rgb_dir = os.path.join(self.paths['video-frames'], '{}-depth'.format(trial_id))
+        if not os.path.exists(rgb_dir):
+            return []
+        
+        pattern = os.path.join(rgb_dir, '*.png')
+        depth_frame_fns = sorted(glob.glob(pattern))
+        return depth_frame_fns
         
         
     def makeVideoLabels(self, trial_id):
