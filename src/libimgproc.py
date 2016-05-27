@@ -138,7 +138,7 @@ def detectBlocks(frame):
 
 if __name__ == '__main__':
     
-    trial_id = 9
+    trial_id = 11
     
     c = DuploCorpus()
     
@@ -201,7 +201,7 @@ if __name__ == '__main__':
         
         mode = cv2.RETR_TREE
         method = cv2.CHAIN_APPROX_SIMPLE
-        _, contours, _ = cv2.findContours(edge_frame, mode, method)
+        contours, _ = cv2.findContours(edge_frame, mode, method)
         contour_frame = np.zeros(color_frame.shape)
         cv2.drawContours(color_frame, contours, -1, (255, 255, 255))
         #plt.imshow(color_frame)
@@ -241,12 +241,12 @@ if __name__ == '__main__':
         
     import platform
     av_util = ''
-    if platform.system == 'Linux':
+    if platform.system() == 'Linux':
         av_util = 'avconv'
-    elif platform.system == 'Darwin':
+    elif platform.system() == 'Darwin':
         av_util = 'ffmpeg'
     frame_fmt = os.path.join(c.paths['working'], '%6d.png')
     video_path = os.path.join(c.paths['working'], '{}.avi'.format(trial_id))
-    make_video = ['avconv', '-y', '-f', 'image2', '-i', frame_fmt, '-c:v',
+    make_video = [av_util, '-y', '-f', 'image2', '-i', frame_fmt, '-c:v',
                   'libx264', '-r', '30', '-pix_fmt', 'yuv420p', video_path]
     subprocess.call(make_video)
