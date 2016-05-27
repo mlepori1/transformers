@@ -138,7 +138,7 @@ def detectBlocks(frame):
 
 if __name__ == '__main__':
     
-    trial_id = 11
+    trial_id = 0
     
     c = DuploCorpus()
     
@@ -186,7 +186,7 @@ if __name__ == '__main__':
         color_frame[min_index == 1,:] = np.array([0, 255, 0])
         color_frame[min_index == 2,:] = np.array([0, 0, 255])
         color_frame[min_index == 3,:] = np.array([255, 255, 0])
-        color_frame[min_index == 4,:] = np.array([128, 128, 128])
+        #color_frame[min_index == 4,:] = np.array([128, 128, 128])
         color_frame = color_frame.astype('uint8')
         
         #plt.imshow(color_frame)
@@ -201,7 +201,7 @@ if __name__ == '__main__':
         
         mode = cv2.RETR_TREE
         method = cv2.CHAIN_APPROX_SIMPLE
-        contours, _ = cv2.findContours(edge_frame, mode, method)
+        _, contours, _ = cv2.findContours(edge_frame, mode, method)
         contour_frame = np.zeros(color_frame.shape)
         cv2.drawContours(color_frame, contours, -1, (255, 255, 255))
         #plt.imshow(color_frame)

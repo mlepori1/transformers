@@ -274,8 +274,10 @@ class Application:
         Save labels and go back to the trial selection interface.
         """
         
+        # Save labels if they exist and update metadata file to reflect changes
         if self.labels:
             self.corpus.writeLabels(self.trial_id, self.labels)
+            self.corpus.updateMetaData(self.trial_id)
         self.clearInterface()
         self.__init__(self.parent)
     
@@ -285,8 +287,10 @@ class Application:
         Save labels and exit the annotation interface.
         """
         
+        # Save labels if they exist and update metadata file to reflect changes
         if self.labels:
             self.corpus.writeLabels(self.trial_id, self.labels)
+            self.corpus.updateMetaData(self.trial_id)
         self.parent.destroy()
     
     

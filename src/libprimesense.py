@@ -51,6 +51,9 @@ def stream(frame_base_path, timestamp_path, img_types, die, q):
     depth_stream = dev.create_depth_stream()
     rgb_stream = dev.create_color_stream()
     
+    # Register depth and color cameras
+    dev.set_image_registration_mode(openni2.IMAGE_REGISTRATION_DEPTH_TO_COLOR)
+    
     frame_index = 0
     
     print("Starting RGBD streams...")
