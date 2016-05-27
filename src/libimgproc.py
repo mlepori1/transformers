@@ -138,31 +138,31 @@ def detectBlocks(frame):
 
 if __name__ == '__main__':
     
+    trial_id = 9
+    
     c = DuploCorpus()
     
-    rgb_frame_fns = c.getRgbFrameFns(1)
-    depth_frame_fns = c.getDepthFrameFns(1)
+    rgb_frame_fns = c.getRgbFrameFns(trial_id)
+    depth_frame_fns = c.getDepthFrameFns(trial_id)
     
-    #for rgb_path, depth_path in zip(rgb_frame_fns, depth_frame_fns)[50:51]: #[250:255]:
-    for rgb_path in rgb_frame_fns[51:52]:
+    for rgb_path, depth_path in zip(rgb_frame_fns, depth_frame_fns): #[250:255]:
+    #for rgb_path in rgb_frame_fns[51:52]:
         
-        # Read in frame and plot
+        # Read in frames and plot
         rgb_frame = cv2.imread(rgb_path)
         rgb_frame = rgb_frame[:,:,[2, 1, 0]] # BGR to RGB
         #plt.imshow(rgb_frame)
         #plt.show()
+        depth_frame = cv2.imread(depth_path, cv2.IMREAD_ANYDEPTH).astype('uint8')
+        #plt.imshow(depth_frame, cmap=plt.get_cmap('gray'))
+        #plt.show()
         
-        """
-        depth_frame = cv2.imread(depth_path, cv2.IMREAD_ANYDEPTH)
-        plt.imshow(depth_frame, cmap=plt.get_cmap('gray'))
-        plt.show()
-        """
-        
-        zero = np.zeros(rgb_frame[:,:,0].shape)
+        # Get colors from rgb data
         yellow_channel = rgb_frame[:,:,0:2].sum(axis=2) / 2.0
         gray_channel = rgb_frame.sum(axis=2) / 3.0
         
         # Components along subspaces orthogonal to r/g/b/y/gray color subspaces
+        zero = np.zeros(rgb_frame[:,:,0].shape)
         orth_red = rgb_frame - np.dstack((rgb_frame[:,:,0], zero, zero))
         orth_green = rgb_frame - np.dstack((zero, rgb_frame[:,:,1], zero))
         orth_blue = rgb_frame - np.dstack((zero, zero, rgb_frame[:,:,2]))
@@ -192,6 +192,21 @@ if __name__ == '__main__':
         #plt.imshow(color_frame)
         #plt.show()
         
+        # Get edge contours from depth data and draw onto color image
+        lower_thresh = 50
+        ratio = 1.5
+        upper_thresh = lower_thresh * ratio
+        edge_frame = cv2.Canny(depth_frame, upper_thresh, lower_thresh)
+        #plt.imshow(edge_frame, cmap='gray')
+        
+        mode = cv2.RETR_TREE
+        method = cv2.CHAIN_APPROX_SIMPLE
+        _, contours, _ = cv2.findContours(edge_frame, mode, method)
+        contour_frame = np.zeros(color_frame.shape)
+        cv2.drawContours(color_frame, contours, -1, (255, 255, 255))
+        #plt.imshow(color_frame)
+        #plt.show()
+        
         """
         # Calculate and plot color space representation
         # Unravel along dimension 0 and 1
@@ -202,7 +217,6 @@ if __name__ == '__main__':
         ax = fig.add_subplot(1, 1, 1, projection='3d')
         ax.scatter(X[:,0], X[:,1], X[:,2])
         plt.show()
-        """
         
         width = 3
         kernel = np.ones((width,width),np.uint8)
@@ -211,18 +225,28 @@ if __name__ == '__main__':
         plt.show()
         plt.imshow(color_frame)
         plt.show()
+        """
         
+        """
         labeled_frame = drawKeyPoints(color_frame[:,:,[2, 1, 0]])
         plt.imshow(labeled_frame[:,:,[2, 1, 0]])
         plt.show()
+        """
         
+        orig_frames = np.hstack((rgb_frame, np.dstack(3 * (depth_frame,))))
+        processed_frames = np.hstack((color_frame, np.dstack(3 * (edge_frame,))))
+        meta_frame = np.vstack((orig_frames, processed_frames))
         _, fn = os.path.split(rgb_path)
-        #cv2.imwrite(os.path.join(c.paths['working'], fn), color_frame[:,:,[2, 1, 0]])
+        cv2.imwrite(os.path.join(c.paths['working'], fn), meta_frame[:,:,[2, 1, 0]])
         
-    
-    """
-    frame_fmt = os.path.join(out_path, '%6d.png')
-    video_path = os.path.join('output', 'rgb', trial_id + '.avi')
-    make_video = ['ffmpeg', '-f', 'image2', '-i', frame_fmt, '-r', '30', video_path]
+    import platform
+    av_util = ''
+    if platform.system == 'Linux':
+        av_util = 'avconv'
+    elif platform.system == 'Darwin':
+        av_util = 'ffmpeg'
+    frame_fmt = os.path.join(c.paths['working'], '%6d.png')
+    video_path = os.path.join(c.paths['working'], '{}.avi'.format(trial_id))
+    make_video = ['avconv', '-y', '-f', 'image2', '-i', frame_fmt, '-c:v',
+                  'libx264', '-r', '30', '-pix_fmt', 'yuv420p', video_path]
     subprocess.call(make_video)
-    """
