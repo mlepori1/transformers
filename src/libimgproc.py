@@ -138,15 +138,14 @@ def detectBlocks(frame):
 
 if __name__ == '__main__':
     
-    trial_id = 0
+    trial_id = 4
     
     c = DuploCorpus()
     
     rgb_frame_fns = c.getRgbFrameFns(trial_id)
     depth_frame_fns = c.getDepthFrameFns(trial_id)
     
-    for rgb_path, depth_path in zip(rgb_frame_fns, depth_frame_fns): #[250:255]:
-    #for rgb_path in rgb_frame_fns[51:52]:
+    for rgb_path, depth_path in zip(rgb_frame_fns, depth_frame_fns):
         
         # Read in frames and plot
         rgb_frame = cv2.imread(rgb_path)
@@ -154,6 +153,10 @@ if __name__ == '__main__':
         #plt.imshow(rgb_frame)
         #plt.show()
         depth_frame = cv2.imread(depth_path, cv2.IMREAD_ANYDEPTH).astype('uint8')
+        #plt.imshow(depth_frame, cmap=plt.get_cmap('gray'))
+        #plt.show()
+        
+        depth_frame[depth_frame == 0] = int(np.median(depth_frame))
         #plt.imshow(depth_frame, cmap=plt.get_cmap('gray'))
         #plt.show()
         
@@ -186,7 +189,7 @@ if __name__ == '__main__':
         color_frame[min_index == 1,:] = np.array([0, 255, 0])
         color_frame[min_index == 2,:] = np.array([0, 0, 255])
         color_frame[min_index == 3,:] = np.array([255, 255, 0])
-        #color_frame[min_index == 4,:] = np.array([128, 128, 128])
+        color_frame[min_index == 4,:] = np.array([128, 128, 128])
         color_frame = color_frame.astype('uint8')
         
         #plt.imshow(color_frame)
@@ -198,13 +201,36 @@ if __name__ == '__main__':
         upper_thresh = lower_thresh * ratio
         edge_frame = cv2.Canny(depth_frame, upper_thresh, lower_thresh)
         #plt.imshow(edge_frame, cmap='gray')
+        #plt.show()
         
+        # Detect contours
         mode = cv2.RETR_TREE
         method = cv2.CHAIN_APPROX_SIMPLE
         _, contours, _ = cv2.findContours(edge_frame, mode, method)
-        contour_frame = np.zeros(color_frame.shape)
-        cv2.drawContours(color_frame, contours, -1, (255, 255, 255))
-        #plt.imshow(color_frame)
+        contours = [cont for cont in contours if cont.shape[0] > 20]
+        contour_frame = rgb_frame.copy()
+        for i, contour in enumerate(contours):
+            color = (0, 0, 0)
+            cv2.drawContours(color_frame, contours, i, color)
+        #plt.imshow(contour_frame)
+        #plt.show()
+        
+        # Detect lines using Hough transform
+        lines = cv2.HoughLinesP(edge_frame, 50, 2 * np.pi / 180, 50, 50, 5)
+        line_frame = rgb_frame.copy()
+        line_frame[edge_frame.astype(bool),:] = np.zeros(3, dtype='uint8')
+        """
+        for i in range(line_frame.shape[2]):
+            channel = line_frame[:,:,i]
+            channel[edge_frame.astype(bool)] = 0
+            line_frame[:,:,i] = channel
+        """
+        for l in lines:
+            points = l[0]
+            intensity = 0
+            color = (0, 255, 0)
+            cv2.line(line_frame, (points[0], points[1]), (points[2], points[3]), color)
+        #plt.imshow(line_frame)
         #plt.show()
         
         """
@@ -238,7 +264,8 @@ if __name__ == '__main__':
         meta_frame = np.vstack((orig_frames, processed_frames))
         _, fn = os.path.split(rgb_path)
         cv2.imwrite(os.path.join(c.paths['working'], fn), meta_frame[:,:,[2, 1, 0]])
-        
+    
+    #"""
     import platform
     av_util = ''
     if platform.system() == 'Linux':
@@ -250,3 +277,4 @@ if __name__ == '__main__':
     make_video = [av_util, '-y', '-f', 'image2', '-i', frame_fmt, '-c:v',
                   'libx264', '-r', '30', '-pix_fmt', 'yuv420p', video_path]
     subprocess.call(make_video)
+    #"""
