@@ -56,7 +56,7 @@ def detectBlocks(depth_frame):
 
 if __name__ == '__main__':
     
-    trial_id = 8
+    trial_id = 3
     
     c = DuploCorpus()
     
@@ -126,7 +126,7 @@ if __name__ == '__main__':
         mode = cv2.RETR_TREE
         method = cv2.CHAIN_APPROX_SIMPLE
         _, bin_thresh = cv2.threshold(depth_frame, 80, 255, 0)
-        contours, _ = cv2.findContours(bin_thresh, mode, method)
+        _, contours, _ = cv2.findContours(bin_thresh, mode, method)
         contour_frame = rgb_frame.copy()
         for i, contour in enumerate(contours):
             color = (255, 255, 255)
@@ -178,7 +178,7 @@ if __name__ == '__main__':
         plt.show()
         """
         
-        blobs = detectBlocks(depth_frame) #rgb_frame[:,:,0])
+        #blobs = detectBlocks(depth_frame) #rgb_frame[:,:,0])
         """
         for blob in blobs:
             center = tuple(int(p) for p in blob.pt if not math.isnan(p))

@@ -71,6 +71,7 @@ class Application:
         self.task = None
         self.active_blocks = None
         
+        self.block2button = {}
         self.block2imu_id = {}
         self.imu_id2socket = {}
         self.imu_settings = []
@@ -247,8 +248,18 @@ class Application:
             id_label = tk.Label(master, text=' \t ', background=block)
             id_label.grid(row=i+1, column=0)
             
+            # Draw different buttons depending on whether the block is
+            # associated with a connected IMU or not
             self.block2imu_id_field[block] = tk.StringVar(master)
-            self.block2imu_id_field[block].set(self.corpus.imu_ids[i])
+            if block in self.block2imu_id:
+                imu = self.block2imu_id[block]
+                self.block2imu_id_field[block].set(imu)
+                button_text = '[Connected]'
+                func = lambda b=str(block): self.connectionAttemptDialog(b)
+            else:
+                self.block2imu_id_field[block].set(self.corpus.imu_ids[i])
+                button_text = 'Connect'
+                func = lambda b=str(block): self.connectionAttemptDialog(b)
             
             menu_args = (master, self.block2imu_id_field[block]) \
                       + self.corpus.imu_ids
@@ -256,8 +267,9 @@ class Application:
             imu_menu.grid(sticky=tk.W, row=i+1, column=1)
             
             func = lambda b=str(block): self.connectionAttemptDialog(b)
-            button = tk.Button(master, text='Connect', command=func)
+            button = tk.Button(master, text=button_text, command=func)
             button.grid(sticky=tk.W, row=i+1, column=2)
+            self.block2button[block] = button
         
         # Draw navigation buttons
         master = self.navigation_frame
@@ -446,6 +458,9 @@ class Application:
             parsed_settings = wax9.parseSettings(settings)
             # TODO: Correct settings if they aren't what we expect
             self.imu_settings.append(parsed_settings)
+            
+            # Update 'connect' button
+            self.block2button[block].configure(text='[Connected]')
             
             sample_str = wax9.sample(socket)
             data_str = sample_str.strip().split('\r\n')[1]
