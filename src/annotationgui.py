@@ -240,12 +240,12 @@ class Application:
         self.start_end = tk.Button(master, text='Start of action',
                                    command=self.startAction, default=tk.ACTIVE)
         self.start_end.grid(sticky=tk.E, row=0, column=1)
-        undo = tk.Button(master, text="Undo annotation",
+        undo = tk.Button(master, text='Undo annotation',
                          command=self.undoAction)
         undo.grid(sticky=tk.W, row=0, column=0)
-        restart = tk.Button(master, text="Start new trial", command=self.restart)
+        restart = tk.Button(master, text='Start new trial', command=self.restart)
         restart.grid(sticky=tk.W, row=0, column=2)
-        restart = tk.Button(master, text="Quit", command=self.close)
+        restart = tk.Button(master, text='Quit', command=self.close)
         restart.grid(sticky=tk.W, row=0, column=3)
     
     
@@ -379,10 +379,16 @@ class Application:
             return
         
         # Store the action annotation
-        for target_index in target_indices:
+        if action in ('remove', 'rotate'):  # No targets
             self.labels.append((self.action_start_index, self.action_end_index,
-                                action_index, object_index, target_index,
+                                action_index, object_index, -1,
                                 '()', '()'))
+        else:   # Write a label for each target
+            for target_index in target_indices:
+                self.labels.append((self.action_start_index,
+                                    self.action_end_index,
+                                    action_index, object_index, target_index,
+                                    '()', '()'))
         
         # Reset start and end indices
         self.action_start_index = -1
