@@ -16,136 +16,54 @@ import os
 import glob
 import subprocess
 
+import math
+
 from duplocorpus import DuploCorpus
 
 
-def drawKeyPoints(frame):
+def detectBlocks(depth_frame):
     """
     Use a simple blob detector to estimate block locations and poses in a given
-    BGR video frame
+    depth video frame
     
     Args:
     -----
-    [np array] frame: h-by-w-by-3 numpy array representing a BGR video frame
+    [np array] depth_frame:
     
     Returns:
     --------
     [np array] frame:
     """
     
-    #"""
-    # Set blob detector parameters. Since DUPLO blocks are simple primary
-    # colors, we'll look for blobs in the individual B, G, R channels
     params = cv2.SimpleBlobDetector_Params()
-    params.blobColor = 255
-    #params.filterByInertia = False
-    #params.filterByConvexity = False
-    #params.minArea = 50
-    #params.maxArea = 300
-    #"""
+    params.minThreshold = 0
+    params.maxThreshold = 250
+    params.thresholdStep = 10
+    params.minDistBetweenBlobs = 1
+    params.filterByColor = False
+    params.filterByArea = False
+    params.filterByCircularity = False
+    params.filterByInertia = False
+    params.filterByConvexity = False
+    #params.minArea = 500
+    #params.maxArea = 3000
     
-    #blob_detector = cv2.SimpleBlobDetector(params)
+    blob_detector = cv2.SimpleBlobDetector(params)
+    blobs = blob_detector.detect(depth_frame)
     
-    """
-    maxCorners = 20         # Don't return more corners than this
-    qualityLevel = 0.05     # Max acceptable difference in quality from best corner
-    minDistance = 5        # Minimum Euclidean distance between corners (in pixels)
-    
-    num_channels = frame.shape[2]
-    for channel in range(num_channels):
-        
-        #blobs = blob_detector.detect(frame[:,:,channel])
-        corners = cv2.goodFeaturesToTrack(frame[:,:,channel], maxCorners, qualityLevel, minDistance)
-        corners = corners.astype(int)
-
-        color = tuple(255 if j == channel else 0 for j in range(num_channels))
-        radius = 2  # pixels
-        for i in range(corners.shape[0]):
-            corner_coords = tuple(corners[i][0])
-            cv2.circle(frame, corner_coords, radius, color, -1)
-    """
-    
-    ksize = (3,3)
-    blurred = cv2.blur(frame, ksize)
-    plt.imshow(blurred[:,:,[2, 1, 0]])
-    plt.show()
-    
-    lower_thresh = 200
-    ratio = 2
-    upper_thresh = lower_thresh * ratio
-    edge_frame = cv2.Canny(blurred, upper_thresh, lower_thresh)
-    plt.imshow(edge_frame, cmap='gray')
-    plt.show()
-    
-    mode = cv2.RETR_TREE
-    method = cv2.CHAIN_APPROX_SIMPLE
-    contours, heirarchy = cv2.findContours(edge_frame, mode, method)
-    
-    """
-    contour_rects = []
-    poly_contours = []
-    eps = 3
-    for contour_idx, contour in enumerate(contours):
-        contour_pts = contour[:,0,:]
-        
-        rect = cv2.minAreaRect(contour_pts)
-        box = cv2.cv.BoxPoints(rect)
-        box = np.int0(box)
-        contour_rects.append(box)
-        
-        poly_contour = cv2.approxPolyDP(contour_pts, eps, True)
-        poly_contours.append(poly_contour)
-    """
-    
-    contour_frame = np.zeros(frame.shape)
-    for contour_idx, contour in enumerate(contours):
-        contour_pts = contours[contour_idx][:,0,:]
-        
-        # Determine closest color from interior of contour
-        max_row = contour_pts[:,1].max()
-        min_row = contour_pts[:,1].min()
-        max_col = contour_pts[:,0].max()
-        min_col = contour_pts[:,0].min()
-        colors = frame[min_row:max_row, min_col:max_col, :]
-        avg_color = np.mean(np.mean(colors, axis=0), axis=0)
-        max_color = avg_color.argmax()
-        color = np.zeros(avg_color.shape)
-        color[max_color] = 255
-        
-        cv2.drawContours(contour_frame, contours, contour_idx, color)
-    
-    """
-    edges = edge_frame == 255
-    
-    labeled_frame = np.zeros(frame.shape)
-    num_channels = frame.shape[2]
-    for i in range(num_channels):
-        channel = frame[:,:,i]
-        channel[edges] = 0
-        labeled_frame[:,:,i] = channel
-    """
-    
-    return contour_frame.astype('uint8')
-
-
-def detectBlocks(frame):
-    """
-    Rectangle detection using the Hough transform.
-    """
-    
-    
+    return blobs
 
 
 if __name__ == '__main__':
     
-    trial_id = 4
+    trial_id = 8
     
     c = DuploCorpus()
     
     rgb_frame_fns = c.getRgbFrameFns(trial_id)
     depth_frame_fns = c.getDepthFrameFns(trial_id)
     
-    for rgb_path, depth_path in zip(rgb_frame_fns, depth_frame_fns):
+    for rgb_path, depth_path in zip(rgb_frame_fns, depth_frame_fns): #[50:51]:
         
         # Read in frames and plot
         rgb_frame = cv2.imread(rgb_path)
@@ -189,7 +107,8 @@ if __name__ == '__main__':
         color_frame[min_index == 1,:] = np.array([0, 255, 0])
         color_frame[min_index == 2,:] = np.array([0, 0, 255])
         color_frame[min_index == 3,:] = np.array([255, 255, 0])
-        color_frame[min_index == 4,:] = np.array([128, 128, 128])
+        color_frame[min_index == 4,:] = np.array([255, 255, 255]) / 2.0
+        color_frame[depth_frame > 80] = 0
         color_frame = color_frame.astype('uint8')
         
         #plt.imshow(color_frame)
@@ -206,13 +125,13 @@ if __name__ == '__main__':
         # Detect contours
         mode = cv2.RETR_TREE
         method = cv2.CHAIN_APPROX_SIMPLE
-        _, contours, _ = cv2.findContours(edge_frame, mode, method)
-        contours = [cont for cont in contours if cont.shape[0] > 20]
+        _, bin_thresh = cv2.threshold(depth_frame, 80, 255, 0)
+        contours, _ = cv2.findContours(bin_thresh, mode, method)
         contour_frame = rgb_frame.copy()
         for i, contour in enumerate(contours):
-            color = (0, 0, 0)
-            cv2.drawContours(color_frame, contours, i, color)
-        #plt.imshow(contour_frame)
+            color = (255, 255, 255)
+            cv2.drawContours(contour_frame, contours, i, color)
+        #plt.imshow(contour_frame) #, cmap='gray')
         #plt.show()
         
         # Detect lines using Hough transform
@@ -257,6 +176,15 @@ if __name__ == '__main__':
         labeled_frame = drawKeyPoints(color_frame[:,:,[2, 1, 0]])
         plt.imshow(labeled_frame[:,:,[2, 1, 0]])
         plt.show()
+        """
+        
+        blobs = detectBlocks(depth_frame) #rgb_frame[:,:,0])
+        """
+        for blob in blobs:
+            center = tuple(int(p) for p in blob.pt if not math.isnan(p))
+            if not len(center) == 2:
+                continue
+            cv2.circle(depth_frame, center, int(blob.size / 2), (255, 255, 255))
         """
         
         orig_frames = np.hstack((rgb_frame, np.dstack(3 * (depth_frame,))))
