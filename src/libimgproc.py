@@ -8,190 +8,176 @@ AUTHOR
   Jonathan D. Jones
 """
 
-
-import cv2
-import numpy as np
-from matplotlib import pyplot as plt
 import os
-import glob
 import subprocess
 
-import math
+import numpy as np
+from matplotlib import pyplot as plt
+
+from skimage import io
+from skimage import feature
+from skimage import transform
 
 from duplocorpus import DuploCorpus
 
 
-def detectBlocks(depth_frame):
+def quantizeColors(rgb_image):
     """
-    Use a simple blob detector to estimate block locations and poses in a given
-    depth video frame
+    Apply color quantization by assigning each pixel to the nearest color
+    subspace in RGB space.
     
     Args:
     -----
-    [np array] depth_frame:
+    [cv mat] rgb_image: h-by-w-by-3 image array with third dimension
+      representing the intensities of the red, green, and blue channels
     
     Returns:
     --------
-    [np array] frame:
+    [cv mat] quantized_image: h-by-w-by-5 image array with third dimension
+      representing the quantization responses in the red, green, blue, yellow,
+      and gray color subspaces
     """
     
-    params = cv2.SimpleBlobDetector_Params()
-    params.minThreshold = 0
-    params.maxThreshold = 250
-    params.thresholdStep = 10
-    params.minDistBetweenBlobs = 1
-    params.filterByColor = False
-    params.filterByArea = False
-    params.filterByCircularity = False
-    params.filterByInertia = False
-    params.filterByConvexity = False
-    #params.minArea = 500
-    #params.maxArea = 3000
+    # Red, green, blue, yellow, gray
+    rgb_values = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0),
+                  (128, 128, 128)]
     
-    blob_detector = cv2.SimpleBlobDetector(params)
-    blobs = blob_detector.detect(depth_frame)
+    yellow_channel = rgb_frame[:,:,0:2].sum(axis=2) / 2.0
+    gray_channel = rgb_frame.sum(axis=2) / 3.0
     
-    return blobs
+    # Components along orthogonal complement of r/g/b/y/gray color subspaces
+    zero = np.zeros(rgb_frame[:,:,0].shape)
+    orth_red = rgb_frame - np.dstack((rgb_frame[:,:,0], zero, zero))
+    orth_green = rgb_frame - np.dstack((zero, rgb_frame[:,:,1], zero))
+    orth_blue = rgb_frame - np.dstack((zero, zero, rgb_frame[:,:,2]))
+    orth_yellow = rgb_frame - np.dstack((yellow_channel, yellow_channel, zero))
+    orth_gray = rgb_frame - np.dstack((gray_channel, gray_channel, gray_channel))
+    
+    # Distance to r/g/b/y/gray subspaces for each pixel (euclidean norm
+    # in color space)
+    dist_red = (orth_red ** 2).sum(axis=2) ** 0.5
+    dist_green = (orth_green ** 2).sum(axis=2) ** 0.5
+    dist_blue = (orth_blue ** 2).sum(axis=2) ** 0.5
+    dist_yellow = (orth_yellow ** 2).sum(axis=2) ** 0.5
+    dist_gray = (orth_gray ** 2).sum(axis=2) ** 0.5
+    extended = np.dstack((dist_red, dist_green, dist_blue, dist_yellow,
+                          dist_gray))
+    min_index = extended.argmin(axis=2)
+    
+    channel_responses = np.zeros(extended.shape, dtype=bool)
+    quantized_image = np.zeros(rgb_image.shape, dtype='uint8')
+    for i, value in enumerate(rgb_values):
+        in_region = min_index == i
+        channel_responses[:,:,i] = in_region
+        quantized_image[in_region, :] = np.array(value)
+    
+    return quantized_image, channel_responses
+
+
+def quantizeDepths(depth_image):
+    """
+    """
+    
+    thresholds = (0, 50, 65, 85, 256)
+    
+    # Any pixel intensity actually equal to zero is either directly in front
+    # of the camera (unlikely) or was thrown out when the camera registered
+    # this frame to the RGB camera (more likely). By setting all 0 values near
+    # the maximum (ie far away), we treat them as part of the background.
+    depth_image[depth_image == 0] = depth_image.max() - 1
+    
+    # Assemble quantized image array with one channel for each depth region
+    channel_responses = np.zeros(depth_image.shape + (len(thresholds) - 1,),
+                               dtype=bool)
+    quantized_image = np.zeros(depth_image.shape, dtype='uint8')
+    for i in range(len(thresholds) - 1):
+        
+        # Quantize pixels in this depth region by assigning them to the mean
+        # value
+        lower_thresh = thresholds[i]
+        upper_thresh = thresholds[i+1]
+        value = (lower_thresh + upper_thresh) / 2
+        
+        in_region = np.logical_and(depth_image >= lower_thresh,
+                                   depth_image <  upper_thresh)
+        channel_responses[:,:,i] = in_region
+        quantized_image[in_region] = value
+    
+    return quantized_image, channel_responses
 
 
 if __name__ == '__main__':
     
-    trial_id = 3
+    trial_id = 4
     
     c = DuploCorpus()
+        
+    rgb_frame_fns = c.getRgbFrameFns(trial_id)[50:51]
+    depth_frame_fns = c.getDepthFrameFns(trial_id)[50:51]
     
-    rgb_frame_fns = c.getRgbFrameFns(trial_id)
-    depth_frame_fns = c.getDepthFrameFns(trial_id)
-    
-    for rgb_path, depth_path in zip(rgb_frame_fns, depth_frame_fns): #[50:51]:
+    for rgb_path, depth_path in zip(rgb_frame_fns, depth_frame_fns):
         
         # Read in frames and plot
-        rgb_frame = cv2.imread(rgb_path)
-        rgb_frame = rgb_frame[:,:,[2, 1, 0]] # BGR to RGB
-        #plt.imshow(rgb_frame)
-        #plt.show()
-        depth_frame = cv2.imread(depth_path, cv2.IMREAD_ANYDEPTH).astype('uint8')
-        #plt.imshow(depth_frame, cmap=plt.get_cmap('gray'))
-        #plt.show()
+        rgb_frame = io.imread(rgb_path)
+        depth_frame = io.imread(depth_path).astype('uint8')
         
-        depth_frame[depth_frame == 0] = int(np.median(depth_frame))
-        #plt.imshow(depth_frame, cmap=plt.get_cmap('gray'))
-        #plt.show()
-        
-        # Get colors from rgb data
-        yellow_channel = rgb_frame[:,:,0:2].sum(axis=2) / 2.0
-        gray_channel = rgb_frame.sum(axis=2) / 3.0
-        
-        # Components along subspaces orthogonal to r/g/b/y/gray color subspaces
-        zero = np.zeros(rgb_frame[:,:,0].shape)
-        orth_red = rgb_frame - np.dstack((rgb_frame[:,:,0], zero, zero))
-        orth_green = rgb_frame - np.dstack((zero, rgb_frame[:,:,1], zero))
-        orth_blue = rgb_frame - np.dstack((zero, zero, rgb_frame[:,:,2]))
-        orth_yellow = rgb_frame - np.dstack((yellow_channel, yellow_channel, zero))
-        orth_gray = rgb_frame - np.dstack((gray_channel, gray_channel, gray_channel))
-        
-        # Distance to r/g/b/y/gray subspaces for each pixel (euclidean norm
-        # in color space)
-        dist_red = (orth_red ** 2).sum(axis=2) ** 0.5
-        dist_green = (orth_green ** 2).sum(axis=2) ** 0.5
-        dist_blue = (orth_blue ** 2).sum(axis=2) ** 0.5
-        dist_yellow = (orth_yellow ** 2).sum(axis=2) ** 0.5
-        dist_gray = (orth_gray ** 2).sum(axis=2) ** 0.5
-        
-        extended = np.dstack((dist_red, dist_green, dist_blue, dist_yellow,
-                              dist_gray))
-        min_index = extended.argmin(axis=2)
-        
-        color_frame = np.zeros(rgb_frame.shape)
-        color_frame[min_index == 0,:] = np.array([255, 0, 0])
-        color_frame[min_index == 1,:] = np.array([0, 255, 0])
-        color_frame[min_index == 2,:] = np.array([0, 0, 255])
-        color_frame[min_index == 3,:] = np.array([255, 255, 0])
-        color_frame[min_index == 4,:] = np.array([255, 255, 255]) / 2.0
-        color_frame[depth_frame > 80] = 0
-        color_frame = color_frame.astype('uint8')
-        
-        #plt.imshow(color_frame)
-        #plt.show()
-        
-        # Get edge contours from depth data and draw onto color image
-        lower_thresh = 50
-        ratio = 1.5
-        upper_thresh = lower_thresh * ratio
-        edge_frame = cv2.Canny(depth_frame, upper_thresh, lower_thresh)
-        #plt.imshow(edge_frame, cmap='gray')
-        #plt.show()
-        
-        # Detect contours
-        mode = cv2.RETR_TREE
-        method = cv2.CHAIN_APPROX_SIMPLE
-        _, bin_thresh = cv2.threshold(depth_frame, 80, 255, 0)
-        _, contours, _ = cv2.findContours(bin_thresh, mode, method)
-        contour_frame = rgb_frame.copy()
-        for i, contour in enumerate(contours):
-            color = (255, 255, 255)
-            cv2.drawContours(contour_frame, contours, i, color)
-        #plt.imshow(contour_frame) #, cmap='gray')
-        #plt.show()
-        
-        # Detect lines using Hough transform
-        lines = cv2.HoughLinesP(edge_frame, 50, 2 * np.pi / 180, 50, 50, 5)
-        line_frame = rgb_frame.copy()
-        line_frame[edge_frame.astype(bool),:] = np.zeros(3, dtype='uint8')
-        """
-        for i in range(line_frame.shape[2]):
-            channel = line_frame[:,:,i]
-            channel[edge_frame.astype(bool)] = 0
-            line_frame[:,:,i] = channel
-        """
-        for l in lines:
-            points = l[0]
-            intensity = 0
-            color = (0, 255, 0)
-            cv2.line(line_frame, (points[0], points[1]), (points[2], points[3]), color)
-        #plt.imshow(line_frame)
-        #plt.show()
+        c_img, c_responses = quantizeColors(rgb_frame)
+        d_img, d_responses = quantizeDepths(depth_frame)
         
         """
-        # Calculate and plot color space representation
-        # Unravel along dimension 0 and 1
-        f = frame[0::5,0::5,:]
-        t = tuple(f[i,j,:] for i in range(f.shape[0]) for j in range(f.shape[1]))
-        X = np.vstack(t)
-        fig = plt.figure()
-        ax = fig.add_subplot(1, 1, 1, projection='3d')
-        ax.scatter(X[:,0], X[:,1], X[:,2])
-        plt.show()
-        
-        width = 3
-        kernel = np.ones((width,width),np.uint8)
-        closed = cv2.morphologyEx(color_frame, cv2.MORPH_CLOSE, kernel)
-        plt.imshow(closed)
-        plt.show()
-        plt.imshow(color_frame)
-        plt.show()
-        """
-        
-        """
-        labeled_frame = drawKeyPoints(color_frame[:,:,[2, 1, 0]])
-        plt.imshow(labeled_frame[:,:,[2, 1, 0]])
-        plt.show()
-        """
-        
-        #blobs = detectBlocks(depth_frame) #rgb_frame[:,:,0])
-        """
-        for blob in blobs:
-            center = tuple(int(p) for p in blob.pt if not math.isnan(p))
-            if not len(center) == 2:
-                continue
-            cv2.circle(depth_frame, center, int(blob.size / 2), (255, 255, 255))
-        """
-        
         orig_frames = np.hstack((rgb_frame, np.dstack(3 * (depth_frame,))))
-        processed_frames = np.hstack((color_frame, np.dstack(3 * (edge_frame,))))
+        processed_frames = np.hstack((c_img, np.dstack(3 * (d_img,))))
         meta_frame = np.vstack((orig_frames, processed_frames))
         _, fn = os.path.split(rgb_path)
-        cv2.imwrite(os.path.join(c.paths['working'], fn), meta_frame[:,:,[2, 1, 0]])
+        cv2.imwrite(os.path.join(c.paths['working'], fn), meta_frame[:,:,])
+        """
+        
+        layers = []
+        for i in range(d_responses.shape[2]):
+            
+            """
+            # Select a depth layer
+            layer = np.zeros(c_img.shape, dtype='uint8')
+            layer[d_responses[:,:,i],:] = c_img[d_responses[:,:,i],:]
+            
+            """
+            
+            layer = feature.canny(d_responses[:200,:300,i].astype('uint8') * 255)
+            rows, cols = layer.shape
+            
+            f = plt.figure()
+            plt.imshow(layer, cmap=plt.cm.gray)
+            
+            """
+            # Detect lines via Hough transform
+            h, theta, d = transform.hough_line(layer)
+            _, angles, dists = transform.hough_line_peaks(h, theta, d, )
+            
+            # Plot lines
+            for angle, dist in zip(angles, dists):
+                y0 = (dist - 0 * np.cos(angle)) / np.sin(angle)
+                y1 = (dist - cols * np.cos(angle)) / np.sin(angle)
+                plt.plot((0, cols), (y0, y1), '-r')
+            plt.axis((0, cols, rows, 0))
+            layers.append(layer)
+            """
+            
+            lines = transform.probabilistic_hough_line(layer, threshold=20,
+                                                       line_length=10,
+                                                       line_gap=50)
+            for line in lines:
+                pt1, pt2 = line
+                plt.plot((pt1[0], pt2[0]), (pt1[1], pt2[1]), '-r')
+            plt.axis((0, cols, rows, 0))
+            layers.append(layer)
+        
+        layer_frame = np.vstack((np.hstack(tuple(layers[0:2])),
+                                 np.hstack(tuple(layers[2:4]))))
+        plt.figure()
+        plt.imshow(layer_frame, cmap=plt.cm.gray); plt.show()
+        _, fn = os.path.split(rgb_path)
+        io.imsave(os.path.join(c.paths['working'], fn), layer_frame)
+        
     
     #"""
     import platform

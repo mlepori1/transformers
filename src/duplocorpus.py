@@ -7,14 +7,12 @@ AUTHOR
   Jonathan D. Jones
 """
 
-import sys
 import os
 import logging
 import csv
 import glob
 import subprocess
 
-import cv2
 import numpy as np
 from matplotlib import pyplot as plt
 import matplotlib as mpl
@@ -139,7 +137,7 @@ class DuploCorpus:
         # Read contents of the metadata file line-by-line
         with open(fn, 'r') as metafile:
             metareader = csv.reader(metafile)
-            metareader.next()   # Skip header
+            next(metareader)   # Skip header
             for row in metareader:
                 meta_data.append(tuple(row))
         
@@ -587,107 +585,6 @@ class DuploCorpus:
         
         return
     
-    """
-    def makeCorrelationFigs(self, trial_id, devices):
-        "
-        Calculate pointwise cosine similarity for all pairs of devices in imus.
-        
-        Args:
-        -----
-        [int] trial_id:
-        [list(str)] devices:
-        "
-        
-        NUM_LABELS = 7
-        
-        # Load IMU data, RGB frame timestamps, and labels (empty list if no labels)
-        imus = self.loadImuData(trial_id, devices)
-        rgb_timestamps = self.loadRgbFrameTimestamps(trial_id)    
-        labels = self.loadLabels(trial_id)
-        
-        # Define the output directory (for saving figures) and create it if it
-        # doesn't already exist
-        corr_fig_path = os.path.join('output', 'figures', 'imu-corrs', str(trial_id))
-        if not os.path.exists(corr_fig_path):
-            os.makedirs(corr_fig_path)
-        
-        # Set colormaps and normalization for plotting labels
-        cmap = mpl.cm.Pastel2
-        cmap_list = [cmap(i) for i in range(cmap.N)]
-        cmap = cmap.from_list('custom', cmap_list, cmap.N)
-        bounds = list(range(NUM_LABELS))
-        norm = mpl.colors.BoundaryNorm(bounds, cmap.N)
-        
-        for i, imu1 in enumerate(imus):
-            
-            name1 = devices[i]
-            
-            # Correlation is symmetric, so only calculate for the n(n-1)/2 unique
-            # cases
-            for j in range(i+1, len(imus)):
-                
-                imu2 = imus[j]
-                name2 = devices[j]
-                
-                syms = ('a', '\omega', 'B')
-                f, axes = plt.subplots(len(syms) + 1, 1, figsize=(6, 6))
-                
-                # Calculate cosine distance = (x^T y) / (|x| |y|) for acceleration,
-                # angular velocity, and magnitude readings
-                for k, ax in enumerate(axes[:-1]):
-                    
-                    start = 4 + k * 3
-                    end = start + 3
-                    
-                    data1 = imu1[:, start:end]
-                    data2 = imu2[:, start:end]
-                    
-                    norm1 = np.sqrt(np.sum(data1 * data1, 1))
-                    norm2 = np.sqrt(np.sum(data2 * data2, 1))
-                    
-                    ptwise_corr = np.sum(data1 * data2, 1) / (norm1 * norm2)
-                    
-                    # Filter out bad data for now b/c it makes the plots impossible to read
-                    # (bad data are marked with a timestamp of 0)
-                    bad_data1 = np.less(imu1[:,0], 1.0)
-                    bad_data2 = np.less(imu2[:,0], 1.0)
-                    bad_data = np.logical_or(bad_data1, bad_data2)
-                    ptwise_corr = ptwise_corr[np.logical_not(bad_data)]
-                    
-                    # Calculate time relative to TRIAL start (this is before each IMU
-                    # actually started streaming data)
-                    t_imu1 = imu1[np.logical_not(bad_data),0]
-                    
-                    actions, imu_bounds = imuActionBounds(labels, rgb_timestamps, t_imu1)
-                    
-                    ax.plot(t_imu1, ptwise_corr, color='k') #, zorder=2)
-                    
-                    # Plot labels as colorbar in background, but only if they exist
-                    if imu_bounds.shape[0] > 0:
-                        max_val = ptwise_corr.max()
-                        min_val = ptwise_corr.min()
-                        ax.pcolor(t_imu1, np.array([min_val, max_val]),
-                                  np.tile(labels, (2,1)), cmap=cmap, norm=norm) #,
-                                  #zorder=1)
-                    
-                    ax.set_ylabel(r'$\cos \theta_{}$'.format(syms[k]))
-                    ax.set_xlabel(r'$t \/ (\mathrm{s})$')
-                
-                # Plot colormap used for labels with tics at label indices
-                mpl.colorbar.ColorbarBase(axes[-1], cmap=cmap, norm=norm,
-                                          orientation='horizontal', ticks=bounds,
-                                          boundaries=bounds)
-                axes[0].set_title('Pointwise cosine similarity for IMU readings')
-                f.tight_layout()
-                
-                # Save plot and don't show
-                fname = 'cos-sim_{}-{}.pdf'.format(name1, name2)
-                f.savefig(os.path.join(corr_fig_path, fname))
-                plt.close()
-        
-        return
-        """
-    
     
     def makeStateVisualizations(self, trial_id):
         """
@@ -757,135 +654,6 @@ class DuploCorpus:
         pattern = os.path.join(rgb_dir, '*.png')
         depth_frame_fns = sorted(glob.glob(pattern))
         return depth_frame_fns
-        
-        
-    def makeVideoLabels(self, trial_id):
-        """
-        Interactive UI for labeling the actions in a trial based on video
-        frames.
-        
-        Args:
-        -----
-        [int] trial_id:
-        """
-        
-        if self.meta_data['has_labels'][trial_id]:
-            fmtstr = 'Trial {}: Label file already exists. Delete it to re-label.'
-            self.logger.warn(fmtstr.format(trial_id))
-            return
-        
-        # Enable python 2/3 compatibility
-        if sys.version_info[0] == 2:
-            input = raw_input
-        
-        blocks = ('(none)', 'red square', 'yellow square', 'green square',
-                  'blue square', 'red rectangle', 'yellow rectangle',
-                  'green rectangle', 'blue rectangle')
-        actions = ('(inactive)', 'place above', 'place adjacent', 'rotate',
-                      'translate', 'remove', 'pick up (no placement)')
-        
-        # Get full path names for RGB frames in this trial
-        rgb_frame_fns = self.getRgbFrameFns(trial_id)
-        num_frames = len(rgb_frame_fns)
-        
-        # Set up image window
-        cv2.namedWindow('Segmentation')
-        
-        label_fn = os.path.join(self.paths['labels'], '{}.csv'.format(trial_id))
-        with open(label_fn, 'w') as label_file:
-            labelwriter = csv.writer(label_file)
-            
-            col_names = ('start index', 'end index', 'action', 'object',
-                         'target', 'object studs', 'target studs')
-            labelwriter.writerow(col_names)
-        
-            action_started = False
-            frame_idx = 0
-            while True:
-                
-                # Open the current frame and display it
-                frame_path = rgb_frame_fns[frame_idx]
-                frame = cv2.imread(frame_path)
-                cv2.imshow('Segmentation', frame)
-                    
-                # Wait until we read some input from the user
-                user_in = cv2.waitKey(0)
-                    
-                # Act on the input if it's one of the recognized characters
-                if action_started and user_in == ord('e'):
-                    action_started = False
-                    end_idx = frame_idx
-                    
-                    # Prompt user to choose an action
-                    print('')
-                    print('ACTIONS')
-                    for i, a in enumerate(actions):
-                        print('  {}: {}'.format(i, a))
-                    action = int(input('Select the action: '))
-                    
-                    # Prompt user to choose object and target blocks
-                    print('')
-                    print('BLOCKS')
-                    for i, b in enumerate(blocks):
-                        print('  {}: {}'.format(i, b))
-                    objects_str = input('Select the object block(s): ')
-                    if len(objects_str.split()) > 1:
-                        objects = (int(x) for x in objects_str.split())
-                        target = 0
-                        
-                        # Write label and print to console
-                        print('')
-                        for obj in objects:
-                            row = (start_idx, end_idx, action, obj, target, '()', '()')
-                            labelwriter.writerow(row)
-                            print((start_idx, end_idx, actions[action], blocks[obj],
-                                   blocks[target]))
-                    else:
-                        obj = objects_str.split()[0]
-                        targets_str = input('Select the target blocks(s): ')
-                        targets = (int(x) for x in targets_str.split())
-                    
-                        # Write label and print to console
-                        print('')
-                        for target in targets:
-                            row = (start_idx, end_idx, action, obj, target, '()', '()')
-                            labelwriter.writerow(row)
-                            print((start_idx, end_idx, actions[action], blocks[obj],
-                                   blocks[target]))
-                    
-                    start_idx = -1
-                    end_idx = -1
-                elif user_in == ord('s'):
-                    start_idx = frame_idx
-                    action_started = True
-                elif user_in == ord('j'):
-                    if frame_idx - 1 > 0:
-                        frame_idx -= 1
-                    else:
-                        frame_idx = 0
-                        print('End of video')
-                elif user_in == ord('k'):
-                    if frame_idx + 1 < num_frames - 1:
-                        frame_idx += 1
-                    else:
-                        frame_idx = num_frames - 1
-                        print('End of video')
-                elif user_in == ord('u'):
-                    if frame_idx - 20 > 0:
-                        frame_idx -= 20
-                    else:
-                        frame_idx = 0
-                        print('End of video')
-                elif user_in == ord('i'):
-                    if frame_idx + 20 < num_frames - 1:
-                        frame_idx += 20
-                    else:
-                        frame_idx = num_frames - 1
-                        print('End of video')
-                elif user_in == ord('q'):   # Exit
-                    break
-        
-        self.updateMetaData(trial_id)
 
 
 if __name__ == '__main__':

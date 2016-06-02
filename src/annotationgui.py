@@ -8,7 +8,7 @@ AUTHOR
 """
 
 from __future__ import print_function
-import Tkinter as tk
+import tkinter as tk
 from PIL import Image, ImageTk
 import graphviz as gv
 import os
