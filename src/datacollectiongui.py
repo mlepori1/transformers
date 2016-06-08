@@ -33,7 +33,7 @@ class Application:
         # Define parent window and resize
         self.parent = parent
         
-        # Window content
+        # Window content master = self.navigation_frame
         self.content_frame = tk.Frame(self.parent)
         self.navigation_frame = tk.Frame(self.parent)
         self.popup = None
@@ -167,7 +167,7 @@ class Application:
         month_menu.grid(sticky=tk.W, row=2, column=1)
         
         # Draw birth year field
-        years = (2010, 2011, 2013, 2014)
+        years = (2010, 2011, 2012, 2013)
         self.birth_year_field = tk.StringVar(master)
         if not self.birth_year:
             self.birth_year_field.set(years[0])
