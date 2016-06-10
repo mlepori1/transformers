@@ -12,11 +12,17 @@ import os
 import subprocess
 
 import numpy as np
+#import matplotlib
+#matplotlib.use('Agg')
 from matplotlib import pyplot as plt
+from numpy import linalg as la
 
 from skimage import io
 from skimage import feature
 from skimage import transform
+from skimage import measure
+from skimage import morphology
+from skimage import draw
 
 from duplocorpus import DuploCorpus
 
@@ -88,7 +94,7 @@ def quantizeDepths(depth_image):
     
     # Assemble quantized image array with one channel for each depth region
     channel_responses = np.zeros(depth_image.shape + (len(thresholds) - 1,),
-                               dtype=bool)
+                                 dtype=bool)
     quantized_image = np.zeros(depth_image.shape, dtype='uint8')
     for i in range(len(thresholds) - 1):
         
@@ -106,20 +112,41 @@ def quantizeDepths(depth_image):
     return quantized_image, channel_responses
 
 
+def calibrateCamera(p_pixel, z_m):
+    """
+    Perform camera calibration under the assumption of a pinhole camera.
+    
+    Args:
+    -----
+    [np array] p_pixel: Block corner coordinates in pixels
+    [float] z_m: Block's distance from camera
+    
+    Returns:
+    --------
+    [np array] p_metric:
+    [np vector] c: Camera coordinates in metric units
+    [float] f: Camera focal length in metric units
+    """
+    
+    return
+
+
 if __name__ == '__main__':
     
     trial_id = 4
     
     c = DuploCorpus()
         
-    rgb_frame_fns = c.getRgbFrameFns(trial_id)[50:51]
-    depth_frame_fns = c.getDepthFrameFns(trial_id)[50:51]
+    rgb_frame_fns = c.getRgbFrameFns(trial_id)#[50:51]
+    depth_frame_fns = c.getDepthFrameFns(trial_id)#[50:51]
     
     for rgb_path, depth_path in zip(rgb_frame_fns, depth_frame_fns):
         
         # Read in frames and plot
         rgb_frame = io.imread(rgb_path)
-        depth_frame = io.imread(depth_path).astype('uint8')
+        #plt.imshow(rgb_frame); #plt.show()
+        depth_frame = io.imread(depth_path).astype('uint8') #[25:200,25:300]
+        #plt.imshow(depth_frame, cmap=plt.cm.gray) #; plt.show()
         
         c_img, c_responses = quantizeColors(rgb_frame)
         d_img, d_responses = quantizeDepths(depth_frame)
@@ -132,54 +159,93 @@ if __name__ == '__main__':
         cv2.imwrite(os.path.join(c.paths['working'], fn), meta_frame[:,:,])
         """
         
+        plt.figure()
+        plt.imshow(rgb_frame)
+                
         layers = []
-        for i in range(d_responses.shape[2]):
+        for i in range(d_responses.shape[2] - 1):
             
             """
+            plt.figure()
+            plt.imshow(rgb_frame)
+            """
+            
             # Select a depth layer
-            layer = np.zeros(c_img.shape, dtype='uint8')
-            layer[d_responses[:,:,i],:] = c_img[d_responses[:,:,i],:]
+            #layer = np.zeros(c_img.shape, dtype='uint8')
+            #layer[d_responses[:,:,i],:] = c_img[d_responses[:,:,i],:]
             
-            """
-            
-            layer = feature.canny(d_responses[:200,:300,i].astype('uint8') * 255)
+            layer = d_responses[:,:,i].astype('uint8')
+            layer[200:,:] = 0
+            layer[:,300:] = 0
+            layer_edges = feature.canny(layer * 255)
             rows, cols = layer.shape
             
-            f = plt.figure()
-            plt.imshow(layer, cmap=plt.cm.gray)
-            
             """
-            # Detect lines via Hough transform
-            h, theta, d = transform.hough_line(layer)
-            _, angles, dists = transform.hough_line_peaks(h, theta, d, )
+            # Lines via Hough transform
+            plt.figure()
+            plt.imshow(layer_edges, cmap=plt.cm.gray)
             
-            # Plot lines
-            for angle, dist in zip(angles, dists):
-                y0 = (dist - 0 * np.cos(angle)) / np.sin(angle)
-                y1 = (dist - cols * np.cos(angle)) / np.sin(angle)
-                plt.plot((0, cols), (y0, y1), '-r')
-            plt.axis((0, cols, rows, 0))
-            layers.append(layer)
-            """
-            
-            lines = transform.probabilistic_hough_line(layer, threshold=20,
+            lines = transform.probabilistic_hough_line(layer_edges,
+                                                       threshold=20,
                                                        line_length=10,
-                                                       line_gap=50)
+                                                       line_gap=50)            
             for line in lines:
                 pt1, pt2 = line
                 plt.plot((pt1[0], pt2[0]), (pt1[1], pt2[1]), '-r')
             plt.axis((0, cols, rows, 0))
-            layers.append(layer)
+            """
+            
+            rgb_values = [(1, 0, 0), (0, 1, 0), (0, 0, 1), (1, 1, 0),
+                          (128, 128, 128)]
+            
+            # Contours
+            
+            contours = measure.find_contours(layer, 0.5)
+            #print('{} contours'.format(len(contours)))
+            
+            contours = [c[:, ::-1] for c in contours]
+            
+            for contour in contours:
+                rr, cc = draw.polygon(contour[:,1], contour[:,0])
+                # FIXME: Do SVD on interior of contour, not edges
+                U, S, V = la.svd(contour)
+                mean = contour.mean(axis=0)
+                std = contour.std(axis=0)   # I'm treating this like an average radius
+                if la.norm(std) < 5:
+                    continue
+                #print('  {} | {} | {}'.format(contour.mean(axis=0), la.norm(std), S))
+                cont_int = contour.astype(int)
+                colors = c_responses[rr,cc,:-1].sum(axis=0)
+                color = rgb_values[colors.argmax()]
+                #colors = colors[colors[:,0,] != 128, :]
+                plt.plot(contour[:, 0], contour[:, 1], linewidth=2, color=color)
+                #plt.plot(cc, rr, linewidth=2, color=color)
+                line = np.vstack((mean, mean + 10 * V[0,:]))
+                plt.plot(line[:,0], line[:,1], color='r')
+                line = np.vstack((mean, mean + 10 * V[1,:]))
+                plt.plot(line[:,0], line[:,1], color='b')
+            
+            # Convex hull
+            hull = morphology.convex_hull_object(layer_edges)
+            objects = c_img.copy()
+            objects[np.logical_not(hull), :] = np.zeros(3)
+            #plt.figure()
+            #plt.imshow(objects, cmap=plt.cm.gray)
+            
+            layers.append(objects)
         
+        layers.append(np.zeros(layers[-1].shape, dtype='uint8'))
         layer_frame = np.vstack((np.hstack(tuple(layers[0:2])),
                                  np.hstack(tuple(layers[2:4]))))
-        plt.figure()
-        plt.imshow(layer_frame, cmap=plt.cm.gray); plt.show()
+        #plt.figure()
+        #plt.imshow(layer_frame, cmap=plt.cm.gray); plt.show()
         _, fn = os.path.split(rgb_path)
-        io.imsave(os.path.join(c.paths['working'], fn), layer_frame)
+        #io.imsave(os.path.join(c.paths['working'], fn), layer_frame)
+        plt.savefig(os.path.join(c.paths['working'], fn), format='png')
+        plt.close()
         
     
-    #"""
+    """
     import platform
     av_util = ''
     if platform.system() == 'Linux':
@@ -191,4 +257,59 @@ if __name__ == '__main__':
     make_video = [av_util, '-y', '-f', 'image2', '-i', frame_fmt, '-c:v',
                   'libx264', '-r', '30', '-pix_fmt', 'yuv420p', video_path]
     subprocess.call(make_video)
-    #"""
+    """
+    
+    block_1_corners = np.array([[120, 101], [119, 87], [133, 85], [134, 100]])
+    block_2_corners = np.array([[134, 100], [133, 85], [147, 84], [148, 99]])
+    block_3_corners = np.array([[149, 97], [148, 83], [161, 82], [162, 99]])
+    block_4_corners = np.array([[164, 96], [163, 81], [176, 80], [177, 95]])
+    side_lens = np.zeros(block_1_corners.shape[0])
+    side_lens[:-1] = (np.diff(block_1_corners, axis=0) ** 2).sum(axis=1) ** 0.5
+    side_lens[-1] = ((block_1_corners[-1,:] - block_1_corners[0,:]) ** 2).sum() ** 0.5
+    z_m = 600   # mm
+    
+    # Side length of a 2x2 DUPLO brick (from stack excange link below)
+    # http://bricks.stackexchange.com/questions/1588/
+    #   what-are-the-exact-dimensions-of-a-duplo-brick
+    block_width = 31.8  # mm
+    block_height = 19.2 # mm
+    
+    # Average focal length assuming a pinhole camera
+    f = (side_lens * (z_m - block_height) / block_width).mean() # pixels
+    
+    # Block corner locations in 3D assuming coordinate frames of metric space
+    # and the image plane are aligned
+    metric_corners = block_1_corners * (z_m - block_height) / f
+    
+    # It looks like a model for the depth camera is:
+    #   depth = max_depth - intensity
+    # where max_depth is about 636
+    depth_offset = 636
+    
+    """
+    num_corners = block_1_corners.shape[0]
+    center = np.array(rgb_frame.shape[0:2])
+    Y = z_m * (block_1_corners - 0.5 * np.vstack(num_corners * (center,)))
+    X = np.array([[-1, 1], [1, 1], [1, -1], [-1, -1]])
+    
+    mean_x = X.mean(axis=0)
+    mean_y = Y.mean(axis=0)
+    
+    Y_centered = Y - np.vstack(Y.shape[0] * (mean_y,))
+    X_centered = X - np.vstack(X.shape[0] * (mean_x,))
+    
+    var_x = (X_centered ** 2).sum(axis=1).mean()
+    var_y = (Y_centered ** 2).sum(axis=1).mean()
+    
+    cov_xy = (Y_centered.T).dot(X_centered)
+    U, D, V = la.svd(cov_xy)
+    
+    S = np.eye(2) if la.det(cov_xy) > 0 else np.diag(np.array([1, -1]))
+    
+    R = U.dot(S).dot(V.T)
+    c = np.diag(D).dot(S).trace() / var_x
+    t = mean_y - c * R.dot(mean_x)
+    
+    f = c / (block_width / 2)
+    block_center = t / f
+    """
