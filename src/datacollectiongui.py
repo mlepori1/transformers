@@ -273,7 +273,7 @@ class Application:
         
         # Draw navigation buttons
         master = self.navigation_frame
-        forward = tk.Button(master, text='Next', command=self.forward,
+        forward = tk.Button(master, text='Collect data', command=self.forward,
                            default=tk.ACTIVE)
         forward.grid(sticky=tk.E, row=0, column=1)
         back = tk.Button(master, text='Back', command=self.back)
