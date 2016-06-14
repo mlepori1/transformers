@@ -33,7 +33,7 @@ class Application:
         # Define parent window and resize
         self.parent = parent
         
-        # Window content
+        # Window content master = self.navigation_frame
         self.content_frame = tk.Frame(self.parent)
         self.navigation_frame = tk.Frame(self.parent)
         self.popup = None
@@ -167,7 +167,7 @@ class Application:
         month_menu.grid(sticky=tk.W, row=2, column=1)
         
         # Draw birth year field
-        years = (2010, 2011, 2013, 2014)
+        years = (2010, 2011, 2012, 2013)
         self.birth_year_field = tk.StringVar(master)
         if not self.birth_year:
             self.birth_year_field.set(years[0])
@@ -273,7 +273,7 @@ class Application:
         
         # Draw navigation buttons
         master = self.navigation_frame
-        forward = tk.Button(master, text='Next', command=self.forward,
+        forward = tk.Button(master, text='Collect data', command=self.forward,
                            default=tk.ACTIVE)
         forward.grid(sticky=tk.E, row=0, column=1)
         back = tk.Button(master, text='Back', command=self.back)
@@ -293,10 +293,22 @@ class Application:
         
         # Draw placeholder for video monitor
         self.rgb_video = tk.Label(master, text='Waiting for video...')
-        self.rgb_video.grid(row=0, column=0)
+        self.rgb_video.grid(row=1, column=0)        
+
+        self.video_label = tk.Label(master, text='Video stream')        
+        self.video_label.grid(row=0, column=0, sticky='N')  
         
-        l = tk.Label(master, text='Streaming data...')
-        l.grid(row=1, column=0)
+        self.imu_label = tk.Label(master, text='IMU activity')        
+        self.imu_label.grid(row=1, column=2, sticky='N') 
+        
+        l2 = tk.Label(master, text='\t', font=("TkDefaultFont",14))
+        l2.grid(row=1, column=1)  
+        
+        l2 = tk.Label(master, text='\t', font=("TkDefaultFont",14))
+        l2.grid(row=3, column=1) 
+        
+        l = tk.Label(master, text='Data is being collected', font=("TkDefaultFont",14))
+        l.grid(row=4, column=1, sticky='S')
         
         # Draw placeholders for IMU monitors
         self.imu_id2activity_color = {}
@@ -314,7 +326,7 @@ class Application:
                                                           text='    ',
                                                           background='yellow')
             self.imu_id2activity_color[imu_id].grid(row=i, column=2)
-        imu_monitor_frame.grid(row=2, column=0)
+        imu_monitor_frame.grid(row=1, column=2)
             
 
         # Draw navigation buttons
