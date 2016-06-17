@@ -24,6 +24,7 @@ from skimage import transform
 from skimage import measure
 from skimage import morphology
 from skimage import draw
+from skimage import color
 
 from duplocorpus import DuploCorpus
 
@@ -84,8 +85,7 @@ def quantizeColors(rgb_image):
 def quantizeDepths(depth_image):
     """
     """
-    
-    thresholds = (0, 50, 65, 85, 256)
+    thresholds = (0, 559, 577, 594)
     
     # Any pixel intensity actually equal to zero is either directly in front
     # of the camera (unlikely) or was thrown out when the camera registered
@@ -113,35 +113,14 @@ def quantizeDepths(depth_image):
     return quantized_image, channel_responses
 
 
-def calibrateCamera(p_pixel, z_m):
+def getFocalLength():
     """
-    Perform camera calibration under the assumption of a pinhole camera.
-    
-    Args:
-    -----
-    [np array] p_pixel: Block corner coordinates in pixels
-    [float] z_m: Block's distance from camera
+    Perform camera calibration under the assumption of a pinhole camera.    
     
     Returns:
     --------
-    [np array] p_metric:
-    [np vector] c: Camera coordinates in metric units
     [float] f: Camera focal length in metric units
     """
-    
-    return
-
-
-if __name__ == '__main__':
-    
-    #plt.ioff()
-    
-    trial_id = 5
-    
-    c = DuploCorpus()
-        
-    rgb_frame_fns = c.getRgbFrameFns(trial_id)[50:51]
-    depth_frame_fns = c.getDepthFrameFns(trial_id)[50:51]
     
     # (Camera calibration)
     block_1_corners = np.array([[120, 101], [119, 87], [133, 85], [134, 100]])
@@ -168,12 +147,150 @@ if __name__ == '__main__':
     # and the image plane are aligned
     metric_corners = block_1_corners * (z_m - block_height_metric) / f
     
-    # It looks like a model for the depth camera is:
-    #   depth = max_depth - intensity
-    # where max_depth is about 636
-    depth_offset = 636
+    # The depth camera directly records distance in mm
     # (end camera calibration)
     
+    return f
+
+
+def pixel2metric(block_dim, block_depth):
+    """
+    """
+    
+    f = getFocalLength()
+    pixel_to_metric = block_depth / f   # mm / pixel
+    metric_est = pixel_to_metric * block_dim
+    
+    return metric_est
+    
+
+def calcResidual(block_width, block_length, block_depth):
+    """
+    """
+    
+    block_width_metric = 31.8  # mm
+    block_height_metric = 19.2 # mm
+    block_length_metric = 2 * block_width_metric
+    
+    ratio = block_length / block_width
+    if ratio < 1.5: # Midway between 1 (square) and 2 (rectangle)
+        side_len = 0.5 * (block_length + block_width)
+        metric_side_est = pixel2metric(side_len, block_depth)
+        residual_w = abs(block_width_metric - metric_side_est) / block_width_metric
+        residual_l = residual_w
+    else:
+        metric_width_est = pixel2metric(block_width, block_depth)
+        metric_length_est = pixel2metric(block_length, block_depth)
+        residual_w = abs(block_width_metric - metric_width_est) \
+                   / block_width_metric
+        residual_l = abs(block_length_metric - metric_length_est) \
+                   / block_length_metric
+    
+    return residual_w, residual_l, ratio
+    
+
+def detectBlocks(rgb_image, depth_image):
+    """
+    """
+    
+    rows, cols = depth_image.shape
+    #rgb_edges = feature.canny(color.rgb2gray(rgb_image))
+    depth_edges = feature.canny(depth_image.astype('uint8'))
+    c_img, c_responses = quantizeColors(rgb_frame)
+    
+    # Contours
+    contours = measure.find_contours(depth_edges.astype('uint8'), 0.5,
+                                     fully_connected='high')                
+    contours = [c[:,::-1] for c in contours]
+    ret_array = np.zeros((len(contours), 11))
+    for j, contour in enumerate(contours):
+        
+        interior_pts = np.column_stack(draw.polygon(contour[:,1], contour[:,0]))
+        depth_pts = depth_frame[interior_pts[:,0], interior_pts[:,1]]
+        block_depth = depth_pts.mean()       # mm
+        
+        contour_colors = c_responses[interior_pts[:,0],interior_pts[:,1],:]
+        color_hist = contour_colors.sum(axis=0)
+        
+        #axes[0,1].plot(contour[:, 0], contour[:, 1], color=c_color)
+        
+        # Determine width and length of block by finding mean distance from
+        # one extreme point to its nearest and second-nearest neighbor
+        extreme_pts = [contour[contour[:,0].argmax(),:],
+                       contour[contour[:,1].argmax(),:],
+                       contour[contour[:,0].argmin(),:],
+                       contour[contour[:,1].argmin(),:]]
+        block_lengths = np.zeros(4)
+        block_widths = np.zeros(4)
+        for i in range(len(extreme_pts)):
+            block_length = np.inf
+            block_width = np.inf
+            p0 = extreme_pts[i]
+            for pt in extreme_pts[:i] + extreme_pts[i+1:]:
+                dist = la.norm(p0 - pt)
+                if dist < block_width:
+                    block_length = block_width
+                    block_width = dist
+                elif dist < block_length:
+                    block_length = dist
+            block_lengths[i] = block_length
+            block_widths[i] = block_width
+        block_length = block_lengths.mean()
+        block_width = block_widths.mean()
+        block_dims = np.array([block_length, block_width])
+        
+        residual_w, residual_l, ratio = calcResidual(block_width, block_length,
+                                                     block_depth)
+        size_tol = 0.25  # allow max 25% deviation
+        if  residual_w > size_tol or residual_l > size_tol:
+            #print(residual_w, ' ', residual_l)
+            continue
+                
+        mean = interior_pts.mean(axis=0)
+        interior_centered = interior_pts - np.vstack(interior_pts.shape[0] * (mean,))
+        U, S, V_T = la.svd(interior_centered)
+        # This is a trick I saw on stack exchange:
+        #   http://math.stackexchange.com/questions/301319/
+        #   derive-a-rotation-from-a-2d-rotation-matrix
+        # Except keep in mind that we have V TRANSPOSE, not V
+        theta = np.rad2deg(np.arctan2(V_T[0,1], V_T[0,0]))
+        
+        """
+        c_corners = np.array([[ block_length,  block_width],
+                              [ block_length, -block_width],
+                              [-block_length, -block_width],
+                              [-block_length,  block_width]]) / 2
+        c_corners = c_corners.dot(V_T) + np.vstack(c_corners.shape[0] * (mean,))
+        """
+        
+        row = np.hstack((mean, np.array([theta]), block_dims,
+                         np.array([block_depth]), color_hist))
+        ret_array[j,:] = row
+    
+    good_feats = ret_array[ret_array[:,0] != 0, :]
+    return good_feats
+
+
+if __name__ == '__main__':
+        
+    trial_id = 0
+    
+    c = DuploCorpus()
+    i = 20
+    rgb_frame_fns = c.getRgbFrameFns(trial_id)#[i:i+1]
+    depth_frame_fns = c.getDepthFrameFns(trial_id)#[i:i+1]
+    
+    # Red, green, blue, yellow, gray (drawn as black)
+    colors = [(1, 0, 0), (0, 1, 0), (0, 0, 1), (1, 1, 0), (0, 0, 0)]
+    
+    # Idea below (this is your warning)
+    """
+    set up 8 kalman filters: 4 for square blocks and 4 for rect blocks
+    don't assign color until the end (aggregate color histogram stats)
+    assign each detected object in a frame to the 'best' block (nearest neighbor)
+    """
+    
+    plt.ioff()
     for rgb_path, depth_path in zip(rgb_frame_fns, depth_frame_fns):
         
         _, frame_fn = os.path.split(rgb_path)
@@ -181,179 +298,26 @@ if __name__ == '__main__':
         
         # Read in frames and plot
         rgb_frame = io.imread(rgb_path)
-        #plt.imshow(rgb_frame); #plt.show()
-        depth_frame = io.imread(depth_path).astype('uint8') #[25:200,25:300]
-        #plt.imshow(depth_frame, cmap=plt.cm.gray) #; plt.show()
+        depth_frame = io.imread(depth_path)
         
-        c_img, c_responses = quantizeColors(rgb_frame)
-        d_img, d_responses = quantizeDepths(depth_frame)
-        
-        """
-        orig_frames = np.hstack((rgb_frame, np.dstack(3 * (depth_frame,))))
-        processed_frames = np.hstack((c_img, np.dstack(3 * (d_img,))))
-        meta_frame = np.vstack((orig_frames, processed_frames))
-        _, fn = os.path.split(rgb_path)
-        cv2.imwrite(os.path.join(c.paths['working'], fn), meta_frame[:,:,])
-        """
-        
-        """
         fig, axes = plt.subplots(1, 2)
         axes[0].imshow(rgb_frame)
-        axes[1].imshow(depth_offset - depth_frame, cmap=plt.cm.gray)
-        """
-                
-        layers = []
-        for i in range(d_responses.shape[2] - 1):
-            
-            #plt.figure()
-            #plt.imshow(rgb_frame)
-                
-            
-            """
-            plt.figure()
-            plt.imshow(rgb_frame)
-            """
-            
-            # Select a depth layer
-            #layer = np.zeros(c_img.shape, dtype='uint8')
-            #layer[d_responses[:,:,i],:] = c_img[d_responses[:,:,i],:]
-            
-            layer = d_responses[:,:,i].astype('uint8')
-            layer[200:,:] = 0
-            layer[:,300:] = 0
-            layer_edges = feature.canny(layer * 255)
-            rows, cols = layer.shape
-            
-            """
-            # Lines via Hough transform
-            plt.figure()
-            plt.imshow(layer_edges, cmap=plt.cm.gray)
-            
-            lines = transform.probabilistic_hough_line(layer_edges,
-                                                       threshold=20,
-                                                       line_length=10,
-                                                       line_gap=50)            
-            for line in lines:
-                pt1, pt2 = line
-                plt.plot((pt1[0], pt2[0]), (pt1[1], pt2[1]), '-r')
-            plt.axis((0, cols, rows, 0))
-            """
-            
-            rgb_values = [(1, 0, 0), (0, 1, 0), (0, 0, 1), (1, 1, 0),
-                          (128, 128, 128)]
-            
-            # Contours
-            
-            contours = measure.find_contours(layer, 0.5)
-            #print('{} contours'.format(len(contours)))
-            
-            contours = [c[:,::-1] for c in contours]
-            fn = '/Users/jonathan/block_coords/{}.csv'.format(frame_num)
-            with open(fn, 'w') as csvfile:
-                csvwriter = csv.writer(csvfile)
-            
-                for contour in contours:
-                    
-                    interior_pts = np.column_stack(draw.polygon(contour[:,1], contour[:,0]))
-                    depth_pts = depth_frame[interior_pts[:,0], interior_pts[:,1]]
-                    block_depth = (depth_offset - depth_pts).mean()
-                    mean = interior_pts.mean(axis=0)
-                    # I'm treating this like an average radius
-                    std = interior_pts.std(axis=0)
-                    if la.norm(std) < 5:
-                        continue
-                    interior_centered = interior_pts - np.vstack(interior_pts.shape[0] * (mean,))
-                    U, S, V = la.svd(interior_centered)
-                    D = np.zeros((U.shape[0], V.shape[0]))
-                    for i in range(S.shape[0]):
-                        D[i,i] = S[i]
-                    rotated_contour = U.dot(D) + np.vstack(interior_pts.shape[0] * (mean,))
-                    block_length = rotated_contour[:,0].max() - rotated_contour[:,0].min()
-                    block_width = rotated_contour[:,1].max() - rotated_contour[:,1].min()
-                    ratio = block_length / block_width
-                    
-                    cont_int = contour.astype(int)
-                    colors = c_responses[interior_pts[:,0],interior_pts[:,1],:-1].sum(axis=0)
-                    color = rgb_values[colors.argmax()]
-                    
-                    #axes[1].plot(contour[:, 0], contour[:, 1], color=color)
-                    
-                    pixel_to_metric = block_depth / f    # mm / pixel
-                    if pixel_to_metric * block_length > 1.5 * block_length_metric:
-                        continue
-                    
-                    if ratio < 1:
-                        block_type = 'impossible'
-                    elif ratio < 1.5:
-                        # FIXME: Rotate corners by 45 degrees in this case
-                        block_type = 'square'
-                        diag_len = 0.5 * (block_length + block_width)
-                        block_length = diag_len / 2 ** 0.5
-                        block_width = diag_len / 2 ** 0.5
-                    elif ratio < 3:
-                        block_type = '2:1 rect'
-                        block_width = block_length / 2
-                    else:
-                        block_type = '4:1 rect'
-                        block_width = block_length / 4
-                    
-                    theta = np.rad2deg(np.arccos(V[0,0]))
-                    row = list(pixel_to_metric * mean) + [block_depth, theta] \
-                        + [block_width, block_length, block_height_metric] + list(color)
-                    csvwriter.writerow(row)
-                    
-                    corners = np.array([[ block_length,  block_width],
-                                        [ block_length, -block_width],
-                                        [-block_length, -block_width],
-                                        [-block_length,  block_width]]) / 2
-                    corners = corners.dot(V) + np.vstack(corners.shape[0] * (mean,))
-                    corners = np.vstack((corners, corners[0:1,:]))
-                    
-                    #print('Length: {:.2f}  |  Width: {:.2f}  |  Ratio: {:.2f}  |  {}'.format(block_length, block_width, ratio, block_type))
-                    
-                    #print('  {} | {} | {}'.format(contour.mean(axis=0),
-                    #    la.norm(std), S))
-                    
-                    #colors = colors[colors[:,0,] != 128, :]
-                    #axes[0].plot(corners[:, 1], corners[:, 0], color=color)
-                    
-                    #plt.plot(cc, rr, linewidth=2, color=color)
-                    #line = np.vstack((mean, mean + 10 * V[0,:]))
-                    #plt.plot(line[:,1], line[:,0], color='r')
-                    #line = np.vstack((mean, mean + 10 * V[1,:]))
-                    #plt.plot(line[:,1], line[:,0], color='b')
-                
-            """
-            # Convex hull
-            hull = morphology.convex_hull_object(layer_edges)
-            objects = c_img.copy()
-            objects[np.logical_not(hull), :] = np.zeros(3)
-            #plt.figure()
-            #plt.imshow(objects, cmap=plt.cm.gray)
-            
-            layers.append(objects)
-            """
-        """
-        layers.append(np.zeros(layers[-1].shape, dtype='uint8'))
-        layer_frame = np.vstack((np.hstack(tuple(layers[0:2])),
-                                 np.hstack(tuple(layers[2:4]))))
-        """
-        """
-        for ax in axes:
+        axes[1].imshow(depth_frame, cmap=plt.cm.gray)
+        
+        fn = '/Users/jonathan/block_coords/{}.csv'.format(frame_num)
+        contour_feats = detectBlocks(rgb_frame, depth_frame)
+        np.savetxt(fn, contour_feats)
+        axes[0].scatter(contour_feats[:,1], contour_feats[:,0])
+        
+        for ax in axes.ravel():
             ax.axis('image')
             ax.set_xticks([])
             ax.set_yticks([])
-        
-        #plt.figure()
-        #plt.imshow(layer_frame, cmap=plt.cm.gray); plt.show()
         _, fn = os.path.split(rgb_path)
-        #io.imsave(os.path.join(c.paths['working'], fn), layer_frame)
         plt.savefig(os.path.join(c.paths['working'], fn), format='png')
         plt.close()
-        """
-        
     
-    """
+    #"""
     import platform
     av_util = ''
     if platform.system() == 'Linux':
@@ -365,6 +329,6 @@ if __name__ == '__main__':
     make_video = [av_util, '-y', '-f', 'image2', '-i', frame_fmt, '-c:v',
                   'libx264', '-r', '30', '-pix_fmt', 'yuv420p', video_path]
     subprocess.call(make_video)
-    """
+    #"""
     
     

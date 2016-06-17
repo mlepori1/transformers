@@ -10,7 +10,7 @@ AUTHOR
 import bpy
 import csv
 
-fn = '/Users/jonathan/block_coords/50.csv'
+fn = '/Users/jonathan/block_coords/0.csv'
 with open(fn) as csvfile:
     csvreader = csv.reader(csvfile)
     
@@ -26,8 +26,9 @@ with open(fn) as csvfile:
     objects = []
     for row in csvreader:
         
-        position = tuple(float(x) / 10 for x in row[0:3])
-        angle = (0, 0, float(row[3]))
+        position = list(float(x) / 10 for x in row[0:3])
+        position[-1] = - position[-1]
+        angle = (0, 0, float(row[3]) + 3.14 / 2)
         r_width, r_length, r_height = tuple(float(x) / 2 / 10 for x in row[4:7])
         color = tuple(int(x) for x in row[7:10])
         
@@ -58,10 +59,11 @@ with open(fn) as csvfile:
         me.from_pydata(verts, [], faces)
         me.update()
         
+        ob.rotation_mode = 'XYZ'
         ob.location = position
         ob.rotation_euler = angle
-        ob.keyframe_insert(data_path='location', frame=i)
-        ob.keyframe_insert(data_path='rotation_euler', frame=i)
+        #ob.keyframe_insert(data_path='location', frame=i)
+        #ob.keyframe_insert(data_path='rotation_euler', frame=i)
         
         objects.append(ob)
         
