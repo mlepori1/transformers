@@ -275,6 +275,13 @@ if __name__ == '__main__':
         
     trial_id = 0
     
+    tracked_objs = []
+    filtered_path = '/Users/jonathan/filtered_coords/'
+    import glob
+    for csv_fn in glob.glob(os.path.join(filtered_path, '*.csv')):
+        M = np.loadtxt(csv_fn, delimiter=',')
+        tracked_objs.append(M)
+    
     c = DuploCorpus()
     i = 20
     rgb_frame_fns = c.getRgbFrameFns(trial_id)#[i:i+1]
@@ -291,7 +298,7 @@ if __name__ == '__main__':
     """
     
     plt.ioff()
-    for rgb_path, depth_path in zip(rgb_frame_fns, depth_frame_fns):
+    for i, (rgb_path, depth_path) in enumerate(zip(rgb_frame_fns, depth_frame_fns)):
         
         _, frame_fn = os.path.split(rgb_path)
         frame_num = int(os.path.splitext(frame_fn)[0])
@@ -308,6 +315,10 @@ if __name__ == '__main__':
         contour_feats = detectBlocks(rgb_frame, depth_frame)
         np.savetxt(fn, contour_feats)
         axes[0].scatter(contour_feats[:,1], contour_feats[:,0])
+        
+        filtered_centroids = tuple(x[i,0:2] for x in tracked_objs) #if x[i,0] > 0)
+        filtered_centroids = np.vstack(filtered_centroids)
+        axes[1].scatter(filtered_centroids[:,1], filtered_centroids[:,0])
         
         for ax in axes.ravel():
             ax.axis('image')
