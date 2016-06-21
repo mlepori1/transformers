@@ -34,7 +34,7 @@ num_tracks = size(M, 1);
 %   2 -- orientation angle
 %   3 -- block length
 %   4 -- block width
-%   5 -- block depth (ignore)
+%   5 -- block depth
 %   6 -- red count
 %   7 -- blue count
 %   8 -- green count
@@ -48,6 +48,18 @@ for i = 1:num_tracks
     % Set up a kalman filter for each detected object
     % Create a Kalman filter object.
     centroid = M(i,1:2);
+    % Filter out multiple detections of the same object
+    nearest_neighbor_dist = Inf;
+    for j = 1:i-1
+        if isempty(obj_centroids{j})
+            continue
+        end
+        d = norm(centroid - obj_centroids{j}(1,:));
+        nearest_neighbor_dist = min(nearest_neighbor_dist, d);
+    end
+    if nearest_neighbor_dist < 1
+        continue
+    end
     color_hist = M(i,end-4:end);
     kalmanFilter = configureKalmanFilter('ConstantVelocity', ...
         centroid, [200, 50], [100, 25], 100);
@@ -67,9 +79,13 @@ for i = 1:num_tracks
     obj_colorhists{i}(1,:) = color_hist;
 end
 
+obj_centroids = obj_centroids(~cellfun(@isempty, obj_centroids));
+obj_colorhists = obj_colorhists(~cellfun(@isempty, obj_colorhists));
+num_tracks = size(tracks, 1);
+
 %%
 % Track phase
-tol = 10;
+tol = 50;
 for i = 2:num_files
     % Load file
     frame_fn = fullfile(dir_path, filenames{i});
@@ -110,9 +126,9 @@ for i = 1:length(obj_centroids)
     color_hist = tracks(i).colorHist;
     [~, idxs] = sort(color_hist, 'descend');
     color = colors{idxs(1)};
-    %if idxs(1) == 5
-    %    color = colors{idxs(2)};
-    %end
+    if idxs(1) == 5
+        color = colors{idxs(2)};
+    end
     
     c = obj_centroids{i};
     c = c(c(:,1) > 0 & c(:,2) > 0,:);

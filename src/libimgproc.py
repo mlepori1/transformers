@@ -202,7 +202,7 @@ def detectBlocks(rgb_image, depth_image):
     contours = measure.find_contours(depth_edges.astype('uint8'), 0.5,
                                      fully_connected='high')                
     contours = [c[:,::-1] for c in contours]
-    ret_array = np.zeros((len(contours), 11))
+    contour_feats = np.zeros((len(contours), 11))
     for j, contour in enumerate(contours):
         
         interior_pts = np.column_stack(draw.polygon(contour[:,1], contour[:,0]))
@@ -265,22 +265,43 @@ def detectBlocks(rgb_image, depth_image):
         
         row = np.hstack((mean, np.array([theta]), block_dims,
                          np.array([block_depth]), color_hist))
-        ret_array[j,:] = row
+        contour_feats[j,:] = row
     
-    good_feats = ret_array[ret_array[:,0] != 0, :]
-    return good_feats
+    contour_feats = contour_feats[contour_feats[:,0] != 0, :]
+    
+    # Merge contour features with centroids close to each other (these are
+    # probably multiple detections of the same object)
+    min_dist = 1
+    good_feats = np.zeros(contour_feats.shape)
+    for i in range(contour_feats.shape[0]):
+        centroid = contour_feats[i,0:2]
+        for j in range(i):
+            other_centroid = contour_feats[j,0:2]
+            dist = la.norm(centroid - other_centroid)
+            #print(dist)
+            if dist < min_dist:
+                good_feats[j,-5:] += contour_feats[i,-5:]
+                break
+        else:
+            good_feats[i,:] = contour_feats[i,:]
+    
+    contour_feats = good_feats[good_feats[:,0] != 0, :]
+    return contour_feats
 
 
 if __name__ == '__main__':
         
     trial_id = 0
     
+    """
     tracked_objs = []
     filtered_path = '/Users/jonathan/filtered_coords/'
     import glob
     for csv_fn in glob.glob(os.path.join(filtered_path, '*.csv')):
         M = np.loadtxt(csv_fn, delimiter=',')
+        M[:,-5:] = np.cumsum(M[:,-5:], axis=0)
         tracked_objs.append(M)
+    """
     
     c = DuploCorpus()
     i = 20
@@ -289,36 +310,60 @@ if __name__ == '__main__':
     
     # Red, green, blue, yellow, gray (drawn as black)
     colors = [(1, 0, 0), (0, 1, 0), (0, 0, 1), (1, 1, 0), (0, 0, 0)]
-    
-    # Idea below (this is your warning)
-    """
-    set up 8 kalman filters: 4 for square blocks and 4 for rect blocks
-    don't assign color until the end (aggregate color histogram stats)
-    assign each detected object in a frame to the 'best' block (nearest neighbor)
-    """
+    color_chars = np.array(['r', 'g', 'b', 'y', 'k'])
     
     plt.ioff()
+    tracks = []
     for i, (rgb_path, depth_path) in enumerate(zip(rgb_frame_fns, depth_frame_fns)):
         
         _, frame_fn = os.path.split(rgb_path)
-        frame_num = int(os.path.splitext(frame_fn)[0])
+        frame_num = os.path.splitext(frame_fn)[0]
         
         # Read in frames and plot
         rgb_frame = io.imread(rgb_path)
         depth_frame = io.imread(depth_path)
         
+        #"""
         fig, axes = plt.subplots(1, 2)
         axes[0].imshow(rgb_frame)
         axes[1].imshow(depth_frame, cmap=plt.cm.gray)
+        #"""
         
         fn = '/Users/jonathan/block_coords/{}.csv'.format(frame_num)
         contour_feats = detectBlocks(rgb_frame, depth_frame)
-        np.savetxt(fn, contour_feats)
+        np.savetxt(fn, contour_feats, fmt='%.2f', delimiter=',')
         axes[0].scatter(contour_feats[:,1], contour_feats[:,0])
         
-        filtered_centroids = tuple(x[i,0:2] for x in tracked_objs) #if x[i,0] > 0)
+        if i == 0:
+            # Initialize tracks
+            for j in range(contour_feats.shape[0]):
+                tracks.append(contour_feats[j,:])
+        else:
+            # Assign detections to tracks
+            for t_idx, track in enumerate(tracks):
+                track_centroid = track[0:2]
+                nn_dist = np.Inf
+                nn_idx = -1
+                # Find the nearest detection
+                # FIXME: don't let track centroids merge
+                for j in range(contour_feats.shape[0]):
+                    contour_centroid = contour_feats[j,0:2]
+                    dist = la.norm(contour_centroid - track_centroid)
+                    if dist < nn_dist:
+                        nn_dist = dist
+                        nn_idx = j
+                # Update the nearest neighbor
+                track[0:-5] = contour_feats[nn_idx,0:-5]
+                track[-5:] += contour_feats[nn_idx,-5:]
+                tracks[t_idx] = track
+        
+        #"""
+        filtered_centroids = tuple(x[0:2] for x in tracks)
         filtered_centroids = np.vstack(filtered_centroids)
-        axes[1].scatter(filtered_centroids[:,1], filtered_centroids[:,0])
+        color_hists = tuple(x[-5:] for x in tracks)
+        color_hists = np.vstack(color_hists)
+        colors = color_chars[color_hists[:,:-1].argmax(axis=1)]
+        axes[1].scatter(filtered_centroids[:,1], filtered_centroids[:,0], c=colors)
         
         for ax in axes.ravel():
             ax.axis('image')
@@ -327,7 +372,9 @@ if __name__ == '__main__':
         _, fn = os.path.split(rgb_path)
         plt.savefig(os.path.join(c.paths['working'], fn), format='png')
         plt.close()
-    
+        #"""
+        
+        
     #"""
     import platform
     av_util = ''
