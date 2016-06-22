@@ -8,10 +8,11 @@ AUTHOR
 """
 
 from __future__ import print_function
-import tkinter as tk
+import Tkinter as tk
 from PIL import Image, ImageTk
 import graphviz as gv
 import os
+import numpy
 
 from duplocorpus import DuploCorpus
 
@@ -54,6 +55,9 @@ class Application:
         self.navigation_frame = tk.Frame(self.parent)
         self.defineTrialSelectionInterface()
         self.drawInterface()
+        
+        #define matrix for object studs
+        self.obj_studs = numpy.zeros((2,2), dtype=bool)
     
     
     def initState(self):
@@ -169,7 +173,10 @@ class Application:
         self.clearInterface()
         self.defineAnnotationInterface()
         self.drawInterface()
-        
+  
+    def assignVar(self, x,y):
+        self.obj_studs[x][y] = not self.obj_studs[x][y]
+        print(self.obj_studs)         
         
     def defineAnnotationInterface(self):
         """
@@ -194,7 +201,7 @@ class Application:
         
         # Draw annotation frame
         ann_frame = tk.Frame(frame1)
-        
+        """
         # Action label (radio buttons)
         action_label = tk.Label(ann_frame, text='Action')
         action_label.grid(row=0, column=0)
@@ -221,6 +228,13 @@ class Application:
             target_box = tk.Checkbutton(ann_frame, text=block,
                                         variable=self.target_fields[block])
             target_box.grid(sticky=tk.W, row=i+1, column=2)
+        """
+        #new annotation button test
+        for r in range(2):
+            for c in range(2):
+                func=lambda x=r, y=c: self.assignVar(x,y)
+                self.annotate_button = tk.Button(ann_frame, command=func)
+                self.annotate_button.grid(row=r, column=c)
         
         ann_frame.pack(side=tk.RIGHT)
         frame1.pack(side=tk.TOP)
@@ -248,7 +262,8 @@ class Application:
         restart = tk.Button(master, text='Quit', command=self.close)
         restart.grid(sticky=tk.W, row=0, column=3)
     
-    
+        
+        
     def undoAction(self):
         """
         Delete the previous action annotation and re-draw block configuration.

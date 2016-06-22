@@ -434,10 +434,11 @@ class Application:
             ok = tk.Button(self.popup, text='OK', command=self.cancel)
             ok.pack()
         else:
-            fmtstr = 'Connecting to {}...'
-            l = tk.Label(self.popup, text=fmtstr.format(imu_id))
-            l.pack()
             
+            #call configure method on self.block2button[block] to change text
+            
+            self.block2button[block].configure(text="Connecting...")
+                        
             self.attemptConnection(imu_id, block)
     
     
