@@ -18,6 +18,8 @@ import numpy as np
 from matplotlib import pyplot as plt
 from numpy import linalg as la
 
+from scipy import optimize
+
 from skimage import io
 from skimage import feature
 from skimage import transform
@@ -27,6 +29,7 @@ from skimage import draw
 from skimage import color
 
 from duplocorpus import DuploCorpus
+from kalmanfilter import KalmanFilter
 
 
 def quantizeColors(rgb_image):
@@ -312,6 +315,14 @@ if __name__ == '__main__':
     colors = [(1, 0, 0), (0, 1, 0), (0, 0, 1), (1, 1, 0), (0, 0, 0)]
     color_chars = np.array(['r', 'g', 'b', 'y', 'k'])
     
+    # TODO: Define model for Kalman filter
+    n = 2
+    F = np.matrix(np.eye(n))
+    G = np.matrix(np.eye(n))
+    H = np.matrix(np.eye(n))
+    Q = np.matrix(np.eye(n))
+    R = np.matrix(np.eye(n))
+    
     plt.ioff()
     tracks = []
     for i, (rgb_path, depth_path) in enumerate(zip(rgb_frame_fns, depth_frame_fns)):
@@ -337,25 +348,30 @@ if __name__ == '__main__':
         if i == 0:
             # Initialize tracks
             for j in range(contour_feats.shape[0]):
-                tracks.append(contour_feats[j,:])
+                # FIXME: initialize the STATE, not the OBSERVATION
+                center = np.matrix(contour_feats[j,0:2]).T
+                cov = np.matrix(np.eye(2))  # FIXME
+                K = KalmanFilter(center, cov)
+                tracks.append((K, contour_feats[j,:]))
         else:
-            # Assign detections to tracks
-            for t_idx, track in enumerate(tracks):
-                track_centroid = track[0:2]
-                nn_dist = np.Inf
-                nn_idx = -1
-                # Find the nearest detection
-                # FIXME: don't let track centroids merge
-                for j in range(contour_feats.shape[0]):
-                    contour_centroid = contour_feats[j,0:2]
-                    dist = la.norm(contour_centroid - track_centroid)
-                    if dist < nn_dist:
-                        nn_dist = dist
-                        nn_idx = j
-                # Update the nearest neighbor
-                track[0:-5] = contour_feats[nn_idx,0:-5]
-                track[-5:] += contour_feats[nn_idx,-5:]
-                tracks[t_idx] = track
+            # Compute cost matrix between detections and tracks and use it to
+            # solve the assignment problem
+            costs = np.zeros((contour_feats.shape[0], len(tracks)))
+            for j, (feats, K) in enumerate(tracks):
+                centers = np.matrix(feats[:,0:2]).T
+                dists = K.mahalanobis(centers, H, R)
+                costs[:,j] = dists
+            det_idxs, track_idxs = optimize.linear_sum_assignment(costs)
+            
+            # Update tracks with assigned detections
+            for det_idx, track_idx in zip(det_idxs, track_idxs):
+                K, feats = tracks[track_idx]
+                contour_feat = contour_feats[det_idx,:]
+                center = np.matrix(contour_feat[0:2]).T
+                Xc, Cc = K.correct(center, H, R)
+                Xp, Cp = K.predict(F, G, Q)
+                feats[0:-5] = contour_feat[0:-5]
+                tracks[track_idx] = K, feats
         
         #"""
         filtered_centroids = tuple(x[0:2] for x in tracks)
