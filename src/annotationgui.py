@@ -58,7 +58,19 @@ class Application:
         
         #define matrix for object studs
         self.obj_studs = numpy.zeros((2,2), dtype=bool)
-    
+        
+        #create arrays for square blocks
+        self.arrays = {}
+        names = ('red square','green square','yellow square','blue square')
+        for n in names:
+            a = numpy.zeros((2,2), dtype=bool)
+            self.arrays[n] = a
+            
+        #relate names of blocks and colors
+        names = ('red square','green square','yellow square','blue square')
+        colors = ('red','green','yellow','blue')
+        self.name2color = {n:c for n,c in zip(names, colors)}
+        
     
     def initState(self):
         """
@@ -174,9 +186,16 @@ class Application:
         self.defineAnnotationInterface()
         self.drawInterface()
   
-    def assignVar(self, x,y):
-        self.obj_studs[x][y] = not self.obj_studs[x][y]
-        print(self.obj_studs)         
+    def assignVar(self, x,y,z):
+        a = self.arrays[z]
+        a[x][y] = not a[x][y]
+        b = self.button_dict[z]
+        
+        if a[x][y]:
+            b[x][y].config(bg='black')        
+        else:
+            b[x][y].config(bg=self.name2color[z]) 
+            
         
     def defineAnnotationInterface(self):
         """
@@ -229,12 +248,24 @@ class Application:
                                         variable=self.target_fields[block])
             target_box.grid(sticky=tk.W, row=i+1, column=2)
         """
-        #new annotation button test
-        for r in range(2):
-            for c in range(2):
-                func=lambda x=r, y=c: self.assignVar(x,y)
-                self.annotate_button = tk.Button(ann_frame, command=func)
-                self.annotate_button.grid(row=r, column=c)
+        
+        #define object buttons for square shapes
+        self.button_dict = {}
+        names = ('red square','green square','yellow square','blue square')        
+        for i,n in enumerate(names):
+            self.annotate_buttons = []
+            f = tk.Frame(ann_frame)
+            square_colors = ('red','green','yellow','blue')
+            for r in range(2):
+                self.annotate_buttons.append([])
+                for c in range(2):
+                    func=lambda x=r, y=c, z=n: self.assignVar(x,y,z)
+                    b = tk.Button(f, command=func, bg=square_colors[i])
+                    b.grid(row=r, column=c)
+                    self.annotate_buttons[-1].append(b)
+            self.button_dict[n] = self.annotate_buttons
+            f.grid(row=i+1, column=1)
+        
         
         ann_frame.pack(side=tk.RIGHT)
         frame1.pack(side=tk.TOP)
