@@ -8,7 +8,6 @@ AUTHOR
   Jonathan D. Jones
 """
 
-import csv
 import os
 import subprocess
 
@@ -296,32 +295,34 @@ if __name__ == '__main__':
         
     trial_id = 0
     
-    """
-    tracked_objs = []
-    filtered_path = '/Users/jonathan/filtered_coords/'
-    import glob
-    for csv_fn in glob.glob(os.path.join(filtered_path, '*.csv')):
-        M = np.loadtxt(csv_fn, delimiter=',')
-        M[:,-5:] = np.cumsum(M[:,-5:], axis=0)
-        tracked_objs.append(M)
-    """
-    
     c = DuploCorpus()
     i = 20
-    rgb_frame_fns = c.getRgbFrameFns(trial_id)#[i:i+1]
-    depth_frame_fns = c.getDepthFrameFns(trial_id)#[i:i+1]
+    rgb_frame_fns = c.getRgbFrameFns(trial_id)#[i:i+5]
+    depth_frame_fns = c.getDepthFrameFns(trial_id)#[i:i+5]
     
     # Red, green, blue, yellow, gray (drawn as black)
     colors = [(1, 0, 0), (0, 1, 0), (0, 0, 1), (1, 1, 0), (0, 0, 0)]
     color_chars = np.array(['r', 'g', 'b', 'y', 'k'])
     
-    # TODO: Define model for Kalman filter
-    n = 2
-    F = np.matrix(np.eye(n))
-    G = np.matrix(np.eye(n))
-    H = np.matrix(np.eye(n))
-    Q = np.matrix(np.eye(n))
-    R = np.matrix(np.eye(n))
+    # Define model for Kalman filter
+    Ts = 1  # Sampling period (in frames)
+    F = np.matrix([[1, Ts, 0,  0],
+                   [0,  1, 0,  0],
+                   [0,  0, 1, Ts],
+                   [0,  0, 0,  1]])
+    G = np.matrix([[ 0,  0],
+                   [Ts,  0],
+                   [ 0,  0],
+                   [ 0, Ts]])
+    H = np.matrix([[1, 0, 0, 0],
+                   [0, 0, 1, 0]])
+    sig_a = 0.1
+    sig_e = 1
+    sig_0 = 1
+    Q = np.matrix(np.eye(2)) * sig_a
+    R = np.matrix(np.eye(2)) * sig_e
+    init_state = np.matrix(np.zeros(4)).T
+    cov_0 = np.matrix(np.eye(4)) * sig_0
     
     plt.ioff()
     tracks = []
@@ -334,49 +335,62 @@ if __name__ == '__main__':
         rgb_frame = io.imread(rgb_path)
         depth_frame = io.imread(depth_path)
         
-        #"""
         fig, axes = plt.subplots(1, 2)
         axes[0].imshow(rgb_frame)
         axes[1].imshow(depth_frame, cmap=plt.cm.gray)
-        #"""
         
-        fn = '/Users/jonathan/block_coords/{}.csv'.format(frame_num)
         contour_feats = detectBlocks(rgb_frame, depth_frame)
-        np.savetxt(fn, contour_feats, fmt='%.2f', delimiter=',')
         axes[0].scatter(contour_feats[:,1], contour_feats[:,0])
+        #fn = '/Users/jonathan/block_coords/{}.csv'.format(frame_num)
+        #np.savetxt(fn, contour_feats, fmt='%.2f', delimiter=',')
+        
+        #print(contour_feats.astype(int))
         
         if i == 0:
             # Initialize tracks
             for j in range(contour_feats.shape[0]):
-                # FIXME: initialize the STATE, not the OBSERVATION
-                center = np.matrix(contour_feats[j,0:2]).T
-                cov = np.matrix(np.eye(2))  # FIXME
-                K = KalmanFilter(center, cov)
+                state = init_state.copy()
+                state[0,0] = contour_feats[j,0]
+                state[2,0] = contour_feats[j,1]
+                K = KalmanFilter(state, cov_0)
                 tracks.append((K, contour_feats[j,:]))
         else:
             # Compute cost matrix between detections and tracks and use it to
-            # solve the assignment problem
+            # solve 'the assignment problem'
             costs = np.zeros((contour_feats.shape[0], len(tracks)))
-            for j, (feats, K) in enumerate(tracks):
-                centers = np.matrix(feats[:,0:2]).T
+            centers = np.matrix(contour_feats[:,0:2]).T
+            for j, (K, feats) in enumerate(tracks):
                 dists = K.mahalanobis(centers, H, R)
                 costs[:,j] = dists
+            #print(costs.astype(int))
             det_idxs, track_idxs = optimize.linear_sum_assignment(costs)
+            #print(np.column_stack((det_idxs, track_idxs)).T)
             
             # Update tracks with assigned detections
             for det_idx, track_idx in zip(det_idxs, track_idxs):
+                
+                # Get the track and detections to be matched
                 K, feats = tracks[track_idx]
                 contour_feat = contour_feats[det_idx,:]
+                
+                # Correct the state and get the estimated location
                 center = np.matrix(contour_feat[0:2]).T
                 Xc, Cc = K.correct(center, H, R)
-                Xp, Cp = K.predict(F, G, Q)
-                feats[0:-5] = contour_feat[0:-5]
+                center_c = H * Xc
+                
+                # Update features
+                feats[0:2] = center_c.A.ravel()
+                feats[2:-5] = contour_feat[2:-5]
+                feats[-5:] += contour_feat[-5:]
                 tracks[track_idx] = K, feats
+            
+            # Predict next state for all tracks
+            for K, feats in tracks:
+                Xp, Cp = K.predict(F, G, Q)
         
-        #"""
-        filtered_centroids = tuple(x[0:2] for x in tracks)
+        filtered_centroids = tuple(x[0:2] for k, x in tracks)
         filtered_centroids = np.vstack(filtered_centroids)
-        color_hists = tuple(x[-5:] for x in tracks)
+        color_hists = tuple(x[-5:] for k, x in tracks)
         color_hists = np.vstack(color_hists)
         colors = color_chars[color_hists[:,:-1].argmax(axis=1)]
         axes[1].scatter(filtered_centroids[:,1], filtered_centroids[:,0], c=colors)
@@ -388,7 +402,6 @@ if __name__ == '__main__':
         _, fn = os.path.split(rgb_path)
         plt.savefig(os.path.join(c.paths['working'], fn), format='png')
         plt.close()
-        #"""
         
         
     #"""

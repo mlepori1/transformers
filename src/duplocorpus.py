@@ -11,7 +11,6 @@ import os
 import logging
 import csv
 import glob
-import subprocess
 
 import numpy as np
 from matplotlib import pyplot as plt
@@ -113,18 +112,32 @@ class DuploCorpus:
         
         Returns:
         --------
-        [np array] meta_data: Numpy structured array with the following fields
-          [int] trial id:
-          [str] participant id:
-          [str] birth month:
-          [str] birth year:
-          [str] gender:
-          [int] task id:
-          [str] 08F1:
-          [str] 095D:
-          [str] 090F:
-          [str] 0949:
-          [int] has_labels:
+        meta_data:  numpy array
+          Numpy structured array with the following fields
+          trial id:  int
+            This is just the entry's row index. All I/O operations take this
+            id as an argument
+          participant id:  str
+            Anonymized participant identifier
+          birth month:  str
+            Participant birth month
+          birth year:  str
+            Participant birth year
+          gender:  str
+            Participant gender
+          task id:  int
+            Integer ID of the block construction task attempted by the
+            participant
+          08F1:  str
+            Color of the rectangular block housing IMU 08F1
+          095D:  str
+            Color of the rectangular block housing IMU 095D
+          090F:  str
+            Color of the rectangular block housing IMU 090F
+          0949:  str
+            Color of the rectangular block housing IMU 0949
+          has_labels:  int
+            0 if human-annotated labels file does not exist, 1 if it does exist
         """
 
         meta_data = []
@@ -147,7 +160,7 @@ class DuploCorpus:
     def writeMetaData(self):
         """
         Write this object's metadata array to a file names meta-data.csv in the
-        data directory
+        data directory.
         """
         
         # Write contents of the metadata array to file line-by-line
@@ -167,14 +180,19 @@ class DuploCorpus:
         
         Args:
         -----
-        [int] trial_id:
-        [tuple(int)] trial_metadata:
-          [0] participant id
-          [1] birth month
-          [2] birth year
-          [3] gender
-          [4] block task ID
-        [dict(str->str)] imu2block:
+        trial_id:  int
+          Trial identifier. This is the trial's index in the corpus metadata
+          array.
+        trial_metadata:  tuple of int
+          (See readMetaData for descriptions of this tuple's entries)
+          0 -- participant id
+          1 -- birth month
+          2 -- birth year
+          3 -- gender
+          4 -- block task ID
+        imu2block:  dict of str -> str
+          Dictionary mapping IMU names to the blocks housing them. This dict
+          MUST contain an entry for every IMU in self.imu_ids.
         """
                 
         label_path = os.path.join(self.paths['labels'], str(trial_id) + '.csv')
@@ -205,9 +223,11 @@ class DuploCorpus:
         """        
         Args:
         -----
-        [int] trial_id: Trial identifier. This is the trial's index in the
-          corpus metadata array.
-        [np array] dev_settings:
+        trial_id:  int
+          Trial identifier. This is the trial's index in the corpus metadata
+          array.
+        dev_settings:  numpy array
+          Numpy structured array. Each row contains the settings of one IMU.
         """
         
         # Write settings array to CSV line-by-line
@@ -223,44 +243,71 @@ class DuploCorpus:
         """
         Args:
         -----
-        [int] trial_id: Trial identifier. This is the trial's index in the
-          corpus metadata array.
+        trial_id:  int
+          Trial identifier. This is the trial's index in the corpus metadata
+          array.
         
         Returns:
         --------
-        [dict(str->np array)] imus:
+        imu_data:  dict of str -> numpy array
+          Dictionary mapping the name of each IMU that was used in this trial
+          to a numpy array representing a timeseries of data samples. Columns
+          of this array are
+          0 ----- Global timestamp. PC time when sample was received, in seconds
+          1 ----- Error flag. 0 if sample is usable (no error), 1 if an
+                  error occurred.
+          2 ----- Sample index (starts at 1)
+          3 ----- IMU timestamp. IMU's local time when sample was taken, in
+                  seconds
+          4:6 --- Acceleration meaured with respect to the IMU frame in m/sec^2
+                  (XYZ order)
+          7:9 --- Angular velocity meaured with respect to the IMU frame in
+                  degrees / sec (XYZ order)
+          10:12 - Magnetic field meaured with respect to the IMU frame in 
+                  milliGauss (XYZ order)
+          13 ---- Battery voltage in milliVolts (only sampled about once or
+                  twice per second)
+          14 ---- Temperature (only sampled about once or twice per second)
+          15 ---- Barometric pressure (only sampled about once or twice per
+                  second)
         """
         
-        imus = {}
+        imu_data = {}
         for imu_id in self.imu_ids:
             
+            # IMUs that weren't used during the trial won't have any data to
+            # read (obviously)
             if self.meta_data[imu_id][trial_id] == 'UNUSED':
                 continue
             
             fn = '{}-{}.csv'.format(trial_id, imu_id)
             path = os.path.join(self.paths['imu-samples'], fn)
             # Skip the first line because it's just the column names
-            imu_data = np.loadtxt(path, delimiter=',', skiprows=1)
+            data = np.loadtxt(path, delimiter=',', skiprows=1)
             
             # FIXME: convert intelligently
-            imu_data[:,3] = imu_data[:,3] / 65536.0   # Convert sample timestamp to seconds
-            imu_data[:,4:7] = imu_data[:,4:7] / 4096.0    # Convert acceleration samples to g
-            imu_data[:,7:10] = imu_data[:,7:10] * 0.07  # Convert angular velocity samples to deg/s
-            imu_data[:,10:13] = imu_data[:,10:13] * 1e-3  # Convert magnetic field to units of mGauss
-            imu_data[:,12] = - imu_data[:,12]   # Field is measured along -z instead of +z
+            data[:,3] = data[:,3] / 65536.0   # Convert sample timestamp to seconds
+            data[:,4:7] = data[:,4:7] / 4096.0    # Convert acceleration samples to g
+            data[:,7:10] = data[:,7:10] * 0.07  # Convert angular velocity samples to deg/s
+            data[:,10:13] = data[:,10:13] * 1e-3  # Convert magnetic field to units of mGauss
+            data[:,12] = - data[:,12]   # Field is measured along -z instead of +z
             
-            imus[imu_id] = imu_data
+            # TODO: Convert temp and pressure to metric units
+            
+            imu_data[imu_id] = data
         
-        return imus
+        return imu_data
 
 
     def writeImuData(self, trial_id, imu_data):
         """
         Args:
         -----
-        [int] trial_id: Trial identifier. This is the trial's index in the
-          corpus metadata array.
-        [dict(str->np array)] imu_data:
+        trial_id:  int
+          Trial identifier. This is the trial's index in the corpus metadata
+          array.
+        imu_data:  dict of str -> numpy array
+          (Same as output of readImuData)
         """
         
         for name, data in imu_data.items():
@@ -278,12 +325,21 @@ class DuploCorpus:
         """
         Args:
         -----
-        [int] trial_id: Trial identifier. This is the trial's index in the
-          corpus metadata array.
+        trial_id:  int
+          Trial identifier. This is the trial's index in the corpus metadata
+          array.
                 
         Returns:
         --------
-        [dict(str->np array)] frame_timestamps:
+        frame_timestamps:  dict of str -> numpy array
+          Dictionary mapping the name of each camera that was used in this
+          trial to a numpy array representing a timeseries of data samples.
+          Columns of this array are
+          0 -- Global timestamp. PC time when sample was received, in seconds
+          1 -- Error flag. 0 if sample is usable (no error), 1 if an error
+               occurred.
+          2 -- Sample index (this is also the name of the corresponding video
+               frame captured by the camera) (starts at 0)
         """
         
         for image_type in self.image_types:
@@ -299,9 +355,11 @@ class DuploCorpus:
         """
         Args:
         -----
-        [int] trial_id: Trial identifier. This is the trial's index in the
-          corpus metadata array.
-        [dict(np array)] img_timestamps:
+        trial_id:  int
+          Trial identifier. This is the trial's index in the corpus metadata
+          array.
+        img_timestamps:  dict of str -> numpy array
+          (Same as output of readFrameTimestamps)
         """
         
         for name, timestamps in frame_timestamps.items():
@@ -321,22 +379,31 @@ class DuploCorpus:
         
         Args:
         -----
-        [int] trial_id: Trial identifier. This is the trial's index in the
-          corpus metadata array.
+        trial_id:  int
+          Trial identifier. This is the trial's index in the corpus metadata
+          array.
         
         Returns:
         --------
-        [np array] labels: Structured array with the following fields
-          [int] start: Video frame index for start of event
-          [int] end: Video frame index for end of event
-          [int] action: Integer event ID (0-5). See labels file for description
-          [int] object: Integer ID for object of event. Ex: 1 in 'place 1 on
+        labels:  numpy array
+          Structured array with the following fields
+          start:  int
+            Video frame index for start of event
+          end:  int
+            Video frame index for end of event
+          action:  int
+            Integer event ID (0-5). See labels file for description
+          object:  int
+            Integer ID for object of event. Ex: 1 in 'place 1 on
             4'. Not all events have objects; when object N/A ID is 0
-          [int] target: Integer ID for target of event. Ex: 4 in 'place 1 on
+          target:  int
+            Integer ID for target of event. Ex: 4 in 'place 1 on
             4'. Not all events have targets; when target is N/A ID is 0
-          [str] obj_studs: Adjacent studs are recorded for placement events. The
+          obj_studs:  str
+            Adjacent studs are recorded for placement events. The
             i-th entry in this list is adjacent to the i-th entry in tgt_studs.
-          [str] tgt_studs: Same as above. The i-th entry in this list is adjacent
+          tgt_studs:  str
+            Same as above. The i-th entry in this list is adjacent
             to the i-th entry in obj_studs.
         """
         
@@ -358,21 +425,23 @@ class DuploCorpus:
         
         Args:
         -----
-        [int] trial_id: Trial identifier. This is the trial's index in the
-          corpus metadata array.
-        [list(tuple)] labels: Labels to be written. Each entry (tuple) in the
+        trial_id:  int
+          Trial identifier. This is the trial's index in the corpus metadata
+          array.
+        labels:  list of tuple
+          Labels to be written. Each entry (tuple) in the
           list represents a single action. Entries are as follows
-          [int] 0: Video frame index for start of event
-          [int] 1: Video frame index for end of event
-          [int] 2: Integer event ID (0-5). See labels file for description
-          [int] 3: Integer ID for object of event. Ex: 1 in 'place 1 on
-            4'. Not all events have objects; when object N/A ID is 0
-          [int] 4: Integer ID for target of event. Ex: 4 in 'place 1 on
-            4'. Not all events have targets; when target is N/A ID is 0
-          [str] 5: Adjacent studs are recorded for placement events. The
-            i-th entry in this list is adjacent to the i-th entry in tgt_studs.
-          [str] 6: Same as above. The i-th entry in this list is adjacent
-            to the i-th entry in obj_studs.
+          0 -- Video frame index for start of event
+          1 -- Video frame index for end of event
+          2 -- Integer event ID (0-5). See labels file for description
+          3 -- Integer ID for object of event. Ex: 1 in 'place 1 on
+               4'. Not all events have objects; when object N/A ID is 0
+          4 -- Integer ID for target of event. Ex: 4 in 'place 1 on
+               4'. Not all events have targets; when target is N/A ID is 0
+          5 -- Adjacent studs are recorded for placement events. The
+               i-th entry in this list is adjacent to the i-th entry in tgt_studs.
+          6 -- Same as above. The i-th entry in this list is adjacent
+               to the i-th entry in obj_studs.
         """
         
         # Convert labels to numpy structured array
@@ -392,21 +461,26 @@ class DuploCorpus:
     
         Args:
         -----
-        [str] path: Path (full or relative) to raw data file
-        [list(str)] imu_dev_names: List of IMU ID strings; define p as the number
-          of items in this list
-        [list(str)] img_dev_names: List of image capture device ID strings; define
-          q as the number of items in this list
+        path:  string
+          Path (full or relative) to raw data file
+        imu_dev_names:  list of strings
+          List of IMU ID strings; define p as the number of items in this list
+        img_dev_names:  list of strings
+          List of image capture device ID strings; define q as the number of
+          items in this list
     
         Returns:
         --------
-        [dict(str->np array)] imu_data: Size n-by-p*d, where n is the number of IMU
+        imu_data:  dict of str -> numpy array
+          Size n-by-p*d, where n is the number of IMU
           samples, p is the number of IMU devices, and d is the length of one IMU
           sample. Each holds p length-d IMU samples, concatenated in the order
           seen in imu_dev_names
-        [np array] img_data: Size m-by-p. Contains the global timestamp for every video
+        img_data:  numpy array
+          Size m-by-p. Contains the global timestamp for every video
           frame recorded
-        [int] sample_len: Length of one IMU sample (d)
+        sample_len:  int
+          Length of one IMU sample (d)
         """
         
         imu_data = {}
@@ -473,41 +547,28 @@ class DuploCorpus:
         return (imu_data, frame_timestamps)
     
     
-    def makeVideo(self, trial_id):
-        """
-        Convert frames to avi video
-        
-        Args:
-        -----
-        [int] trial_id: Trial identifier. This is the trial's index in the
-          corpus metadata array.
-        """
-        
-        # NOTE: This depends on the avconv utility for now
-        print('')
-        frame_fmt = os.path.join(self.paths['video-frames'], '{}-rgb'.format(trial_id), '%6d.png')
-        video_path = os.path.join(self.paths['video-frames'], '{}-rgb.avi'.format(trial_id))
-        make_video = ['avconv', '-y', '-f', 'image2', '-i', frame_fmt, '-r', '30', video_path]
-        subprocess.call(make_video)
-        print('')
-    
-    
     def postprocess(self, trial_id, trial_metadata, imu2block, imu_settings):
         """
-        []
+        This is a wrapper script that parses the raw IMU and video frame
+        timestamp data into more organized formats and updates the metadata
+        array to record that the trial occurred.
         
         Args:
         -----
-        [int] trial_id: Trial identifier. This is the trial's index in the
+        trial_id:  int
+          Trial identifier. This is the trial's index in the
           corpus metadata array.
-        [tuple(str)] trial_metadata:
-          [0] participant id
-          [1] birth month
-          [2] birth year
-          [3] gender
-          [4] block task ID
-        [dict(str->str)] imu_settings:
-        [dict(str->str)] imu2block:
+        trial_metadata:  tuple of str
+          (See updateMetaData)
+          0 -- participant id
+          1 -- birth month
+          2 -- birth year
+          3 -- gender
+          4 -- block task ID
+        imu2block:  dict of str -> str
+          (See updateMetaData)
+        imu_settings:  dict of str -> str
+          (See writeImuSettings)
         """
         
         imu_data, frame_timestamps = self.parseRawData(trial_id)
@@ -517,9 +578,7 @@ class DuploCorpus:
         self.writeFrameTimestamps(trial_id, frame_timestamps)
                 
         self.updateMetaData(trial_id, trial_metadata, imu2block)
-        
-        #self.makeVideo(trial_id)
-    
+            
     
     def makeImuFigs(self, trial_id):
         """
@@ -528,8 +587,13 @@ class DuploCorpus:
         
         Args:
         -----
-        [int] trial_id:
+        trial_id:  int
+          Trial identifier. This is the trial's index in the corpus metadata
+          array.
         """
+        
+        # FIXME: With the way I'm currently drawing background annotations,
+        #   this method will break with simultaneous events
         
         # Load IMU data, RGB frame timestamps, and labels (empty list if no labels)
         imus = self.readImuData(trial_id)
@@ -592,7 +656,9 @@ class DuploCorpus:
         
         Args:
         -----
-        [int] trial_id:
+        trial_id:  int
+          Trial identifier. This is the trial's index in the corpus metadata
+          array.
         """
         
         labels = self.readLabels(trial_id)
@@ -615,11 +681,14 @@ class DuploCorpus:
         
         Args:
         -----
-        [int] trial_id:
+        trial_id:  int
+          Trial identifier. This is the trial's index in the corpus metadata
+          array.
         
         Returns:
         --------
-        [list(str)] rgb_frame_fns:
+        rgb_frame_fns:  list of str
+          Full path to each RGB frame, sorted in alphanumeric order
         """
         
         # Get full path names for RGB frames in this trial
@@ -639,11 +708,14 @@ class DuploCorpus:
         
         Args:
         -----
-        [int] trial_id:
+        trial_id:  int
+          Trial identifier. This is the trial's index in the corpus metadata
+          array.
         
         Returns:
         --------
-        [list(str)] depth_frame_fns:
+        depth_frame_fns:  list of str
+          Full path to each depth frame, sorted in alphanumeric order
         """
         
         # Get full path names for RGB frames in this trial
@@ -657,5 +729,25 @@ class DuploCorpus:
 
 
 if __name__ == '__main__':
+    
+    # Ignore the code below if you aren't me (the author)
+    
     c = DuploCorpus()
-        
+    sample_rate = 15    # Hz
+    end_idx = 45 * sample_rate  # No motion for the first ~45-50 seconds
+    imu_data = c.readImuData(13)
+    
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    for name, data in imu_data.items():
+        a_stationary = data[:end_idx, 4:7]
+        mu_a = a_stationary.mean(axis=0)
+        theta_xz = np.arctan2(mu_a[0], mu_a[2])
+        theta_yz = np.arctan2(mu_a[1], mu_a[2])
+        print()
+        print(mu_a)
+        fmtstr = 'XZ angle: {:.5f}  |  YZ angle: {:.5f}'
+        print(fmtstr.format(np.rad2deg(theta_xz), np.rad2deg(theta_yz)))
+        line = np.vstack((np.zeros(3), mu_a))
+        ax.plot(line[:,0], line[:,1], line[:,2])
+        ax.scatter(mu_a[0], mu_a[1], mu_a[2])

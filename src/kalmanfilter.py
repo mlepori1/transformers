@@ -29,6 +29,10 @@ class KalmanFilter:
         self.Xp = init_state
         self.Cp = init_cov
         
+        self.num_steps_since_correction = 1
+        
+        #print('Initial state:  {}'.format(self.Xp.A.ravel()))
+        
         # Correction params
         self.Xc = None
         self.Cc = None
@@ -38,12 +42,16 @@ class KalmanFilter:
         """
         """
         
-        # FIXME: requires perfectly determined linear system
-        # FIXME: Variables must by numpy matrix objects
-        K = la.solve(H * self.Cp * H.T + R, self.Cp * H.T)
+        # FIXME: Direct matrix inversion is bad
+        # FIXME: Variables must be numpy matrix objects
+        K = (self.Cp * H.T) * (H * self.Cp * H.T + R).I
         
         self.Cc = self.Cp - K * H * self.Cp
         self.Xc = self.Xp + K * (y - H * self.Xp)
+        
+        #print('Corrected state:  {}'.format(self.Xc.A.ravel()))
+        
+        self.num_steps_since_correction = 0
         
         return self.Xc, self.Cc
     
@@ -52,8 +60,17 @@ class KalmanFilter:
         """
         """
         
-        self.Xp = F * self.Xc
-        self.Cp = F * self.Cc * F.T + G * Q * G.T
+        # FIXME: predicting multiple steps into the future should be allowed
+        if self.num_steps_since_correction > 0:
+            self.Xp = F * self.Xp
+            self.Cp = F * self.Cp * F.T + G * Q * G.T
+        else:
+            self.Xp = F * self.Xc
+            self.Cp = F * self.Cc * F.T + G * Q * G.T
+        
+        #print('Predicted state:  {}'.format(self.Xp.A.ravel()))
+        
+        self.num_steps_since_correction += 1
         
         return self.Xp, self.Cp
     
@@ -65,7 +82,7 @@ class KalmanFilter:
         # FIXME: This only works for vector observations
         num_observations = Ys.shape[1]
         dists = np.zeros(num_observations)
-        for i, in range(num_observations):
+        for i in range(num_observations):
             y = Ys[:,i]
             
             # Observation distribution is gaussian, so specify with mean and
@@ -77,7 +94,7 @@ class KalmanFilter:
             # covariance
             # FIXME: I'm not sure if this covariance matrix is necessarily positive
             #   definite
-            dist_m = ((y - Yp).T * la.inv(cov_yp) * (y - Yp)) ** 0.5
+            dist_m = np.asscalar((y - Yp).T * cov_yp.I * (y - Yp)) ** 0.5
             dists[i] = dist_m
         
         return dists

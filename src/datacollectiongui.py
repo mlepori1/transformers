@@ -27,7 +27,8 @@ class Application:
         """
         Args:
         -----
-        [tk window] parent: Parent tkinter object
+        parent:  tk window
+          Parent tkinter object
         """
         
         # Define parent window and resize
@@ -93,6 +94,7 @@ class Application:
     
     def defineStreamProcesses(self):
         """
+        Define processes that stream from IMUs and camera
         """
         
         # Define paths used for file I/O when streaming data
@@ -137,7 +139,7 @@ class Application:
     
     def defineInfoInterface(self):
         """
-        Draw the metadata collection window.
+        Set up the metadata collection interface.
         """
         
         master = self.content_frame
@@ -197,7 +199,7 @@ class Application:
     
     def defineTaskInterface(self):
         """
-        Draw the block task selection window.
+        Set up the block task selection interface.
         """
         
         master = self.content_frame
@@ -232,7 +234,7 @@ class Application:
 
     def defineImuInterface(self):
         """
-        Draw the IMU connection window.
+        Set up the IMU connection interface.
         """
         
         master = self.content_frame
@@ -282,7 +284,7 @@ class Application:
     
     def defineStreamInterface(self):
         """
-        Draw the data streaming window.
+        Set up the data streaming interface.
         """
         
         # Start streaming data
@@ -355,7 +357,7 @@ class Application:
             for sample in samples:
                 imu_id = sample[-1]
                 # Calculate (unitless) l1 norm of acceleration
-                # (4096 bits in 1 g --> why we use 5000 as the threshold)
+                # (4096 bits in 1 g --> why I use 5000 as the threshold)
                 accel_mag = abs(sample[4]) + abs(sample[5]) + abs(sample[6])
                 bg_color = 'green' if accel_mag > 4950 else 'yellow'
                 self.imu_id2activity_color[imu_id].configure(background=bg_color)
@@ -372,7 +374,7 @@ class Application:
     
     def chooseNewTask(self):
         """
-        Stop streaming, write data,  and go back to the task selection
+        Stop streaming, write data, and go back to the task selection
         interface.
         """
         
@@ -408,7 +410,8 @@ class Application:
         
         Args:
         -----
-        [str] block: Color of the rectangular block housing the IMU
+        block:  str
+          Color of the rectangular block housing the IMU
         """
         
         if not self.popup is None:
@@ -447,8 +450,10 @@ class Application:
         
         Args:
         -----
-        [str] imu_id: 4-digit hex ID of the IMU
-        [str] block: Color of the current block
+        imu_id:  str
+          4-digit hex ID of the IMU
+        block:  str
+          Color of the current block
         """
         
         mac_prefix = ['00', '17', 'E9', 'D7']
@@ -504,8 +509,10 @@ class Application:
         
         Args:
         -----
-        [str] imu_id: 4-digit hex ID of the IMU, as a string
-        [int] battery: IMU battery voltage in mV
+        imu_id:  str
+          4-digit hex ID of the IMU, as a string
+        battery:  int
+          IMU battery voltage in mV
         """
         
         self.popup.destroy()
@@ -609,7 +616,8 @@ class Application:
         
         Args:
         -----
-        [str] error_string: Message that will be displayed in popup window
+        error_string:  str
+          Message that will be displayed in popup window
         """
         
         # It shouldn't be possible to get here if a popup window is active
@@ -663,8 +671,9 @@ class Application:
         
         Returns:
         --------
-        [str] error_string: Data validation error message. Empty string if
-          user input passes validation.
+        error_string:  str
+          Data validation error message. Empty string if user input passes
+          validation.
         """
         
         self.participant_id = self.participant_id_field.get()
@@ -688,8 +697,9 @@ class Application:
         
         Returns:
         --------
-        [str] error_string: Data validation error message. Empty string if
-          user input passes validation.
+        error_string:  str
+          Data validation error message. Empty string if user input passes
+          validation.
         """
         
         self.task = self.task_field.get()
@@ -724,6 +734,8 @@ class Application:
     
 
 if __name__ == '__main__':
+    
+    # Start the application in quasi-fullscreen mode
     
     root = tk.Tk()
     screen_width = root.winfo_screenwidth()

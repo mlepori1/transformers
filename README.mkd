@@ -1,0 +1,62 @@
+
+INFO
+----
+
+This repo contains some python scripts that stream synchronized (globally
+timestamped) readings from multiple Axivity WAX9 inertial measurement units
+(IMUs) and a Primesense RGBD camera. For more information about the IMUs, see
+wax9-dev-guide.pdf
+
+
+DIRECTORY STRUCTURE
+-------------------
+
+duplocorpus.py contains a class, DuploCorpus, which is supposed to be an
+interface for file I/O and indexing. When an instance of DuploCorpus is 
+initialized, it creates this directory structure:
+    
+    ROOT
+     |--> data
+     | |--> frame-timestamps
+     | |--> imu-samples
+     | |--> imu-settings
+     | |--> labels
+     | |--> raw
+     | |--> video-frames
+     | |--> meta-data.csv (index file)
+     |--> figures
+     |--> output
+     |--> src
+     |--> working
+     
+DIRECTORY DESCRIPTIONS
+  frame-timestamps -- global timestamps for all video frames
+  imu-samples  ------ timeseries samples from IMUs
+  imu-settings ------ IMU streaming settings
+  labels ------------ human-annotated labels
+  raw --------------- minimally-processed IMU data and video frame timestamps
+  video-frames ------ folders for RGB and depth video frames
+  figures ----------- any figures that need to be generated
+  output ------------ results of experiments
+  src --------------- source code
+  working ----------- files resulting from intermediate calculations
+
+
+DEPENDENCIES
+------------
+
+Since the data collection interface depends on pybluez, that part is only
+compatible with linux platforms.
+
+Also, make sure openNI2 and openCV are installed.
+
+datacollectiongui.py
+* numpy / scipy / matplotlib
+* pybluez: https://pypi.python.org/pypi/PyBluez
+* primesense python API: https://pypi.python.org/pypi/primesense
+* openCV: http://opencv.org/
+* PIL / pillow: https://pypi.python.org/pypi/Pillow
+
+annotationgui.py
+* graphviz: https://pypi.python.org/pypi/graphviz
+* PIL / pillow (see link above)
