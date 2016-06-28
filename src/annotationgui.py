@@ -57,21 +57,47 @@ class Application:
         self.drawInterface()
         
         #define matrix for object studs
+        #may be deprecated
         self.obj_studs = numpy.zeros((2,2), dtype=bool)
         
-        #create arrays for square blocks
+        #create object arrays for square blocks
         self.arrays = {}
         names = ('red square','green square','yellow square','blue square')
         for n in names:
             a = numpy.zeros((2,2), dtype=bool)
             self.arrays[n] = a
             
-        #relate names of blocks and colors
+        #relate names of square blocks and colors
         names = ('red square','green square','yellow square','blue square')
         colors = ('red','green','yellow','blue')
-        self.name2color = {n:c for n,c in zip(names, colors)}
+        self.name2color_square = {n:c for n,c in zip(names, colors)}
         
-    
+        #create object arrays for rectangular blocks
+        self.arrays_rect = {}
+        names_rect = ('red rect','green rect','yellow rect','blue rect')
+        for n in names_rect:
+            a = numpy.zeros((2,4), dtype=bool)
+            self.arrays_rect[n] = a
+            
+        #relate names of rectangular blocks and colors
+        names_rect = ('red rect','green rect','yellow rect','blue rect')
+        colors = ('red','green','yellow','blue')
+        self.name2color_rect = {n:c for n,c in zip(names_rect, colors)}
+        
+        #create target arrays for square blocks
+        self.arrays_target = {}
+        names = ('red square','green square','yellow square','blue square')
+        for n in names:
+            a = numpy.zeros((2,2), dtype=bool)
+            self.arrays_target[n] = a       
+            
+        #create object arrays for rectangular blocks
+        self.arrays_rect_target = {}
+        names_rect = ('red rect','green rect','yellow rect','blue rect')
+        for n in names_rect:
+            a = numpy.zeros((2,4), dtype=bool)
+            self.arrays_rect_target[n] = a
+            
     def initState(self):
         """
         Initialize the world state as an unconnected graph with one node for
@@ -186,17 +212,64 @@ class Application:
         self.defineAnnotationInterface()
         self.drawInterface()
   
-    def assignVar(self, x,y,z):
+    def assignVar_square(self, x,y,z):
         a = self.arrays[z]
         a[x][y] = not a[x][y]
-        b = self.button_dict[z]
+        b = self.button_dict_square[z]
         
         if a[x][y]:
-            b[x][y].config(bg='black')        
+            b[x][y].config(bg='black')
+            b[x][y].config(activebackground='black')
+            b[x][y].config(relief='sunken')
         else:
-            b[x][y].config(bg=self.name2color[z]) 
+            b[x][y].config(bg=self.name2color_square[z])
+            b[x][y].config(activebackground=self.name2color_square[z])
+            b[x][y].config(relief='raised')
             
+    def assignVar_rect(self, x,y,z):
+        a = self.arrays_rect[z]
+        a[x][y] = not a[x][y]
+        b = self.button_dict_rect[z]
         
+        if a[x][y]:
+            b[x][y].config(bg='black')
+            b[x][y].config(activebackground='black')
+            b[x][y].config(relief='sunken')
+        else:
+            b[x][y].config(bg=self.name2color_rect[z])
+            b[x][y].config(activebackground=self.name2color_rect[z])
+            b[x][y].config(relief='raised')
+    
+    def assignVar_square_target(self, x,y,z):
+        a = self.arrays_target[z]
+        a[x][y] = not a[x][y]
+        b = self.button_dict_square_target[z]
+        
+        if a[x][y]:
+            b[x][y].config(bg='black')
+            b[x][y].config(activebackground='black')
+            b[x][y].config(relief='sunken')
+            print(self.arrays_target)
+        else:
+            b[x][y].config(bg=self.name2color_square[z])
+            b[x][y].config(activebackground=self.name2color_square[z])
+            b[x][y].config(relief='raised')
+            
+    def assignVar_rect_target(self, x,y,z):
+        a = self.arrays_rect_target[z]
+        a[x][y] = not a[x][y]
+        b = self.button_dict_rect_target[z]
+        
+        if a[x][y]:
+            b[x][y].config(bg='black')
+            b[x][y].config(activebackground='black')
+            b[x][y].config(relief='sunken')
+            print(self.arrays_rect_target)
+        else:
+            b[x][y].config(bg=self.name2color_rect[z])
+            b[x][y].config(activebackground=self.name2color_rect[z])
+            b[x][y].config(relief='raised')
+            
     def defineAnnotationInterface(self):
         """
         Draw the annotation interface with RGB frame.
@@ -250,22 +323,104 @@ class Application:
         """
         
         #define object buttons for square shapes
-        self.button_dict = {}
+        self.button_dict_square = {}
         names = ('red square','green square','yellow square','blue square')        
         for i,n in enumerate(names):
             self.annotate_buttons = []
             f = tk.Frame(ann_frame)
+            g = tk.Frame(ann_frame)
             square_colors = ('red','green','yellow','blue')
             for r in range(2):
                 self.annotate_buttons.append([])
                 for c in range(2):
-                    func=lambda x=r, y=c, z=n: self.assignVar(x,y,z)
-                    b = tk.Button(f, command=func, bg=square_colors[i])
+                    func=lambda x=r, y=c, z=n: self.assignVar_square(x,y,z)
+                    b = tk.Button(f, command=func, bg=square_colors[i], 
+                                  activebackground=square_colors[i])
                     b.grid(row=r, column=c)
+                    a = tk.Label(g, text='\t', font=("TkDefaultFont",1))
+                    a.grid(row=r-r+1, column=c-c+1)
                     self.annotate_buttons[-1].append(b)
-            self.button_dict[n] = self.annotate_buttons
-            f.grid(row=i+1, column=1)
+            self.button_dict_square[n] = self.annotate_buttons
+            f.grid(row=2*i+1, column=1)
+            g.grid(row=2*i+2, column=1)
         
+        #define object buttons for rectangular shapes
+        self.button_dict_rect = {}
+        names_rect = ('red rect','green rect','yellow rect','blue rect')        
+        for i,n in enumerate(names_rect):
+            self.annotate_buttons_rect = []
+            h = tk.Frame(ann_frame)
+            k = tk.Frame(ann_frame)
+            l = tk.Frame(ann_frame)
+            rect_colors = ('red','green','yellow','blue')
+            for r in range(2):
+                self.annotate_buttons_rect.append([])
+                for c in range(4):
+                    func=lambda x=r, y=c, z=n: self.assignVar_rect(x,y,z)
+                    br = tk.Button(h, command=func, bg=rect_colors[i], 
+                                   activebackground=rect_colors[i])
+                    br.grid(row=r, column=c)
+                    ar = tk.Label(k, text='\t', font=("TkDefaultFont",1))
+                    ar.grid(row=r-r+1, column=c-c+3)
+                    cr = tk.Label(l, text='    ', font=("TkDefaultFont",14))
+                    cr.grid(row=r-r+1, column=c-c+2)
+                    self.annotate_buttons_rect[-1].append(br)
+            self.button_dict_rect[n] = self.annotate_buttons_rect
+            h.grid(row=2*i+1, column=3)
+            k.grid(row=2*i+2, column=3)
+            l.grid(row=2*i, column=2)
+            
+        #define target buttons for square shapes
+        self.button_dict_square_target = {}
+        names = ('red square','green square','yellow square','blue square')        
+        for i,n in enumerate(names):
+            self.annotate_buttons_target = []
+            ft = tk.Frame(ann_frame)
+            gt = tk.Frame(ann_frame)
+            square_colors = ('red','green','yellow','blue')
+            for r in range(2):
+                self.annotate_buttons_target.append([])
+                for c in range(2):
+                    func=lambda x=r, y=c, z=n: self.assignVar_square_target(x,y,z)
+                    bt = tk.Button(ft, command=func, bg=square_colors[i], 
+                                  activebackground=square_colors[i])
+                    bt.grid(row=r, column=c)
+                    at = tk.Label(gt, text='\t', font=("TkDefaultFont",1))
+                    at.grid(row=r-r+1, column=c-c+1)
+                    self.annotate_buttons_target[-1].append(bt)
+            self.button_dict_square_target[n] = self.annotate_buttons_target
+            ft.grid(row=2*i+1, column=5)
+            gt.grid(row=2*i+2, column=5)
+        
+        #define target buttons for rectangular shapes
+        self.button_dict_rect_target = {}
+        names_rect = ('red rect','green rect','yellow rect','blue rect')        
+        for i,n in enumerate(names_rect):
+            self.annotate_buttons_rect_target = []
+            ht = tk.Frame(ann_frame)
+            kt = tk.Frame(ann_frame)
+            lt = tk.Frame(ann_frame)
+            xt = tk.Frame(ann_frame)
+            rect_colors = ('red','green','yellow','blue')
+            for r in range(2):
+                self.annotate_buttons_rect_target.append([])
+                for c in range(4):
+                    func=lambda x=r, y=c, z=n: self.assignVar_rect_target(x,y,z)
+                    brt = tk.Button(ht, command=func, bg=rect_colors[i], 
+                                   activebackground=rect_colors[i])
+                    brt.grid(row=r, column=c)
+                    art = tk.Label(kt, text='\t', font=("TkDefaultFont",1))
+                    art.grid(row=r-r+1, column=c-c+3)
+                    crt = tk.Label(lt, text='    ', font=("TkDefaultFont",14))
+                    crt.grid(row=r-r+1, column=c-c+2)
+                    xrt = tk.Label(xt, text='              ', font=("TkDefaultFont",14))
+                    xrt.grid(row=r-r+1, column=c-c+4)
+                    self.annotate_buttons_rect_target[-1].append(brt)
+            self.button_dict_rect_target[n] = self.annotate_buttons_rect_target
+            ht.grid(row=2*i+1, column=7)
+            kt.grid(row=2*i+2, column=7)
+            lt.grid(row=2*i, column=6)
+            xt.grid(row=2*1, column=4)
         
         ann_frame.pack(side=tk.RIGHT)
         frame1.pack(side=tk.TOP)
