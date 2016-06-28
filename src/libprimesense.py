@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-libprimesense
+libprimesense.py
   Library for streaming RGBD data from a primesense camera
 
 AUTHOR
   Jonathan D. Jones
 
 NOTE
-  Depth frames look blank, but they can be opened in openCV with
-  depth_img = cv2.imread([filename], cv2.IMREAD_ANYDEPTH)
+  Depth frames look empty, but they are 16-bit images where the value of each
+  pixel is its distance from the camera in millimeters.
 """
 
 import os
@@ -27,11 +27,19 @@ def stream(frame_base_path, timestamp_path, img_types, die, q):
 
     Args:
     -----
-    [str] frame_base_path:
-    [str] timestamp_path:
-    [tuple(str)] img_types:
-    [mp event] die:
-    [mp queue] q:
+    frame_base_path: str
+      Path to directory where video frames should be saved. In this location,
+      a directory will be created for each type of image that is saved (usually
+      RGB and depth frames).
+    timestamp_path: str
+      Path and filename of the CSV file where timestamps should be saved
+    img_types: tuple of str
+      Tuple specifying the video sources to open. Can be 'rgb', 'depth', or
+      both.
+    die: multiprocessing event
+      The streaming loop monitors this event and quits when it is set
+    q: multiprocessing queue
+      Queue used to communicate with the main process.
     """
     
     # Create directory for video frames

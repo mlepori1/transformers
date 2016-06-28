@@ -63,8 +63,8 @@ class Application:
         
         Returns:
         --------
-        [gv digraph] state: graphviz directed graph representing the initial
-          world state.
+        state: graphviz Digraph
+          graphviz directed graph representing the initial world state.
         """
         
         # Block height when drawn as graph node, in inches
@@ -418,9 +418,12 @@ class Application:
         
         Args:
         -----
-        [str] action: Action label (one of self.actions)
-        [str] object_block: Block that was placed (index in self.blocks)
-        [list(str)] target_blocks: Blocks near the one that was placed
+        action: str
+          Action label (one of self.actions)
+        object_block: str
+          Block that was placed (index in self.blocks)
+        target_blocks: list or str
+          Blocks near the one that was placed
         """
         
         # TODO: validate the provided action by making sure it is a possible
@@ -468,7 +471,8 @@ class Application:
         
         Args:
         -----
-        [str] error_string: Message that will be displayed in popup window
+        error_string: str
+          Message that will be displayed in popup window
         """
         
         # Destroy the popup window if it exists

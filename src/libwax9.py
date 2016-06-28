@@ -18,16 +18,19 @@ import numpy as np
 
 def recvAll(socket, timeout):
     """
-    Receive data from a WAX9 device
+    Receive data from a WAX9 device.
 
     Args:
     -----
-      socket: WAX9 bluetooth socket
-      timeout (float): Amount of time to wait for a response, in seconds
+    socket: bluetooth socket
+      Connection to WAX9 device
+    timeout: float 
+      Amount of time to wait for a response, in seconds
 
     Returns:
     --------
-      response (str): Data sent by device
+    response: str
+      Data sent by device
     """
 
     response = ''
@@ -44,16 +47,19 @@ def recvAll(socket, timeout):
 
 def connect(target_address):
     """
-    Connect to a WAX9 IMU sensor over bluetooth
+    Connect to a WAX9 IMU sensor over bluetooth.
 
     Args:
     -----
-      target_addresss (str): The sensor's MAC address, format 'XX:XX:XX:XX:XX'
+    target_addresss: str
+      The sensor's MAC address, format 'XX:XX:XX:XX:XX'
     
     Returns:
     --------
-      socket: Client connection to the sensor (bluetooth socket)
-      name (str): Sensor ID
+    socket: bluetooth socket
+      Connection to WAX9 device
+    name: str
+      Sensor ID
     """
 
     # I think the WAX9 sensors can only connect on channel 1 (whatever that
@@ -75,15 +81,17 @@ def connect(target_address):
 
 def getSettings(socket):
     """
-    Read sensor settings from WAX9 device
+    Read sensor settings from WAX9 device.
 
     Args:
     -----
-      socket: WAX9 bluetooth socket
+    socket: bluetooth socket
+      Connection to WAX9 device
 
     Returns:
     --------
-      settings (str): WAX9 sensor settings
+    settings: str
+      WAX9 sensor settings
     """
 
     socket.sendall("settings\r\n")
@@ -98,25 +106,27 @@ def parseSettings(settings_str):
     
     Args:
     -----
-    [str] settings_str: WAX9 sensor settings
+    settings_str: str
+      WAX9 sensor settings (e.g. output of getSettings)
     
     Returns:
     --------
-    [np array] parsed_settings: length-1 structured array with these fields
-      [str] name:
-      [str] mac:
-      [int] accel on:
-      [int] accel rate:
-      [int] accel range:
-      [int] gyro on:
-      [int] gyro rate:
-      [int] gyro range:
-      [int] mag on:
-      [int] mag rate:
-      [int] ratex:
-      [int] data mode:
-      [int] sleep mode:
-      [int] threshold:
+    parsed_settings: numpy array
+      length-1 structured array with these fields
+      name: str
+      mac: str
+      accel on: int
+      accel rate: int
+      accel range: int
+      gyro on: int
+      gyro rate: int
+      gyro range: int
+      mag on: int
+      mag rate: int
+      ratex: int
+      data mode: int
+      sleep mode: int
+      threshold: int
     """
     
     int_labels = ('ratex', 'data mode', 'sleep mode', 'threshold')
@@ -163,15 +173,17 @@ def parseSettings(settings_str):
 
 def sample(socket):
     """
-    Read one data sample from WAX9 device
+    Read one data sample from WAX9 device.
 
     Args:
     -----
-      socket: WAX9 bluetooth socket
+    socket: bluetooth socket
+      Connection to WAX9 device
 
     Returns:
     --------
-      sample (str): Strings of IMU samples
+    sample: str
+      Strings of IMU samples
     """
 
     socket.sendall("sample\r\n")
@@ -182,14 +194,19 @@ def sample(socket):
 
 def stream(connected_devices, path, die, q):
     """
-    Stream data from WAX9 devices until die is set
+    Stream data from WAX9 devices until die is set. This function is intended
+    to be used in a multithreading / multiprocessing setting.
 
     Args:
     -----
-    [dict(str->socket)] connected_devices:
-    [str] path: Path to raw IMU output file
-    [mp event] die:
-    [mp queue] q:
+    connected_devices: dict of str -> bluetooth socket
+      Dictionary mapping each WAX9 device's socket connections to its ID string 
+    path: str
+      Path to raw output file
+    die: multiprocessing event
+      The streaming loop monitors this event and quits when it is set
+    q: multiprocessing queue
+      Queue used to communicate with the main process.
     """
     
     SAMPLE_RATE = 15
@@ -341,16 +358,28 @@ def stream(connected_devices, path, die, q):
 
 def setDataMode(socket, datamode):
     """
-    Set WAX9 device's data streaming mode. This is mostly for debug use.
+    Set WAX9 device's data streaming mode.
 
     Args:
     -----
-      socket: WAX9 bluetooth socket
-      datamode (int): Acceptable values are 0, 1, 128, 129
+    socket: bluetooth socket
+      Connection to WAX9 device
+    datamode: int
+      Format to be sent when streaming data (this only affects data received
+      from stream(), not sample())
+      0 ---- Ascii mode with batt, temp, pressure, inactivity transmitted as
+             they are sampled (~1Hz). 
+      1 ---- Binary mode with ~1Hz batt, temp, pressure, inactivity update
+             transmitted as they are sampled.
+      128 -- Ascii mode with batt, temp, pressure, inactivity transmitted every
+             packet.
+      129 -- Binary mode with continuous batt, temp, pressure, inactivity
+             update transmitted every packet.
 
     Returns:
     --------
-      settings (str): Device's settings
+    settings: str
+      Device's settings after data mode has been changed.
     """
 
     socket.sendall("datamode {}\r\n".format(datamode))
@@ -365,12 +394,15 @@ def setRate(socket, rate):
 
     Args:
     -----
-      socket: WAX9 bluetooth socket
-      rate (int): new output rate (default is 50Hz)
+    socket: bluetooth socket
+      Connection to WAX9 device
+    rate: int
+      New output rate (default is 50Hz)
 
     Returns:
     --------
-      settings (str): Device's settings
+    settings: str
+      Device's settings after rate has been changed
     """
 
     socket.sendall("rate x 0 0 {}\r\n".format(rate))

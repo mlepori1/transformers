@@ -20,12 +20,13 @@ def fractionDropped(imus):
     
     Args:
     -----
-    [dict(str->np array)] imus: Dictionary mapping IMU IDs to data samples
+    imus: dict of str -> numpy array
+      Dictionary mapping IMU IDs to data samples
     
     Returns:
     --------
-    [dict(str->float)] fraction_dropped: Dictionary mapping IMU IDs to fraction
-      of missing samples
+    fraction_dropped: dict of str -> float
+      Dictionary mapping IMU IDs to fraction of missing samples
     """
     
     fraction_dropped = {}
@@ -44,16 +45,19 @@ def rgbFrame2imuFrame(rgb_timestamps, imu_timestamps):
     
     Args:
     -----
-    [np vector] rgb_timestamps: The i-th entry contains the universal time
-      at which the i-th VIDEO FRAME occurred
-    [np vector] imu_timestamps: The i-th entry contains the universal time
-      at which the i-th IMU SAMPLE occurred
+    rgb_timestamps: numpy vector
+      The i-th entry contains the universal time at which the i-th VIDEO FRAME
+      occurred
+    imu_timestamps: numpy vector
+      The i-th entry contains the universal time at which the i-th IMU SAMPLE
+      occurred
       
     Returns:
     --------
-    [np vector] indices: Same length as vid_timestamps.
-      The i-th entry holds the index of imu_timestamps that most
-      closely matches the time of the i-th index in video_timestamps.
+    indices: numpy vector
+      Same length as vid_timestamps. The i-th entry holds the index of
+      imu_timestamps that most closely matches the time of the i-th index in
+      video_timestamps.
     """
     
     rgb_len = rgb_timestamps.shape[0]
@@ -80,14 +84,18 @@ def parseLabels(labels, num_frames):
     
     Args:
     -----
-    [np array] labels: Structured array of event annotations (see loadLabels)
-    [int] num_frames: Number of RGB frames recorded
+    labels: numpy array
+      Structured array of event annotations (see loadLabels)
+    num_frames: int
+      Number of RGB frames recorded
     
     Returns:
     --------
-    [np vector] actions: Sequence of integer event labels for this trial
-    [np vector] action_bounds: boundary indices for the actions specified
-      above. The length of this vector is len(labels) + 1
+    actions: numpy vector
+      Sequence of integer event labels for this trial
+    action_bounds: numpy vector
+      Boundary indices for the actions specified above. The length of this
+      vector is len(labels) + 1
     """
     
     bounds = []
@@ -142,19 +150,25 @@ def parseLabels(labels, num_frames):
 
 def imuActionBounds(labels, t_rgb, t_imu):
     """
-    [DESCRIPTION]
+    Convert human-annotated labels (with respect to video frames) to a sequence
+    of actions and action boundaries (with respect to IMU frames)
     
     Args:
     -----
-    [np array] labels: Structured array of event annotations (see loadLabels)
-    [np vector] t_rgb:
-    [np vector] t_imu:
+    labels: numpy array
+      Structured array of event annotations (see loadLabels)
+    t_rgb: numpy vector
+      RGB frame timestamps
+    t_imu: numpy vector
+      IMU sample timestamps
     
     Returns:
     --------
-    [np vector] actions: Sequence of integer event labels for this trial
-    [np vector] action_bounds: boundary indices for the actions specified
-      above. The length of this vector is len(labels) + 1
+    actions: numpy vector
+      Sequence of integer event labels for this trial
+    action_bounds: numpy vector
+      Boundary indices for the actions specified above. The length of this
+      vector is len(labels) + 1
     """
     
     num_rgb_frames = t_rgb.shape[0]
@@ -170,28 +184,32 @@ def imuActionBounds(labels, t_rgb, t_imu):
 
 def plot3dof(data, actions, action_bounds, fig_text):
     """
-    [DESCRIPTION]
+    Plot data with 3 degrees of freedom in 3 subplots
     
     Args:
     -----
-    [np array] data: n-by-4 array (n is the number of samples) with the
-      following columns
-      [0] - time
-      [1] - x component
-      [2] - y component
-      [3] - z component
-    [np vector] actions: Sequence of integer event labels for this trial
-    [np vector] action_bounds: boundary indices for the actions specified
-      above. The length of this vector is len(labels) + 1
-    [list(str)] fig_text: List of text strings to be used in labeling the
-      figure. Elements are the following
-      [0] - title
-      [1] - symbol
-      [2] - unit
+    data: numpy array
+      n-by-4 array (n is the number of samples) with the following columns
+      0 -- time
+      1 -- x component
+      2 -- y component
+      3 -- z component
+    actions: numpy vector
+      Sequence of integer event labels for this trial
+    action_bounds: numpy vector
+      Boundary indices for the actions specified above. The length of this
+      vector is len(labels) + 1
+    fig_text: list of str
+      List of text strings to be used in labeling the figure. Elements are the
+      following
+      0 -- title
+      1 -- symbol
+      2 -- unit
     
     Returns:
     --------
-    [int] f: matplotlib handle for the figure that was created
+    f: int
+      matplotlib handle for the figure that was created
     """
     
     # FIXME: don't use a magic number like this
@@ -249,16 +267,17 @@ def plot3dof(data, actions, action_bounds, fig_text):
 
 def plotPosition(X):
     """
-    3D plot of IMU location
+    3D plot of IMU position
     
     Args:
     -----
-    [np array] X: IMU position (n-by-3, where n is the number of
-      samples in the trial)
+    X: numpy array
+      IMU position (n-by-3, where n is the number of samples in the trial)
     
     Returns:
     --------
-    [int] fig: Figure handle for plot
+    fig: int
+      Figure handle for plot
     """
     
     fig = plt.figure()
@@ -285,22 +304,27 @@ def trackIMU(imu_data):
     
     Args:
     -----
-    [np array] imu_data: n-by-11 array (where n is the number of samples in the
+    imu_data: numpy array
+      n-by-11 array (where n is the number of samples in the
       trial) containing IMU sensor readings from one device. Columns are
-      [0] ---- Universal relative time, measured from t_init (seconds)
-      [1] ---- Sensor time (no units)
-      [2:4] -- Acceleration [xyz] (g * meters / second^2)
-      [5:7] -- Angular velocity [xyz] (radians / second)
-      [8:10] - Magnetic field [xyz] (milliTeslas)
+      0 ---- Universal relative time, measured from t_init (seconds)
+      1 ---- Sensor time (no units)
+      2:4 -- Acceleration [xyz] (g * meters / second^2)
+      5:7 -- Angular velocity [xyz] (radians / second)
+      8:10 - Magnetic field [xyz] (milliTeslas)
     
     Returns:
     --------
-    [np array] R: Block orientation (flattened rotation matrix) at each
-      sample. n-by-9 array. Matrix is row-major flattened.
-    [np array] A_g: Block acceleration (in global frame) at each sample. n-by-3
+    R: numpy array
+      Block orientation (flattened rotation matrix) at each sample. n-by-9
+      array. Matrix is row-major flattened.
+    A_g: numpy array
+      Block acceleration (in global frame) at each sample. n-by-3
       array.
-    [np array] V: Block velocity at each sample. n-by-3 array.
-    [np array] S: Block position at each sample. n-by-3 array.
+    V: numpy array
+      Block velocity at each sample. n-by-3 array.
+    S: numpy array
+      Block position at each sample. n-by-3 array.
     """
     
     R = np.zeros((imu_data.shape[0], 9))
@@ -382,12 +406,13 @@ def parseActions(labels):
     
     Args:
     -----
-    [np array] labels: (See loadlabels in duplocorpus.py)
+    labels: numpy array
+      (See loadlabels in duplocorpus.py)
     
     Returns:
     --------
-    [list(gv Digraph)] states: List of graphviz graphs representing the
-      progression of block states
+    states: list of graphviz Digraph
+      List of graphviz graphs representing the progression of block states
     """
     
     import graphviz as gv
