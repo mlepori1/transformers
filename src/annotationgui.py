@@ -57,7 +57,7 @@ class Application:
         self.drawInterface()
         
         #define matrix for object studs
-        #may be deprecated
+        #may be deprecated - consider removing
         self.obj_studs = numpy.zeros((2,2), dtype=bool)
         
         #create object arrays for square blocks
@@ -66,7 +66,7 @@ class Application:
         for n in names:
             a = numpy.zeros((2,2), dtype=bool)
             self.arrays[n] = a
-            
+        
         #relate names of square blocks and colors
         names = ('red square','green square','yellow square','blue square')
         colors = ('red','green','yellow','blue')
@@ -249,7 +249,6 @@ class Application:
             b[x][y].config(bg='black')
             b[x][y].config(activebackground='black')
             b[x][y].config(relief='sunken')
-            print(self.arrays_target)
         else:
             b[x][y].config(bg=self.name2color_square[z])
             b[x][y].config(activebackground=self.name2color_square[z])
@@ -264,7 +263,6 @@ class Application:
             b[x][y].config(bg='black')
             b[x][y].config(activebackground='black')
             b[x][y].config(relief='sunken')
-            print(self.arrays_rect_target)
         else:
             b[x][y].config(bg=self.name2color_rect[z])
             b[x][y].config(activebackground=self.name2color_rect[z])
@@ -444,11 +442,76 @@ class Application:
                          command=self.undoAction)
         undo.grid(sticky=tk.W, row=0, column=0)
         restart = tk.Button(master, text='Start new trial', command=self.restart)
-        restart.grid(sticky=tk.W, row=0, column=2)
-        restart = tk.Button(master, text='Quit', command=self.close)
         restart.grid(sticky=tk.W, row=0, column=3)
+        restart = tk.Button(master, text='Quit', command=self.close)
+        restart.grid(sticky=tk.W, row=0, column=4)
+        self.queue_button = tk.Button(master, text='Queue event', 
+                                      command = self.queue_event, state=tk.DISABLED)
+        self.queue_button.grid(stick=tk.W, row=0, column=2)
     
+    def queue_event(self):
+        """
+        Adds array values for obj/target block into event queue
+        """
         
+        ##validate data
+        
+        #no self edges check
+        names = ('red square','green square','yellow square','blue square')
+        for n in names:
+            if numpy.any(self.arrays[n]) and numpy.any(self.arrays_target[n]):
+                queue_error = 'A block cannot be attached to itself'
+                self.badInputDialog(queue_error)
+                return
+        names_rect = ('red rect','green rect','yellow rect','blue rect')
+        for n in names_rect:
+            if numpy.any(self.arrays_rect[n]) and numpy.any(self.arrays_rect_target[n]):
+                queue_error = 'A block cannot be attached to itself'
+                self.badInputDialog(queue_error)
+                return
+                
+        #
+        #check to make sure only one block per column(obj/target) is selected
+        #as well as record which block was selected
+        
+            #object blocks        
+                #concatenate dictionaries for object blocks first
+        self.arrays.update(self.arrays_rect)
+        names = ('red square','green square','yellow square','blue square', 
+        'red rect','green rect','yellow rect','blue rect')
+        selected_object = ""
+        count = 0
+        for n in names:
+            val = self.arrays[n].any()
+            count += val
+            if count >1:
+                queue_error_object = 'Only one object block may be selected at a time'
+                self.badInputDialog(queue_error_object)
+                return
+            elif val:
+                selected_object = n
+        selected_object_block = self.arrays[selected_object]
+        print(selected_object_block)
+        print(selected_object)
+        
+        self.arrays_target.update(self.arrays_rect_target)
+        names = ('red square','green square','yellow square','blue square', 
+        'red rect','green rect','yellow rect','blue rect')
+        selected_target = ""
+        count = 0
+        for n in names:
+            val = self.arrays_target[n].any()
+            count += val
+            if count >1:
+                queue_error_target = 'Only one target block may be selected at a time'
+                self.badInputDialog(queue_error_target)
+                return
+            elif val:
+                selected_target = n
+        selected_target_block = self.arrays_target[selected_target]
+        print(selected_target_block)
+        print(selected_target)        
+    
         
     def undoAction(self):
         """
@@ -536,7 +599,9 @@ class Application:
         
         # Redraw button
         self.start_end.configure(text='End of action', command=self.endAction)
-    
+        
+        # enable queue event button
+        self.queue_button.configure(state=tk.NORMAL)
     
     def endAction(self):
         """
@@ -599,7 +664,8 @@ class Application:
         self.updateWorldState()
         self.start_end.configure(text='Start of action',
                                  command=self.startAction)
-    
+        
+        
     
     def updateWorldState(self):
         """
