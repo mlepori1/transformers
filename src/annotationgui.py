@@ -44,6 +44,7 @@ class Application:
         self.states = []
         self.labels = []
         
+        
         # User input (to be read from interface later)
         self.action_field = None
         self.object_field = None
@@ -97,6 +98,9 @@ class Application:
         for n in names_rect:
             a = numpy.zeros((2,4), dtype=bool)
             self.arrays_rect_target[n] = a
+            
+        #define event queue
+        self.event_queue = None
             
     def initState(self):
         """
@@ -291,16 +295,16 @@ class Application:
         
         # Draw annotation frame
         ann_frame = tk.Frame(frame1)
-        """
+        
         # Action label (radio buttons)
         action_label = tk.Label(ann_frame, text='Action')
         action_label.grid(row=0, column=0)
         self.action_field = tk.IntVar()
         for i, label in enumerate(self.actions):
-            button = tk.Radiobutton(ann_frame, text=label,
+            action_button = tk.Radiobutton(ann_frame, text=label,
                                     variable=self.action_field, value=i+1)
-            button.grid(sticky=tk.W, row=i+1, column=0)
-        
+            action_button.grid(sticky=tk.W, row=i+1, column=0)
+        """
         # Object label (radio buttons)
         obj_label = tk.Label(ann_frame, text='Object')
         obj_label.grid(row=0, column=1)
@@ -433,7 +437,7 @@ class Application:
         self.state_display.pack()
         frame2.pack(side=tk.BOTTOM)
         
-        # Draw start/end, undo, restart, and quit buttons
+        # Draw start/end, undo, restart, quit, and queue event buttons
         master = self.navigation_frame
         self.start_end = tk.Button(master, text='Start of action',
                                    command=self.startAction, default=tk.ACTIVE)
@@ -491,8 +495,6 @@ class Application:
             elif val:
                 selected_object = n
         selected_object_block = self.arrays[selected_object]
-        print(selected_object_block)
-        print(selected_object)
         
         self.arrays_target.update(self.arrays_rect_target)
         names = ('red square','green square','yellow square','blue square', 
@@ -509,27 +511,46 @@ class Application:
             elif val:
                 selected_target = n
         selected_target_block = self.arrays_target[selected_target]
-        print(selected_target_block)
-        print(selected_target)        
-    
+        
+        #get action index
+        action_index = self.action_field.get() - 1
+        
+        # Make sure the user has selected an action
+        # (Value of -1 means original value was zero, ie empty)
+        if action_index == -1:
+            err_str = 'Please select and action and an object block.'
+            self.badInputDialog(err_str)
+            return 
+            
+        #define event
+        event = (action_index, selected_object, selected_target,
+                 selected_object_block, selected_target_block)       
+        
+        #append the event to the event queue
+        self.event_queue.append(event)
         
     def undoAction(self):
         """
         Delete the previous action annotation and re-draw block configuration.
         """
-        
+        """
         if not self.states:
             error_string = 'No annotation to undo'
             self.badInputDialog(error_string)
         
+        
         # Delete all labels associated with the last annotation
         last_label = self.labels[-1]
         while self.labels[-1][:3] == last_label[:3]:
-            self.labels.pop()
+            self.labels.pop(-1)
         
         self.states = self.states[:-1]
         self.updateWorldState()
+        """
         
+        #delete last action
+        self.labels.pop()        
+        print(self.labels)
         return
     
     
@@ -602,6 +623,9 @@ class Application:
         
         # enable queue event button
         self.queue_button.configure(state=tk.NORMAL)
+        
+        #enable event queue
+        self.event_queue = []
     
     def endAction(self):
         """
@@ -612,59 +636,29 @@ class Application:
         
         # Set the action's end to the index of the current frame
         self.action_end_index = self.cur_frame
+              
+        #add start and end indexes to event queue
+        self.event_queue = [s + (self.action_start_index, self.action_end_index) 
+        for s in self.event_queue]                
+           
+           
+        #write event queue (which represents one action) to action queue (called 'labels')
+        self.labels.append(self.event_queue)
         
-        # Get action annotation (action and object fields are one-indexed, so
-        # convert to zero-indexing)
-        action_index = self.action_field.get() - 1
-        object_index = self.object_field.get() - 1
-        target_indices = tuple(self.block2index[block] for block, field in
-                               self.target_fields.items() if field.get())
-        
-        # Make sure the user has selected an action and an object
-        # (Value of -1 means original value was zero, ie empty)
-        if action_index == -1 or object_index == -1:
-            err_str = 'Please select and action and an object block.'
-            self.badInputDialog(err_str)
-            return
-        
-        action = self.actions[action_index]
-        object_block = self.blocks[object_index]
-        target_blocks = tuple(block for block, field in
-                              self.target_fields.items() if field.get())
-        
-        # Make sure the user has selected targets for actions that require them
-        if not target_blocks and not action in ('remove', 'rotate'):
-            err_str = 'Please select one or more target blocks.'
-            self.badInputDialog(err_str)
-            return
-        
-        # Parse and validate annotation
-        err_str = self.parseAction(action, object_index, target_indices)
-        if err_str:
-            self.badInputDialog(err_str)
-            return
-        
-        # Store the action annotation
-        if action in ('remove', 'rotate'):  # No targets
-            self.labels.append((self.action_start_index, self.action_end_index,
-                                action_index, object_index, -1,
-                                '()', '()'))
-        else:   # Write a label for each target
-            for target_index in target_indices:
-                self.labels.append((self.action_start_index,
-                                    self.action_end_index,
-                                    action_index, object_index, target_index,
-                                    '()', '()'))
+        #reset event queue
+        self.event_queue = None
         
         # Reset start and end indices
         self.action_start_index = -1
         self.action_end_index = -1
         
-        # Redraw world state image and stard/end button
+        #Redraw world state image and stard/end button
         self.updateWorldState()
         self.start_end.configure(text='Start of action',
                                  command=self.startAction)
-        
+                                 
+        #disable queue event button
+        self.queue_button.configure(state=tk.DISABLED)
         
     
     def updateWorldState(self):
