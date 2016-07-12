@@ -12,7 +12,7 @@ import Tkinter as tk
 from PIL import Image, ImageTk
 import graphviz as gv
 import os
-import numpy
+import numpy as np
 
 from duplocorpus import DuploCorpus
 
@@ -59,13 +59,13 @@ class Application:
         
         #define matrix for object studs
         #may be deprecated - consider removing
-        self.obj_studs = numpy.zeros((2,2), dtype=bool)
+        self.obj_studs = np.zeros((2,2), dtype=bool)
         
         #create object arrays for square blocks
         self.arrays = {}
         names = ('red square','green square','yellow square','blue square')
         for n in names:
-            a = numpy.zeros((2,2), dtype=bool)
+            a = np.zeros((2,2), dtype=bool)
             self.arrays[n] = a
         
         #relate names of square blocks and colors
@@ -77,7 +77,7 @@ class Application:
         self.arrays_rect = {}
         names_rect = ('red rect','green rect','yellow rect','blue rect')
         for n in names_rect:
-            a = numpy.zeros((2,4), dtype=bool)
+            a = np.zeros((2,4), dtype=bool)
             self.arrays_rect[n] = a
             
         #relate names of rectangular blocks and colors
@@ -89,14 +89,14 @@ class Application:
         self.arrays_target = {}
         names = ('red square','green square','yellow square','blue square')
         for n in names:
-            a = numpy.zeros((2,2), dtype=bool)
+            a = np.zeros((2,2), dtype=bool)
             self.arrays_target[n] = a       
             
         #create object arrays for rectangular blocks
         self.arrays_rect_target = {}
         names_rect = ('red rect','green rect','yellow rect','blue rect')
         for n in names_rect:
-            a = numpy.zeros((2,4), dtype=bool)
+            a = np.zeros((2,4), dtype=bool)
             self.arrays_rect_target[n] = a
             
         #define event queue
@@ -458,18 +458,30 @@ class Application:
         Adds array values for obj/target block into event queue
         """
         
+        # Make sure the user has selected an action
+        # (Value of -1 means original value was zero, ie empty)
+        
+        #get action index
+        action_index = self.action_field.get() - 1
+        
+        #check to make sure there is an action index
+        if action_index == -1:
+            err_str = 'Please select and action and an object block.'
+            self.badInputDialog(err_str)
+            return         
+        
         ##validate data
         
         #no self edges check
         names = ('red square','green square','yellow square','blue square')
         for n in names:
-            if numpy.any(self.arrays[n]) and numpy.any(self.arrays_target[n]):
+            if np.any(self.arrays[n]) and np.any(self.arrays_target[n]):
                 queue_error = 'A block cannot be attached to itself'
                 self.badInputDialog(queue_error)
                 return
         names_rect = ('red rect','green rect','yellow rect','blue rect')
         for n in names_rect:
-            if numpy.any(self.arrays_rect[n]) and numpy.any(self.arrays_rect_target[n]):
+            if np.any(self.arrays_rect[n]) and np.any(self.arrays_rect_target[n]):
                 queue_error = 'A block cannot be attached to itself'
                 self.badInputDialog(queue_error)
                 return
@@ -512,16 +524,40 @@ class Application:
                 selected_target = n
         selected_target_block = self.arrays_target[selected_target]
         
-        #get action index
-        action_index = self.action_field.get() - 1
+        #retrieve selected stud coordinates for object and target
+        selected_object_coords_temp = np.where(selected_object_block ==1)        
+        selected_object_coords = zip(*selected_object_coords_temp)
+        selected_target_coords_temp = np.where(selected_target_block == 1)  
+        selected_target_coords = zip(*selected_target_coords_temp)        
         
-        # Make sure the user has selected an action
-        # (Value of -1 means original value was zero, ie empty)
-        if action_index == -1:
-            err_str = 'Please select and action and an object block.'
-            self.badInputDialog(err_str)
-            return 
+        #check to see if coordinates of obj and target are aligned on the same axis
+        obj_alignment = []
+        test_obj_x = [pair[0] for pair in selected_object_coords]
+        test_obj_y = [pair[1] for pair in selected_object_coords]
+        if all([x == test_obj_x[0] for x in test_obj_x]):
+            obj_alignment = "x"
+        elif all([x == test_obj_y[0] for x in test_obj_y]):
+            obj_alignment = "y"
+        else:
+            print("failure") 
+
+        target_alignment = []
+        test_target_x = [pair[0] for pair in selected_target_coords]
+        test_target_y = [pair[1] for pair in selected_target_coords]
+        if all([x == test_target_x[0] for x in test_target_x]):
+            target_alignment = "x"
+        elif all([x == test_target_y[0] for x in test_target_y]):
+            target_alignment = "y"
+        else:
+            print("failure")
             
+        alignment = [obj_alignment, target_alignment]
+        if not all([x == alignment[0] for x in alignment]):
+            print("different axes") #compare different axes                
+        else:
+            print("same axes") #compare same axes    
+        
+        
         #define event
         event = (action_index, selected_object, selected_target,
                  selected_object_block, selected_target_block)       
@@ -755,7 +791,6 @@ class Application:
         
         self.popup.destroy()
         self.popup = None
-        
 
 if __name__ == '__main__':
     root = tk.Tk()
