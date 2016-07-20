@@ -527,40 +527,60 @@ class Application:
         #retrieve selected stud coordinates for object and target
         selected_object_coords_temp = np.where(selected_object_block ==1)        
         selected_object_coords = zip(*selected_object_coords_temp)
+        selected_object_coords_array = np.array(selected_object_coords)
         selected_target_coords_temp = np.where(selected_target_block == 1)  
-        selected_target_coords = zip(*selected_target_coords_temp)        
+        selected_target_coords = zip(*selected_target_coords_temp)  
+        selected_target_coords_array = np.array(selected_target_coords)
         
         #check to see if coordinates of obj and target are aligned on the same axis
         obj_alignment = []
         test_obj_x = [pair[0] for pair in selected_object_coords]
         test_obj_y = [pair[1] for pair in selected_object_coords]
         if all([x == test_obj_x[0] for x in test_obj_x]):
-            obj_alignment = "x"
-        elif all([x == test_obj_y[0] for x in test_obj_y]):
             obj_alignment = "y"
+            ax_object = 1
+        elif all([x == test_obj_y[0] for x in test_obj_y]):
+            obj_alignment = "x"
+            ax_object = 0
         else:
-            print("failure") 
+            obj_alignment = "x"
+            ax_object = 0
 
         target_alignment = []
         test_target_x = [pair[0] for pair in selected_target_coords]
         test_target_y = [pair[1] for pair in selected_target_coords]
         if all([x == test_target_x[0] for x in test_target_x]):
-            target_alignment = "x"
-        elif all([x == test_target_y[0] for x in test_target_y]):
             target_alignment = "y"
+            ax_target = 1
+        elif all([x == test_target_y[0] for x in test_target_y]):
+            target_alignment = "x"
+            ax_target = 0
         else:
-            print("failure")
+            target_alignment = "x"
+            ax_target = 0
             
         alignment = [obj_alignment, target_alignment]
         if not all([x == alignment[0] for x in alignment]):
-            print("different axes") #compare different axes                
+            sorted_obj_coords_idx = selected_object_coords_array[:,ax_object].argsort()
+            selected_object_coords_array = selected_object_coords_array[sorted_obj_coords_idx,:]
+            sorted_target_coords_idx = selected_target_coords_array[:,ax_target].argsort()
+            selected_target_coords_array = selected_target_coords_array[sorted_target_coords_idx,:]                
         else:
-            print("same axes") #compare same axes    
+            sorted_obj_coords_idx = selected_object_coords_array[:,ax_object].argsort()
+            selected_object_coords_array = selected_object_coords_array[sorted_obj_coords_idx,:]
+            sorted_target_coords_idx = selected_target_coords_array[:,ax_target].argsort()
+            selected_target_coords_array = selected_target_coords_array[sorted_target_coords_idx,:]
         
-        
+        #convert array to strings for later writing
+        selected_object_coords_str = ':'.join([''.join(x) for x in 
+            selected_object_coords_array.astype(str).tolist()])
+            
+        selected_target_coords_str = ':'.join([''.join(x) for x in 
+            selected_target_coords_array.astype(str).tolist()])
+            
         #define event
         event = (action_index, selected_object, selected_target,
-                 selected_object_block, selected_target_block)       
+                 selected_object_coords_str, selected_target_coords_str)       
         
         #append the event to the event queue
         self.event_queue.append(event)
@@ -607,6 +627,11 @@ class Application:
         """
         Save labels and exit the annotation interface.
         """
+        
+        
+        
+        
+        
         
         # Save labels if they exist and update metadata file to reflect changes
         if self.labels:
@@ -675,11 +700,11 @@ class Application:
               
         #add start and end indexes to event queue
         self.event_queue = [s + (self.action_start_index, self.action_end_index) 
-        for s in self.event_queue]                
-           
+        for s in self.event_queue]                           
            
         #write event queue (which represents one action) to action queue (called 'labels')
         self.labels.append(self.event_queue)
+        print(self.labels)
         
         #reset event queue
         self.event_queue = None
