@@ -28,7 +28,8 @@ class DuploCorpus:
         self.initLogger()
         
         # ID strings for the recording devices
-        self.imu_ids = ('08F1', '095D', '090F', '0949')
+        self.imu_ids = ('095D', '0949', '090F', '08F1')
+        self.nickname2id = {'A':'095D', 'B':'0949', 'C':'090F', 'D':'08F1'}
         self.image_types = ('rgb', 'depth')
         
         self.initTypestructs()
@@ -733,6 +734,8 @@ if __name__ == '__main__':
     # Ignore the code below if you aren't me (the author)
     
     c = DuploCorpus()
+    c.makeImuFigs(24)
+    """
     sample_rate = 15    # Hz
     end_idx = 45 * sample_rate  # No motion for the first ~45-50 seconds
     imu_data = c.readImuData(13)
@@ -751,3 +754,4 @@ if __name__ == '__main__':
         line = np.vstack((np.zeros(3), mu_a))
         ax.plot(line[:,0], line[:,1], line[:,2])
         ax.scatter(mu_a[0], mu_a[1], mu_a[2])
+        """

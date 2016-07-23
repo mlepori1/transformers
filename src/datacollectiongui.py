@@ -41,16 +41,20 @@ class Application:
         
         # These structures define how the data collection screens progress
         self.interface_index = 0
-        self.interfaces = (self.defineInfoInterface, self.defineTaskInterface,
-                           self.defineImuInterface, self.defineStreamInterface)
-        self.getters = (self.getMetaData, self.getTaskData, self.getImuData,
+        self.interfaces = (self.defineInfoInterface, self.defineImuInterface,
+                           self.defineTaskInterface, self.defineStreamInterface)
+        self.getters = (self.getMetaData, self.getImuData, self.getTaskData,
                         self.getStreamData)
         
-        # Define some constants        
+        # Define some constants
+        # NOTE: The trial id will increase after a call to corpus.postprocess!!
+        #   (which happens in chooseNewTask and closeStream)
         self.corpus = DuploCorpus()
-        blocks = ('red', 'yellow', 'green', 'blue')
-        self.task2block = {1: blocks[:2], 2: blocks[2:], 3: blocks,
-                           4:blocks, 5: blocks, 6: blocks}
+        self.trial_id = self.corpus.meta_data.shape[0]
+        self.blocks = ('red', 'yellow', 'green', 'blue')
+        self.task2block = {1: self.blocks[:2], 2: self.blocks[2:],
+                           3: self.blocks, 4: self.blocks, 5: self.blocks,
+                           6: self.blocks}
         self.imu2block = {imu: 'UNUSED' for imu in self.corpus.imu_ids}
         
         #===[DATA FIELDS]======================================================
@@ -73,7 +77,7 @@ class Application:
         self.active_blocks = None
         
         self.block2button = {}
-        self.block2imu_id = {}
+        self.block2imu_nickname = {}
         self.imu_id2socket = {}
         self.imu_settings = []
         
@@ -83,37 +87,11 @@ class Application:
         self.die_set_by_user = False
         self.video_q = mp.Queue()
         self.imu_q = mp.Queue()
-        
-        self.defineStreamProcesses()
-         
+                 
         # Start drawing interfaces
         interface = self.interfaces[self.interface_index]
         interface()
         self.drawInterface()
-    
-    
-    def defineStreamProcesses(self):
-        """
-        Define processes that stream from IMUs and camera
-        """
-        
-        # Define paths used for file I/O when streaming data
-        # NOTE: The trial id will increase after a call to corpus.postprocess!!!
-        #   (which happens in chooseNewTask and closeStream)
-        self.trial_id = self.corpus.meta_data.shape[0]
-        raw_imu_fn = '{}-imu.csv'.format(self.trial_id)
-        raw_imu_path = os.path.join(self.corpus.paths['raw'], raw_imu_fn)
-        frame_base_path = os.path.join(self.corpus.paths['video-frames'],
-                                       str(self.trial_id))
-        timestamp_fn = '{}-timestamps.csv'.format(self.trial_id)
-        timestamp_path = os.path.join(self.corpus.paths['raw'], timestamp_fn)
-        
-        # Define processes that stream from IMUs and camera
-        videostream_args = (frame_base_path, timestamp_path,
-                            self.corpus.image_types, self.die, self.video_q)
-        imustream_args = (self.imu_id2socket, raw_imu_path, self.die, self.imu_q)
-        self.processes = (mp.Process(target=ps.stream, args=videostream_args),
-                          mp.Process(target=wax9.stream, args=imustream_args),)
     
     
     def drawInterface(self):
@@ -192,9 +170,59 @@ class Application:
             
         # Draw navigation buttons
         master = self.navigation_frame
-        forward = tk.Button(master, text='Next', command=self.forward,
+        forward = tk.Button(master, text='Connect IMUs >>', command=self.forward,
                             default=tk.ACTIVE)
         forward.grid(sticky=tk.E, row=0, column=1)
+    
+    
+    def defineImuInterface(self):
+        """
+        Set up the IMU connection interface.
+        """
+        
+        master = self.content_frame
+        
+        # Draw instructions
+        user_text = "Place IMUs in the following blocks and select their IDs."
+        instructions = tk.Label(master, text=user_text)
+        instructions.grid(sticky=tk.W, row=0, columnspan=3)
+    
+        # Draw IMU-block connection interface
+        imu_nicknames = tuple(sorted(self.corpus.nickname2id.keys()))
+        for i, block in enumerate(self.blocks):
+            
+            id_label = tk.Label(master, text=' \t ', background=block)
+            id_label.grid(row=i+1, column=0)
+            
+            # Draw different buttons depending on whether the block is
+            # associated with a connected IMU or not
+            self.block2imu_id_field[block] = tk.StringVar(master)
+            if block in self.block2imu_nickname:
+                nickname = self.block2imu_nickname[block]
+                self.block2imu_id_field[block].set(nickname)
+                button_text = 'Disconnect'
+                func = lambda b=str(block): self.resetConnection(b)
+            else:
+                self.block2imu_id_field[block].set(imu_nicknames[i])
+                button_text = 'Connect'
+                func = lambda b=str(block): self.connectionAttemptDialog(b)
+            
+            menu_args = (master, self.block2imu_id_field[block]) \
+                      + imu_nicknames
+            imu_menu = apply(tk.OptionMenu, menu_args)
+            imu_menu.grid(sticky=tk.W, row=i+1, column=1)
+            
+            button = tk.Button(master, text=button_text, command=func)
+            button.grid(sticky=tk.W, row=i+1, column=2)
+            self.block2button[block] = button
+        
+        # Draw navigation buttons
+        master = self.navigation_frame
+        forward = tk.Button(master, text='Select task >>', command=self.forward,
+                           default=tk.ACTIVE)
+        forward.grid(sticky=tk.E, row=0, column=1)
+        back = tk.Button(master, text='<< Enter data', command=self.back)
+        back.grid(sticky=tk.W, row=0, column=0)
     
     
     def defineTaskInterface(self):
@@ -225,71 +253,20 @@ class Application:
         
         # Draw navigaton buttons
         master = self.navigation_frame
-        forward = tk.Button(master, text="Next", command=self.forward,
+        forward = tk.Button(master, text="Collect data >>", command=self.forward,
                            default=tk.ACTIVE)
         forward.grid(sticky=tk.E, row=0, column=1)
-        back = tk.Button(master, text="Back", command=self.back)
+        back = tk.Button(master, text="<< Connect IMUs", command=self.back)
         back.grid(sticky=tk.W, row=0, column=0)
-                
+                    
 
-    def defineImuInterface(self):
-        """
-        Set up the IMU connection interface.
-        """
-        
-        master = self.content_frame
-        
-        # Draw instructions
-        user_text = "Place IMUs in the following blocks and select their IDs."
-        instructions = tk.Label(master, text=user_text)
-        instructions.grid(sticky=tk.W, row=0, columnspan=3)
-    
-        # Draw IMU-block connection interface
-        for i, block in enumerate(self.active_blocks):
-            
-            id_label = tk.Label(master, text=' \t ', background=block)
-            id_label.grid(row=i+1, column=0)
-            
-            # Draw different buttons depending on whether the block is
-            # associated with a connected IMU or not
-            self.block2imu_id_field[block] = tk.StringVar(master)
-            if block in self.block2imu_id:
-                imu = self.block2imu_id[block]
-                self.block2imu_id_field[block].set(imu)
-                button_text = '[Connected]'
-                func = lambda b=str(block): self.connectionAttemptDialog(b)
-            else:
-                self.block2imu_id_field[block].set(self.corpus.imu_ids[i])
-                button_text = 'Connect'
-                func = lambda b=str(block): self.connectionAttemptDialog(b)
-            
-            menu_args = (master, self.block2imu_id_field[block]) \
-                      + self.corpus.imu_ids
-            imu_menu = apply(tk.OptionMenu, menu_args)
-            imu_menu.grid(sticky=tk.W, row=i+1, column=1)
-            
-            func = lambda b=str(block): self.connectionAttemptDialog(b)
-            button = tk.Button(master, text=button_text, command=func)
-            button.grid(sticky=tk.W, row=i+1, column=2)
-            self.block2button[block] = button
-        
-        # Draw navigation buttons
-        master = self.navigation_frame
-        forward = tk.Button(master, text='Collect data', command=self.forward,
-                           default=tk.ACTIVE)
-        forward.grid(sticky=tk.E, row=0, column=1)
-        back = tk.Button(master, text='Back', command=self.back)
-        back.grid(sticky=tk.W, row=0, column=0)
-    
-    
     def defineStreamInterface(self):
         """
         Set up the data streaming interface.
         """
         
         # Start streaming data
-        for p in self.processes:
-            p.start()
+        self.startStreamProcesses()
         
         master = self.content_frame
         
@@ -302,15 +279,6 @@ class Application:
         
         self.imu_label = tk.Label(master, text='IMU activity')        
         self.imu_label.grid(row=1, column=2, sticky='N') 
-        
-        l2 = tk.Label(master, text='\t', font=("TkDefaultFont",14))
-        l2.grid(row=1, column=1)  
-        
-        l2 = tk.Label(master, text='\t', font=("TkDefaultFont",14))
-        l2.grid(row=3, column=1) 
-        
-        l = tk.Label(master, text='Data is being collected', font=("TkDefaultFont",14))
-        l.grid(row=4, column=1, sticky='S')
         
         # Draw placeholders for IMU monitors
         self.imu_id2activity_color = {}
@@ -340,7 +308,37 @@ class Application:
                 
         self.parent.after(75, self.refreshStreamInterface)
     
+       
+    def startStreamProcesses(self):
+        """
+        Define and start running processes that stream from IMUs and cameras
+        """
+        
+        # Define paths used for file I/O when streaming data
+        raw_imu_fn = '{}-imu.csv'.format(self.trial_id)
+        raw_imu_path = os.path.join(self.corpus.paths['raw'], raw_imu_fn)
+        frame_base_path = os.path.join(self.corpus.paths['video-frames'],
+                                       str(self.trial_id))
+        timestamp_fn = '{}-timestamps.csv'.format(self.trial_id)
+        timestamp_path = os.path.join(self.corpus.paths['raw'], timestamp_fn)
+        
+        # Active block --> IMU nickname --> IMU id --> IMU socket
+        # I know this is stupid but it's the best I can do for now
+        active_nicknames = [self.block2imu_nickname[block] for block in self.active_blocks]
+        active_ids = [self.corpus.nickname2id[nn] for nn in active_nicknames]
+        active_devices = {ID: self.imu_id2socket[ID] for ID in active_ids}
+        
+        # Define processes that stream from IMUs and camera
+        videostream_args = (frame_base_path, timestamp_path,
+                            self.corpus.image_types, self.die, self.video_q)
+        imustream_args = (active_devices, raw_imu_path, self.die, self.imu_q)
+        self.processes = (mp.Process(target=ps.stream, args=videostream_args),
+                          mp.Process(target=wax9.stream, args=imustream_args),)
+        
+        for p in self.processes:
+            p.start()
     
+ 
     def refreshStreamInterface(self):
         """
         Update frame on the RGB video monitor and check to make sure none of
@@ -381,22 +379,28 @@ class Application:
         if not self.die.is_set():
             self.stopStream()
         
+        # Map the blocks used in this trial to the IDs of the IMUs inside them.
+        # Map the blocks that weren't used to the string, 'UNUSED'.
+        block_mapping = {imu_id: 'UNUSED' for imu_id in self.corpus.imu_ids}
+        for block in self.active_blocks:
+            imu_id = self.corpus.nickname2id[self.block2imu_nickname[block]]
+            block_mapping[imu_id] = block
+        
+        # Update the metadata array and increment the trial index
         metadata = (self.participant_id, self.birth_month, self.birth_year,
                     self.gender, self.task)
         imu_settings_array = np.hstack(tuple(self.imu_settings))
-        self.corpus.postprocess(self.trial_id, metadata, self.imu2block,
+        self.corpus.postprocess(self.trial_id, metadata, block_mapping,
                                 imu_settings_array)
+        self.trial_id = self.corpus.meta_data.shape[0]
         
         # Reset die so we don't immediately quit streaming data in the next
         # round
         self.die.clear()
         
-        # Re-define streaming processes
-        self.defineStreamProcesses()
-        
         # task selection interface is at position 1
         self.clearInterface()
-        self.interface_index = 1
+        self.interface_index = 2
         interface = self.interfaces[self.interface_index]
         interface()
         self.drawInterface()
@@ -417,44 +421,74 @@ class Application:
         if not self.popup is None:
             return
         
-        imu_id = self.block2imu_id_field[block].get()
+        nickname = self.block2imu_id_field[block].get()
+        imu_id = self.corpus.nickname2id[nickname]
         
         self.popup = tk.Toplevel(self.parent)
         
         if imu_id in self.imu_id2socket:
             fmtstr = 'Device {} is already in use! Choose a different device.'
-            l = tk.Label(self.popup, text=fmtstr.format(imu_id))
+            l = tk.Label(self.popup, text=fmtstr.format(nickname))
             l.pack()
-            
             ok = tk.Button(self.popup, text='OK', command=self.cancel)
             ok.pack()
-        elif block in self.block2imu_id:
-            block_dev = self.block2imu_id[block]
+        elif block in self.block2imu_nickname:
+            nickname = self.block2imu_nickname[block]
             fmtstr = 'This block is already associated with device {}!'
-            l = tk.Label(self.popup, text=fmtstr.format(block_dev))
+            l = tk.Label(self.popup, text=fmtstr.format(nickname))
             l.pack()
-            
             ok = tk.Button(self.popup, text='OK', command=self.cancel)
             ok.pack()
         else:
-            fmtstr = 'Connecting to {}...'
-            l = tk.Label(self.popup, text=fmtstr.format(imu_id))
+            fmtstr = 'Connecting to  device {}...'
+            l = tk.Label(self.popup, text=fmtstr.format(nickname))
             l.pack()
-            
-            self.attemptConnection(imu_id, block)
+            self.attemptConnection(nickname, block)
     
     
-    def attemptConnection(self, imu_id, block):
+    def resetConnection(self, block):
+        """
+        Close the socket for the IMU currently connected to the specified block
+        
+        Args:
+        -----
+        block:  str
+          Color of the current block
+        """
+        
+        # block name --> imu nickname --> imu 4-digit hex id --> imu socket
+        nickname = self.block2imu_nickname[block]
+        imu_id = self.corpus.nickname2id[nickname]
+        socket = self.imu_id2socket[imu_id]
+        
+        # Disconnect from socket
+        print('Disconnecting from {}...'.format(imu_id))
+        socket.close()
+        
+        # Update dictionaries
+        self.imu_id2socket.pop(imu_id, None)
+        self.block2imu_nickname.pop(block, None)
+        self.imu2block.pop(imu_id, None)
+        
+        # Re-configure button
+        func = lambda b=str(block): self.connectionAttemptDialog(b)
+        self.block2button[block].configure(text='Connect', command=func)
+        
+    
+    def attemptConnection(self, nickname, block):
         """
         Try to connect to the specified IMU.
         
         Args:
         -----
-        imu_id:  str
-          4-digit hex ID of the IMU
+        nickname:  str
+          Simple label given to IMU (one character, e.g. 'A')
         block:  str
           Color of the current block
         """
+        
+        # Get the 4-digit hex ID of the IMU from its nickname
+        imu_id = self.corpus.nickname2id[nickname]
         
         mac_prefix = ['00', '17', 'E9', 'D7']
         imu_address = ':'.join(mac_prefix + [imu_id[0:2], imu_id[2:4]])
@@ -463,7 +497,7 @@ class Application:
             self.connectionFailureDialog()
         else:
             self.imu_id2socket[imu_id] = socket
-            self.block2imu_id[block] = imu_id
+            self.block2imu_nickname[block] = nickname
             self.imu2block[imu_id] = block
             print('{}: {}'.format(block, imu_id))
             
@@ -477,12 +511,13 @@ class Application:
             self.imu_settings.append(parsed_settings)
             
             # Update 'connect' button
-            self.block2button[block].configure(text='[Connected]')
+            func = lambda b=str(block): self.resetConnection(b)
+            self.block2button[block].configure(text='Disconnect', command=func)
             
             sample_str = wax9.sample(socket)
             data_str = sample_str.strip().split('\r\n')[1]
             battery = int(data_str.split(',')[-4])  # Battery voltage in mV
-            self.connectionSuccessDialog(name, battery)
+            self.connectionSuccessDialog(nickname, battery)
         
     
     def connectionFailureDialog(self):
@@ -502,15 +537,15 @@ class Application:
         ok.grid(row=1)
     
     
-    def connectionSuccessDialog(self, imu_id, battery):
+    def connectionSuccessDialog(self, nickname, battery):
         """
         Draw a popup window informing the user that the connection attempt was
         successful.
         
         Args:
         -----
-        imu_id:  str
-          4-digit hex ID of the IMU, as a string
+        nickname:  str
+          Simple label given to IMU (one character, e.g. 'A')
         battery:  int
           IMU battery voltage in mV
         """
@@ -528,8 +563,8 @@ class Application:
         # because the max capacity is only approximate
         charge_percent = int(min(charge_percent, 1) * 100)
         
-        fmtstr = '\nSuccessfully connected to {}!\n\nBattery: {}%\n'
-        l = tk.Label(self.popup, text=fmtstr.format(imu_id, charge_percent))
+        fmtstr = '\nSuccessfully connected to device {}!\n\nBattery: {}%\n'
+        l = tk.Label(self.popup, text=fmtstr.format(nickname, charge_percent))
         l.pack()
         
         ok = tk.Button(self.popup, text='OK', command=self.cancel)
@@ -644,10 +679,17 @@ class Application:
             print('Disconnecting from {}...'.format(name))
             socket.close()
         
+        # Map the blocks used in this trial to the IDs of the IMUs inside them.
+        # Map the blocks that weren't used to the string, 'UNUSED'.
+        block_mapping = {imu_id: 'UNUSED' for imu_id in self.corpus.imu_ids}
+        for block in self.active_blocks:
+            imu_id = self.corpus.nickname2id[self.block2imu_nickname[block]]
+            block_mapping[imu_id] = block
+        
         metadata = (self.participant_id, self.birth_month, self.birth_year,
                     self.gender, self.task)
         imu_settings_array = np.hstack(tuple(self.imu_settings))
-        self.corpus.postprocess(self.trial_id, metadata, self.imu2block,
+        self.corpus.postprocess(self.trial_id, metadata, block_mapping,
                                 imu_settings_array)
         #self.corpus.makeImuFigs(self.trial_id)
         
@@ -691,6 +733,20 @@ class Application:
         return ''
     
     
+    def getImuData(self):
+        """
+        Read block to IMU mappings from tkinter widgets.
+        """
+                
+        # Make sure there is a connected IMU associated with every block
+        for block in self.blocks:
+            if not block in self.block2imu_nickname:
+                fmtstr = 'Please put an IMU in the {} block and click connect.'
+                return fmtstr.format(block)
+        
+        return ''
+    
+    
     def getTaskData(self):
         """
         Read the block construction task from tkinter widgets.
@@ -714,20 +770,6 @@ class Application:
         return ''
         
     
-    def getImuData(self):
-        """
-        Read block to IMU mappings from tkinter widgets.
-        """
-                
-        # Make sure there is a connected IMU associated with every block
-        for block in self.active_blocks:
-            if not block in self.block2imu_id:
-                fmtstr = 'Please put an IMU in the {} block and click connect.'
-                return fmtstr.format(block)
-        
-        return ''
-            
-    
     def getStreamData(self):
         # TODO:
         print("I am a dummy function!")
@@ -736,7 +778,6 @@ class Application:
 if __name__ == '__main__':
     
     # Start the application in quasi-fullscreen mode
-    
     root = tk.Tk()
     screen_width = root.winfo_screenwidth()
     screen_height = root.winfo_screenheight()
