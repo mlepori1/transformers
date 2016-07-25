@@ -28,7 +28,7 @@ class Application:
         self.blocks = ('red square', 'yellow square', 'green square',
                        'blue square', 'red rect', 'yellow rect', 'green rect',
                        'blue rect')
-        self.block2index = {block: str(i) for i, block in enumerate(self.blocks)}
+        self.block2index = {block: i for i, block in enumerate(self.blocks)}
         
         # Corpus object manages file I/O -- filenames and paths are filled in
         # after reading input from trial selection interface
@@ -579,8 +579,8 @@ class Application:
             selected_target_coords_array.astype(str).tolist()])
             
         #define event
-        event = (action_index, selected_object, selected_target,
-                 selected_object_coords_str, selected_target_coords_str)       
+        event = (action_index, self.block2index[selected_object], self.block2index[selected_target],
+                 selected_target_coords_str, selected_object_coords_str)       
         
         #append the event to the event queue
         self.event_queue.append(event)
@@ -699,12 +699,20 @@ class Application:
         self.action_end_index = self.cur_frame
               
         #add start and end indexes to event queue
-        self.event_queue = [s + (self.action_start_index, self.action_end_index) 
+        self.event_queue = [(self.action_start_index, self.action_end_index) + s 
         for s in self.event_queue]                           
-           
+        
         #write event queue (which represents one action) to action queue (called 'labels')
         self.labels.append(self.event_queue)
-        print(self.labels)
+        
+        #write target indices to a variable for parseAction
+        target_indices = (x[4] for x in self.event_queue)
+        object_index = self.event_queue[0][3]
+        action_index = self.event_queue[0][2]
+        action = self.actions[action_index]
+        
+        #parse actions to create state image
+        self.parseAction(action, object_index, target_indices)        
         
         #reset event queue
         self.event_queue = None
@@ -713,7 +721,7 @@ class Application:
         self.action_start_index = -1
         self.action_end_index = -1
         
-        #Redraw world state image and stard/end button
+        #Redraw world state image and start/end button
         self.updateWorldState()
         self.start_end.configure(text='Start of action',
                                  command=self.startAction)
