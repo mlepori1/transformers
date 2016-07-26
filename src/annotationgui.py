@@ -466,9 +466,40 @@ class Application:
         
         #check to make sure there is an action index
         if action_index == -1:
-            err_str = 'Please select and action and an object block.'
+            err_str = 'Please select an action and an object block.'
             self.badInputDialog(err_str)
             return         
+        
+        #if 'remove' is the selected action, only an object is needed
+        if action_index == 2:
+            self.arrays.update(self.arrays_rect)
+            names = ('red square','green square','yellow square','blue square', 
+            'red rect','green rect','yellow rect','blue rect')
+            selected_object = ""
+            count = 0
+            for n in names:
+                val = self.arrays[n].any()
+                count += val
+                if count >1:
+                    queue_error_object = 'Only one object block may be selected at a time'
+                    self.badInputDialog(queue_error_object)
+                    return
+                elif val:
+                    selected_object = n
+            selected_object_block = self.arrays[selected_object]   
+            selected_object_coords_temp = np.where(selected_object_block ==1)        
+            selected_object_coords = zip(*selected_object_coords_temp)
+            selected_object_coords_array = np.array(selected_object_coords)
+            selected_object_coords_str = ':'.join([''.join(x) for x in 
+            selected_object_coords_array.astype(str).tolist()])
+            
+            #define event
+            event = (action_index, self.block2index[selected_object], '',
+                 '', '')       
+        
+            #append the event to the event queue
+            self.event_queue.append(event)
+            return
         
         ##validate data
         
@@ -605,8 +636,9 @@ class Application:
         """
         
         #delete last action
-        self.labels.pop()        
-        print(self.labels)
+        self.labels.pop()
+        self.states = self.states[:-1]        
+        self.updateWorldState()
         return
     
     
@@ -635,7 +667,10 @@ class Application:
         
         # Save labels if they exist and update metadata file to reflect changes
         if self.labels:
-            self.corpus.writeLabels(self.trial_id, self.labels)
+            self.labels_fixed = []
+            for l in self.labels:
+                self.labels_fixed += l
+            self.corpus.writeLabels(self.trial_id, self.labels_fixed)
             self.corpus.updateMetaData(self.trial_id)
         self.parent.destroy()
     
