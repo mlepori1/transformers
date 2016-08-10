@@ -2,6 +2,10 @@
 //#define GLEW_STATIC
 
 // Headers
+#include "blockmodel.h"
+
+#include "Eigen/Dense"
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <iostream>
@@ -9,18 +13,23 @@
 #include <sstream>
 #include <string>
 #include <vector>
+
 #include <png.h>
+
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
+
 #include <chrono>
 
 // Shader macro
 // FIXME: this should be an inline function
 #define GLSL(src) "#version 150 core\n" #src
 
+using namespace Eigen;
+using namespace std;
 
 png_byte* readPng(const char* filename, int& width, int& height)
 {
@@ -130,31 +139,31 @@ void writePng(const char* filename, png_byte* image, png_bytep* row_pointers, in
     fclose(fp);
 }
 
-std::vector< std::vector<float> > readCsv(const char* filename)
+vector< vector<float> > readCsv(const char* filename)
 {
-    std::ifstream ifs(filename, std::ifstream::in);
-    std::string line;
-    std::getline(ifs, line);
+    ifstream ifs(filename, ifstream::in);
+    string line;
+    getline(ifs, line);
 
     // Initialize one column for each column name in the CSV file
-    std::stringstream lineStream(line);
-    std::string entry;
-    std::vector< std::vector<float> > cols;
-    while (std::getline(lineStream, entry, ','))
+    stringstream lineStream(line);
+    string entry;
+    vector< vector<float> > cols;
+    while (getline(lineStream, entry, ','))
     {
-        std::vector<float> col;
+        vector<float> col;
         cols.push_back(col);
     }
 
     // Read the CSV data as floats
-    while (std::getline(ifs, line))
+    while (getline(ifs, line))
     {
-        std::stringstream lineStream(line);
-        std::string entry;
+        stringstream lineStream(line);
+        string entry;
         int i = 0;
-        while (std::getline(lineStream, entry, ','))
+        while (getline(lineStream, entry, ','))
         {
-            cols[i].push_back(std::stof(entry));
+            cols[i].push_back(stof(entry));
             i++;
         }
     }
@@ -163,39 +172,41 @@ std::vector< std::vector<float> > readCsv(const char* filename)
     return cols;
 }
 
-void writeCsv(const char* filename, const std::vector<std::string>& colNames, const std::vector< std::vector<float> >& data)
+void writeCsv(const char* filename, const vector<string>& colNames, const vector< vector<Vector3f> >& data)
 {
-    std::ofstream ofs(filename, std::ofstream::out);
-    std::vector<std::string>::const_iterator it;
+    ofstream ofs(filename, ofstream::out);
+    vector<string>::const_iterator it;
     for (it = colNames.begin(); it != colNames.end(); ++it)
     {
         ofs << *it << ",";
     }
-    ofs << std::endl;
+    ofs << endl;
    
     // FIXME: assert all columns have the same number of entries
     for (int i = 0; i < data[0].size(); ++i)
     {
-        std::vector< std::vector<float> >::const_iterator it;
+        vector< vector<Vector3f> >::const_iterator it;
         for (it = data.begin(); it != data.end(); ++it)
         {
-            ofs << (*it)[i] << ",";
+            ofs << (*it)[i][0] << ",";
+            ofs << (*it)[i][1] << ",";
+            ofs << (*it)[i][2] << "\t";//",";
         }
-        ofs << std::endl;
+        ofs << endl;
     }
 
     ofs.close();
 }
 
-const std::vector<std::string> readImagePaths( const char* filename)
+const vector<string> readImagePaths(const char* filename)
 {
-    std::ifstream ifs(filename, std::ifstream::in);
-    std::string line;
-    std::getline(ifs, line);
+    ifstream ifs(filename, ifstream::in);
+    string line;
+    getline(ifs, line);
 
-    std::vector<std::string> imagePaths;
+    vector<string> imagePaths;
     // Read the CSV data as floats
-    while (std::getline(ifs, line))
+    while (getline(ifs, line))
     {
         imagePaths.push_back(line);
     }
@@ -278,257 +289,44 @@ void APIENTRY glDebugOutput(GLenum source, GLenum type, GLuint id, GLenum severi
     // ignore non-significant error/warning codes
     if (id == 131169 || id == 131185 || id == 131218 || id == 131204) return; 
     
-    std::cout << "---------------" << std::endl;
-    std::cout << "Debug message (" << id << "): " <<  message << std::endl;
+    cout << "---------------" << endl;
+    cout << "Debug message (" << id << "): " <<  message << endl;
     
     switch (source)
     {
-        case GL_DEBUG_SOURCE_API:             std::cout << "Source: API"; break;
-        case GL_DEBUG_SOURCE_WINDOW_SYSTEM:   std::cout << "Source: Window System"; break;
-        case GL_DEBUG_SOURCE_SHADER_COMPILER: std::cout << "Source: Shader Compiler"; break;
-        case GL_DEBUG_SOURCE_THIRD_PARTY:     std::cout << "Source: Third Party"; break;
-        case GL_DEBUG_SOURCE_APPLICATION:     std::cout << "Source: Application"; break;
-        case GL_DEBUG_SOURCE_OTHER:           std::cout << "Source: Other"; break;
-    } std::cout << std::endl;
+        case GL_DEBUG_SOURCE_API:             cout << "Source: API"; break;
+        case GL_DEBUG_SOURCE_WINDOW_SYSTEM:   cout << "Source: Window System"; break;
+        case GL_DEBUG_SOURCE_SHADER_COMPILER: cout << "Source: Shader Compiler"; break;
+        case GL_DEBUG_SOURCE_THIRD_PARTY:     cout << "Source: Third Party"; break;
+        case GL_DEBUG_SOURCE_APPLICATION:     cout << "Source: Application"; break;
+        case GL_DEBUG_SOURCE_OTHER:           cout << "Source: Other"; break;
+    } cout << endl;
         
     switch (type)
     {
-        case GL_DEBUG_TYPE_ERROR:               std::cout << "Type: Error"; break;
-        case GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR: std::cout << "Type: Deprecated Behaviour"; break;
-        case GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR:  std::cout << "Type: Undefined Behaviour"; break; 
-        case GL_DEBUG_TYPE_PORTABILITY:         std::cout << "Type: Portability"; break;
-        case GL_DEBUG_TYPE_PERFORMANCE:         std::cout << "Type: Performance"; break;
-        case GL_DEBUG_TYPE_MARKER:              std::cout << "Type: Marker"; break;
-        case GL_DEBUG_TYPE_PUSH_GROUP:          std::cout << "Type: Push Group"; break;
-        case GL_DEBUG_TYPE_POP_GROUP:           std::cout << "Type: Pop Group"; break;
-        case GL_DEBUG_TYPE_OTHER:               std::cout << "Type: Other"; break;
-    } std::cout << std::endl;
+        case GL_DEBUG_TYPE_ERROR:               cout << "Type: Error"; break;
+        case GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR: cout << "Type: Deprecated Behaviour"; break;
+        case GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR:  cout << "Type: Undefined Behaviour"; break; 
+        case GL_DEBUG_TYPE_PORTABILITY:         cout << "Type: Portability"; break;
+        case GL_DEBUG_TYPE_PERFORMANCE:         cout << "Type: Performance"; break;
+        case GL_DEBUG_TYPE_MARKER:              cout << "Type: Marker"; break;
+        case GL_DEBUG_TYPE_PUSH_GROUP:          cout << "Type: Push Group"; break;
+        case GL_DEBUG_TYPE_POP_GROUP:           cout << "Type: Pop Group"; break;
+        case GL_DEBUG_TYPE_OTHER:               cout << "Type: Other"; break;
+    } cout << endl;
         
     switch (severity)
     {
-        case GL_DEBUG_SEVERITY_HIGH:         std::cout << "Severity: high"; break;
-        case GL_DEBUG_SEVERITY_MEDIUM:       std::cout << "Severity: medium"; break;
-        case GL_DEBUG_SEVERITY_LOW:          std::cout << "Severity: low"; break;
-        case GL_DEBUG_SEVERITY_NOTIFICATION: std::cout << "Severity: notification"; break;
-    } std::cout << std::endl;
-    std::cout << std::endl;
+        case GL_DEBUG_SEVERITY_HIGH:         cout << "Severity: high"; break;
+        case GL_DEBUG_SEVERITY_MEDIUM:       cout << "Severity: medium"; break;
+        case GL_DEBUG_SEVERITY_LOW:          cout << "Severity: low"; break;
+        case GL_DEBUG_SEVERITY_NOTIFICATION: cout << "Severity: notification"; break;
+    } cout << endl;
+    cout << endl;
 }
 
-GLfloat* initializeVertices()
+void saveImage(const char* image_fn)
 {
-    // Define vertices
-    GLfloat w = 31.8;
-    GLfloat l = 31.8;
-    GLfloat h = 19.2;
-
-    GLfloat vertices[] = {
-    // square block
-    //  position in R3, normal vector in R3
-        -w/2, -l/2, -h/2, -1.0,  0.0,  0.0,
-        -w/2,  l/2, -h/2, -1.0,  0.0,  0.0,
-        -w/2, -l/2,  h/2, -1.0,  0.0,  0.0,
-        -w/2,  l/2,  h/2, -1.0,  0.0,  0.0,
-        -w/2,  l/2, -h/2, -1.0,  0.0,  0.0,
-        -w/2, -l/2,  h/2, -1.0,  0.0,  0.0,
-
-         w/2, -l/2, -h/2,  1.0,  0.0,  0.0,
-         w/2,  l/2, -h/2,  1.0,  0.0,  0.0,
-         w/2, -l/2,  h/2,  1.0,  0.0,  0.0,
-         w/2,  l/2,  h/2,  1.0,  0.0,  0.0,
-         w/2,  l/2, -h/2,  1.0,  0.0,  0.0,
-         w/2, -l/2,  h/2,  1.0,  0.0,  0.0,
-
-        -w/2, -l/2, -h/2,  0.0, -1.0,  0.0,
-         w/2, -l/2, -h/2,  0.0, -1.0,  0.0,
-        -w/2, -l/2,  h/2,  0.0, -1.0,  0.0,
-         w/2, -l/2,  h/2,  0.0, -1.0,  0.0,
-         w/2, -l/2, -h/2,  0.0, -1.0,  0.0,
-        -w/2, -l/2,  h/2,  0.0, -1.0,  0.0,
-
-        -w/2,  l/2, -h/2,  0.0,  1.0,  0.0,
-         w/2,  l/2, -h/2,  0.0,  1.0,  0.0,
-        -w/2,  l/2,  h/2,  0.0,  1.0,  0.0,
-         w/2,  l/2,  h/2,  0.0,  1.0,  0.0,
-         w/2,  l/2, -h/2,  0.0,  1.0,  0.0,
-        -w/2,  l/2,  h/2,  0.0,  1.0,  0.0,
-
-        -w/2, -l/2, -h/2,  0.0,  0.0, -1.0,
-        -w/2,  l/2, -h/2,  0.0,  0.0, -1.0,
-         w/2, -l/2, -h/2,  0.0,  0.0, -1.0,
-         w/2,  l/2, -h/2,  0.0,  0.0, -1.0,
-        -w/2,  l/2, -h/2,  0.0,  0.0, -1.0,
-         w/2, -l/2, -h/2,  0.0,  0.0, -1.0,
-
-        -w/2, -l/2,  h/2,  0.0,  0.0,  1.0,
-        -w/2,  l/2,  h/2,  0.0,  0.0,  1.0,
-         w/2, -l/2,  h/2,  0.0,  0.0,  1.0,
-         w/2,  l/2,  h/2,  0.0,  0.0,  1.0,
-        -w/2,  l/2,  h/2,  0.0,  0.0,  1.0,
-         w/2, -l/2,  h/2,  0.0,  0.0,  1.0,
-    //  Rectangular block
-    //  position in R3, normal vector in R3
-        -w/2, -l, -h/2, -1.0,  0.0,  0.0,
-        -w/2,  l, -h/2, -1.0,  0.0,  0.0,
-        -w/2, -l,  h/2, -1.0,  0.0,  0.0,
-        -w/2,  l,  h/2, -1.0,  0.0,  0.0,
-        -w/2,  l, -h/2, -1.0,  0.0,  0.0,
-        -w/2, -l,  h/2, -1.0,  0.0,  0.0,
-
-         w/2, -l, -h/2,  1.0,  0.0,  0.0,
-         w/2,  l, -h/2,  1.0,  0.0,  0.0,
-         w/2, -l,  h/2,  1.0,  0.0,  0.0,
-         w/2,  l,  h/2,  1.0,  0.0,  0.0,
-         w/2,  l, -h/2,  1.0,  0.0,  0.0,
-         w/2, -l,  h/2,  1.0,  0.0,  0.0,
-
-        -w/2, -l, -h/2,  0.0, -1.0,  0.0,
-         w/2, -l, -h/2,  0.0, -1.0,  0.0,
-        -w/2, -l,  h/2,  0.0, -1.0,  0.0,
-         w/2, -l,  h/2,  0.0, -1.0,  0.0,
-         w/2, -l, -h/2,  0.0, -1.0,  0.0,
-        -w/2, -l,  h/2,  0.0, -1.0,  0.0,
-
-        -w/2,  l, -h/2,  0.0,  1.0,  0.0,
-         w/2,  l, -h/2,  0.0,  1.0,  0.0,
-        -w/2,  l,  h/2,  0.0,  1.0,  0.0,
-         w/2,  l,  h/2,  0.0,  1.0,  0.0,
-         w/2,  l, -h/2,  0.0,  1.0,  0.0,
-        -w/2,  l,  h/2,  0.0,  1.0,  0.0,
-
-        -w/2, -l, -h/2,  0.0,  0.0, -1.0,
-        -w/2,  l, -h/2,  0.0,  0.0, -1.0,
-         w/2, -l, -h/2,  0.0,  0.0, -1.0,
-         w/2,  l, -h/2,  0.0,  0.0, -1.0,
-        -w/2,  l, -h/2,  0.0,  0.0, -1.0,
-         w/2, -l, -h/2,  0.0,  0.0, -1.0,
-
-        -w/2, -l,  h/2,  0.0,  0.0,  1.0,
-        -w/2,  l,  h/2,  0.0,  0.0,  1.0,
-         w/2, -l,  h/2,  0.0,  0.0,  1.0,
-         w/2,  l,  h/2,  0.0,  0.0,  1.0,
-        -w/2,  l,  h/2,  0.0,  0.0,  1.0,
-         w/2, -l,  h/2,  0.0,  0.0,  1.0
-    };
-
-    return vertices;
-}
-
-void initializeParameters(glm::vec3* squareTranslations, glm::vec3* squareRotations, 
-                          glm::vec3*   rectTranslations, glm::vec3*   rectRotations)
-{
-    // mm
-    squareTranslations[0] = glm::vec3(-150.0f, 0.0f, 0.0f);
-    squareTranslations[1] = glm::vec3( -50.0f, 0.0f, 0.0f);
-    squareTranslations[2] = glm::vec3(  50.0f, 0.0f, 0.0f);
-    squareTranslations[3] = glm::vec3( 150.0f, 0.0f, 0.0f);
-
-    // mm
-    rectTranslations[0] = glm::vec3(0.0f, -150.0f, 0.0f);
-    rectTranslations[1] = glm::vec3(0.0f,  -50.0f, 0.0f);
-    rectTranslations[2] = glm::vec3(0.0f,   50.0f, 0.0f);
-    rectTranslations[3] = glm::vec3(0.0f,  150.0f, 0.0f);
-
-    // degrees
-    squareRotations[0] = glm::vec3(0.0f, 0.0f, 0.0f);
-    squareRotations[1] = glm::vec3(0.0f, 0.0f, 0.0f);
-    squareRotations[2] = glm::vec3(0.0f, 0.0f, 0.0f);
-    squareRotations[3] = glm::vec3(0.0f, 0.0f, 0.0f);
-
-    // degrees
-    rectRotations[0] = glm::vec3(0.0f, 0.0f, 90.0f);
-    rectRotations[1] = glm::vec3(0.0f, 0.0f,  0.0f);
-    rectRotations[2] = glm::vec3(0.0f, 0.0f,  0.0f);
-    rectRotations[3] = glm::vec3(0.0f, 0.0f, 90.0f);
-}
-
-void updateParameters(glm::vec3* squareTranslations, glm::vec3* squareRotations, 
-                      glm::vec3*   rectTranslations, glm::vec3*   rectRotations,
-                      float elapsed_time)
-{
-    float theta = elapsed_time * glm::radians(180.0f);
-    float r = 10;
-
-    // Update kinematic parameters
-    for (int i = 0; i < 4; i++)
-    {
-        r = (-2 * (i / 2) + 1) * length(squareTranslations[i]);
-        squareTranslations[i] = glm::vec3(r * cos(theta), r * sin(theta), 0.0);
-
-        r = (-2 * (i / 2) + 1) * length(rectTranslations[i]);
-        rectTranslations[i] = glm::vec3(r * cos(theta + /*glm::radians(*/45),
-                                        r * sin(theta + /*glm::radians(*/45), 0.0);
-    }
-}
-
-void storeParameters(const glm::vec3* squareTranslations, const glm::vec3* squareRotations, 
-                     const glm::vec3*   rectTranslations, const glm::vec3*   rectRotations,
-                     std::vector< std::vector<float> > data)
-{
-    // Store kinematic parameters
-    for (int i = 0; i < 4; i++)
-    {
-        // Square
-        data[i * 12 + 0].push_back(squareTranslations[i].x);
-        data[i * 12 + 1].push_back(squareTranslations[i].y);
-        data[i * 12 + 2].push_back(squareTranslations[i].z);
-        data[i * 12 + 3].push_back(squareRotations[i].x);
-        data[i * 12 + 4].push_back(squareRotations[i].y);
-        data[i * 12 + 5].push_back(squareRotations[i].z);
-
-        // Rectangular
-        data[i * 12 + 6].push_back(rectTranslations[i].x);
-        data[i * 12 + 7].push_back(rectTranslations[i].y);
-        data[i * 12 + 8].push_back(rectTranslations[i].z);
-        data[i * 12 + 9].push_back(rectRotations[i].x);
-        data[i * 12 + 10].push_back(rectRotations[i].y);
-        data[i * 12 + 11].push_back(rectRotations[i].z);
-    }
-}
-
-void genObservation(const glm::vec3* squareTranslations, const glm::vec3* squareRotations, 
-                    const glm::vec3*   rectTranslations, const glm::vec3*   rectRotations,
-                    const glm::vec3* blockColors, GLuint shaderProgram, const char* image_fn)
-{
-    GLint uniModel = glGetUniformLocation(shaderProgram, "model");
-    GLint uniObjectColor = glGetUniformLocation(shaderProgram, "objectColor");
-
-    // Enable depth rendering, clear the screen to black and clear depth buffer
-    glEnable(GL_DEPTH_TEST);
-    glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-    // Draw square blocks
-    for (int i = 0; i < 4; i++)
-    {
-        glm::mat4 model;
-        model = glm::translate(model, squareTranslations[i]);
-        model = glm::rotate(model, glm::radians(squareRotations[i].x), glm::vec3(1.0f, 0.0f, 0.0f));
-        model = glm::rotate(model, glm::radians(squareRotations[i].y), glm::vec3(0.0f, 1.0f, 0.0f));
-        model = glm::rotate(model, glm::radians(squareRotations[i].z), glm::vec3(0.0f, 0.0f, 1.0f));
-        glUniformMatrix4fv(uniModel, 1, GL_FALSE, glm::value_ptr(model));
-
-        glm::vec3 color = blockColors[i];
-        glUniform3f(uniObjectColor, color.r, color.g, color.b);
-
-        glDrawArrays(GL_TRIANGLES, 0, 6 * 6);
-    }
-
-    // Draw rectangular blocks
-    for (int i = 0; i < 4; i++)
-    {
-        glm::mat4 model;
-        model = glm::translate(model, rectTranslations[i]);
-        model = glm::rotate(model, glm::radians(rectRotations[i].x), glm::vec3(1.0f, 0.0f, 0.0f));
-        model = glm::rotate(model, glm::radians(rectRotations[i].y), glm::vec3(0.0f, 1.0f, 0.0f));
-        model = glm::rotate(model, glm::radians(rectRotations[i].z), glm::vec3(0.0f, 0.0f, 1.0f));
-        glUniformMatrix4fv(uniModel, 1, GL_FALSE, glm::value_ptr(model));
-
-        glm::vec3 color = blockColors[i];
-        glUniform3f(uniObjectColor, color.r, color.g, color.b);
-
-        glDrawArrays(GL_TRIANGLES, 6 * 6, 6 * 6);
-    }
-
     // Save image
     GLint viewport[4];
     glGetIntegerv(GL_VIEWPORT, viewport);
@@ -548,7 +346,7 @@ void genObservation(const glm::vec3* squareTranslations, const glm::vec3* square
 
 int main()
 {
-    auto t_start = std::chrono::high_resolution_clock::now();
+    auto t_start = chrono::high_resolution_clock::now();
 
     // Initialize a GLFW window
     glfwInit();
@@ -585,12 +383,6 @@ int main()
     GLuint shaderProgram = glCreateProgram();
     glAttachShader(shaderProgram, vertexShader);
     glAttachShader(shaderProgram, fragmentShader);
-
-    /*
-    // Transform feedback buffer for debugging
-    const GLchar* feedbackVaryings[] = { "transformFeedback" };
-    glTransformFeedbackVaryings(shaderProgram, 1, feedbackVaryings, GL_INTERLEAVED_ATTRIBS);
-    */
 
     glLinkProgram(shaderProgram);
 
@@ -704,8 +496,6 @@ int main()
          w/2, -l,  h/2,  0.0,  0.0,  1.0
     };
 
-    //GLfloat* vertices = initializeVertices();
-
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
 
@@ -727,39 +517,16 @@ int main()
     glUniform3f(uniLightColor, 1.0f, 1.0f, 1.0f);
     glUniform3f(uniLightPos, 0.0f, 0.0f, 2000.0f);
 
-    /*
-    // Create transform feedback buffer
-    GLuint tbo;
-    glGenBuffers(1, &tbo);
-    glBindBuffer(GL_ARRAY_BUFFER, tbo);
-    glBufferData(GL_ARRAY_BUFFER, 4 * 16 * sizeof(GLfloat), NULL, GL_STATIC_READ);
-    glBindBufferBase(GL_TRANSFORM_FEEDBACK_BUFFER, 0, tbo);
-    GLfloat feedback[4 * 16];
-    glBindBuffer(GL_ARRAY_BUFFER, vboSquare);
-    */
-
     // Set up projection
     // Camera located 600mm above the origin, pointing along -z.
-    // Downward direction is... +z??
     glm::mat4 view = glm::lookAt(
-        glm::vec3(50.0f, 50.0f, 600.0f),
-        //glm::vec3(100.0f, 100.0f, 100.0f),
+        glm::vec3(0.0f, -50.0f, 600.0f),
         glm::vec3(0.0f, 0.0f, 0.0f),
         glm::vec3(0.0f, 0.0f, 1.0f)
     );
     GLint uniView = glGetUniformLocation(shaderProgram, "view");
     glUniformMatrix4fv(uniView, 1, GL_FALSE, glm::value_ptr(view));
 
-    /*
-    printf("View matrix:\n");
-    for (int i = 0; i < 4; i++) {
-        for (int j = 0; j < 4; j++) {
-            printf("%f ", view[i][j]);
-        }
-        printf("\n");
-    }
-    */
-    
     // I calculated field of view from camera intrinsic parameters
     // I set the near and far clipping planes ~arbitrarily~
     float field_of_view = 47.9975;  // degrees
@@ -769,219 +536,105 @@ int main()
     GLint uniProj = glGetUniformLocation(shaderProgram, "proj");
     glUniformMatrix4fv(uniProj, 1, GL_FALSE, glm::value_ptr(proj));
 
-    /*
-    printf("Projection matrix:\n");
-    for (int i = 0; i < 4; i++) {
-        for (int j = 0; j < 4; j++) {
-            printf("%f ", proj[i][j]);
-        }
-        printf("\n");
-    }
-    */
-
-    /*
-    GLint uniModel = glGetUniformLocation(shaderProgram, "model");
-    GLint uniObjectColor = glGetUniformLocation(shaderProgram, "objectColor");
-    */
-
-    glm::vec3 blockColors[4] = {
-        glm::vec3(1.0f, 0.0f, 0.0f),
-        glm::vec3(0.0f, 1.0f, 0.0f),
-        glm::vec3(0.0f, 0.0f, 1.0f),
-        glm::vec3(1.0f, 1.0f, 0.0f)
-    };  // rgb
-    /*
-    glm::vec3 squareTranslations[4] = {
-        glm::vec3(-150.0f, 0.0f, 0.0f),
-        glm::vec3( -50.0f, 0.0f, 0.0f),
-        glm::vec3(  50.0f, 0.0f, 0.0f),
-        glm::vec3( 150.0f, 0.0f, 0.0f)
-    };  // mm
-    glm::vec3 rectTranslations[4] = {
-        glm::vec3(0.0f, -150.0f, 0.0f),
-        glm::vec3(0.0f,  -50.0f, 0.0f),
-        glm::vec3(0.0f,   50.0f, 0.0f),
-        glm::vec3(0.0f,  150.0f, 0.0f)
-    };  // mm
-    glm::vec3 squareRotations[4] = {
-        glm::vec3(0.0f, 0.0f, 0.0f),
-        glm::vec3(0.0f, 0.0f, 0.0f),
-        glm::vec3(0.0f, 0.0f, 0.0f),
-        glm::vec3(0.0f, 0.0f, 0.0f)
-    };  // degrees
-    glm::vec3 rectRotations[4] = {
-        glm::vec3(0.0f, 0.0f, 90.0f),
-        glm::vec3(0.0f, 0.0f,  0.0f),
-        glm::vec3(0.0f, 0.0f,  0.0f),
-        glm::vec3(0.0f, 0.0f, 90.0f)
-    };  // degrees
-    */
-
-    glm::vec3 squareTranslations[4];
-    glm::vec3 squareRotations[4];
-    glm::vec3 rectTranslations[4];
-    glm::vec3 rectRotations[4];
-    initializeParameters(squareTranslations, squareRotations,
-                           rectTranslations,   rectRotations);
-
     // Generate vectors to hold simulation data
-    std::vector< std::vector<float> > data;
-    for (int i = 0; i < 8 * 6; ++i)
+    vector<string> col_names;
+    col_names.push_back("position (XYZ)");
+    col_names.push_back("velocity (XYZ)");
+    col_names.push_back("acceleration (XYZ)");
+    col_names.push_back("orientation (XYZ)");
+    col_names.push_back("angular velocity (XYZ)");
+    vector< vector<Vector3f> > data;
+    for (int i = 0; i < col_names.size(); ++i)
     {
-        std::vector<float> col;
+        vector<Vector3f> col;
         data.push_back(col);
     }
-    std::vector<std::string> names(data.size(), "X");
 
-    const std::vector<std::string> imagePaths = readImagePaths("../working/gl-render/png-files.txt");
+    // Define block colors
+    Vector3f red(1.0f, 0.0f, 0.0f);
+    Vector3f green(0.0f, 1.0f, 0.0f);
+    Vector3f blue(0.0f, 0.0f, 1.0f);
+    Vector3f yellow(1.0f, 1.0f, 0.0f);
+
+    // Initialize block model(s)
+    Vector3f center(0.0f, 0.0f, 0.0f);
+    float angle = 0.0f;
+    float dt = 1.0 / 100.0;
+    float rate = glm::radians(180.0f);  // pi radians per second
+    float r = 100.0;
+    Vector3f s0 = center + Vector3f(r * cos(angle), r * sin(angle), 0.0f);
+    Vector3f v0(-r * rate * sin(angle), r * rate * cos(angle), 0.0f);
+    Vector3f theta0(0.0f, 0.0f, 0.0f);
+    Vector3f a_g(0.0f, 0.0f, 9810.0f);   // millimeters / second^2
+    BlockModel block(s0, v0, theta0, red, a_g);
+
+    const vector<string> imagePaths = readImagePaths("../working/gl-render/png-files.txt");
     int num_frames = imagePaths.size();
-    //int num_frames = 100;
     int field_width = ceil(log(float(num_frames)) / log(10.0f)) + 1;
 
-    for (int frame = 0; frame < num_frames; frame++)
-    //while (!glfwWindowShouldClose(window))
+    GLint uniModel = glGetUniformLocation(shaderProgram, "model");
+    GLint uniObjectColor = glGetUniformLocation(shaderProgram, "objectColor");
+
+    int frame = 0;
+    while (!glfwWindowShouldClose(window))
+    //for (int frame = 0; frame < num_frames; frame++)
     {
+        /*
         // Read the current frame
         int frame_width, frame_height;
         png_byte* image = readPng(imagePaths[frame].c_str(), frame_width, frame_height);
+        */
 
-        // Take a step in the state space
-        auto t_now = std::chrono::high_resolution_clock::now();
-        float time = std::chrono::duration_cast< std::chrono::duration<float> >(t_now - t_start).count();
-        updateParameters(squareTranslations, squareRotations,
-                           rectTranslations,   rectRotations, time);
-
-        // Record current state space position
-        storeParameters(squareTranslations, squareRotations,
-                          rectTranslations,   rectRotations, data);
-
-        // Draw the scene generated by this point in state space
-        std::string frame_str = std::to_string(frame);
-        std::string fn = "../working/gl-render/" + frame_str.insert(0, size_t(field_width - frame_str.size()), '0') + ".png";
-        genObservation(squareTranslations, squareRotations, 
-                         rectTranslations,   rectRotations,
-                       blockColors, shaderProgram, fn.c_str());
-
-        /*
         // Enable depth rendering, clear the screen to black and clear depth buffer
         glEnable(GL_DEPTH_TEST);
-        glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        // Calculate the transformation
-        auto t_now = std::chrono::high_resolution_clock::now();
-        float time = std::chrono::duration_cast< std::chrono::duration<float> >(t_now - t_start).count();
-        float theta = time * glm::radians(180.0f);
-        float r = 10;
+        // State at current time
+        Vector3f s_t = block.getPosition();
+        Vector3f v_t = block.getVelocity();
+        Vector3f theta_t = block.getOrientation();
 
-        // Draw square blocks
-        for (int i = 0; i < 4; i++)
-        {
-            // Store kinematic parameters
-            data[i * 12 + 0].push_back(squareTranslations[i].x);
-            data[i * 12 + 1].push_back(squareTranslations[i].y);
-            data[i * 12 + 2].push_back(squareTranslations[i].z);
-            data[i * 12 + 3].push_back(squareRotations[i].x);
-            data[i * 12 + 4].push_back(squareRotations[i].y);
-            data[i * 12 + 5].push_back(squareRotations[i].z);
+        // Input at current time
+        //auto t_now = chrono::high_resolution_clock::now();
+        //float time = chrono::duration_cast< chrono::duration<float> >(t_now - t_start).count();
+        Vector3f a_t(-r * rate * rate * cos(rate * frame * dt),
+                     -r * rate * rate * sin(rate * frame * dt),
+                     0.0f);
+        Vector3f omega_t(0.0f, 0.0f, 0.0f);
+        
+        // Store data
+        data[0].push_back(s_t);
+        data[1].push_back(v_t);
+        data[2].push_back(a_t);
+        data[3].push_back(theta_t);
+        data[4].push_back(omega_t);
 
-            glm::mat4 model;
-            model = glm::translate(model, squareTranslations[i]);
-            model = glm::rotate(model, glm::radians(squareRotations[i].x), glm::vec3(1.0f, 0.0f, 0.0f));
-            model = glm::rotate(model, glm::radians(squareRotations[i].y), glm::vec3(0.0f, 1.0f, 0.0f));
-            model = glm::rotate(model, glm::radians(squareRotations[i].z), glm::vec3(0.0f, 0.0f, 1.0f));
-            glUniformMatrix4fv(uniModel, 1, GL_FALSE, glm::value_ptr(model));
+        // Render scene
+        block.draw(uniModel, uniObjectColor, 0);
 
-            glm::vec3 color = blockColors[i];
-            glUniform3f(uniObjectColor, color.r, color.g, color.b);
+        // Save the image
+        string frame_str = to_string(frame);
+        string fn = "../working/gl-render/" + frame_str.insert(0, field_width - frame_str.size(), '0') + ".png";
+        saveImage(fn.c_str());
 
-            //glBeginTransformFeedback(GL_LINES);
-            glDrawArrays(GL_TRIANGLES, 0, 6 * 6);
-            //glEndTransformFeedback();
-
-            // Update kinematic parameters
-            r = (-2 * (i / 2) + 1) * length(squareTranslations[i]);
-            squareTranslations[i] = glm::vec3(r * cos(theta), r * sin(theta), 0.0);
-        }
-
-        // Draw rectangular blocks
-        for (int i = 0; i < 4; i++)
-        {
-            // Store kinematic parameters
-            data[i * 12 + 6].push_back(rectTranslations[i].x);
-            data[i * 12 + 7].push_back(rectTranslations[i].y);
-            data[i * 12 + 8].push_back(rectTranslations[i].z);
-            data[i * 12 + 9].push_back(rectRotations[i].x);
-            data[i * 12 + 10].push_back(rectRotations[i].y);
-            data[i * 12 + 11].push_back(rectRotations[i].z);
-
-            glm::mat4 model;
-            model = glm::translate(model, rectTranslations[i]);
-            model = glm::rotate(model, glm::radians(rectRotations[i].x), glm::vec3(1.0f, 0.0f, 0.0f));
-            model = glm::rotate(model, glm::radians(rectRotations[i].y), glm::vec3(0.0f, 1.0f, 0.0f));
-            model = glm::rotate(model, glm::radians(rectRotations[i].z), glm::vec3(0.0f, 0.0f, 1.0f));
-            glUniformMatrix4fv(uniModel, 1, GL_FALSE, glm::value_ptr(model));
-
-            glm::vec3 color = blockColors[i];
-            glUniform3f(uniObjectColor, color.r, color.g, color.b);
-
-            glDrawArrays(GL_TRIANGLES, 6 * 6, 6 * 6);
-
-            // Update kinematic parameters
-            r = (-2 * (i / 2) + 1) * length(rectTranslations[i]);
-            rectTranslations[i] = glm::vec3(r * cos(theta + 90), r * sin(theta + 90), 0.0);
-        }
-
-        // Save image
-        GLint viewport[4];
-        glGetIntegerv(GL_VIEWPORT, viewport);
-        int w = viewport[2];
-        int h = viewport[3];
-        glFinish();
-        unsigned int bytes_per_row = 4 * w;
-        png_byte* out_image = new png_byte[h * bytes_per_row];
-        glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, out_image);
-        png_bytep* row_pointers = new png_bytep[h];
-        for (int row = 0; row < h; row++)
-            row_pointers[h - 1 - row] = out_image + row * bytes_per_row;
-        std::string frame_str = std::to_string(frame);
-        std::string fn = "../working/gl-render/" + frame_str.insert(0, size_t(field_width - frame_str.size()), '0') + ".png";
-        writePng(fn.c_str(), out_image, row_pointers, w, h);
-        delete[] row_pointers;
-        delete[] out_image;
-        */
+        // Take a step in state space
+        block.updateState(a_t + a_g, omega_t, dt);
 
         // Swap buffers
         glfwSwapBuffers(window);
         glfwPollEvents();
 
-        /*
-        if (!written)
-        {
-            // Fetch and print results
-            printf("Transform feedback:\n");
-            glGetBufferSubData(GL_TRANSFORM_FEEDBACK_BUFFER, 0, sizeof(feedback), feedback);
-            for (int j = 0; j < 16; j++) {
-                for (int i = 0; i < 4; i++) {
-                    printf("%f  ", feedback[4 * j + i]);
-                }
-                printf("\n");
-            }
-
-            written = true;
-        }
-        */
+        ++frame;
     }
 
-    writeCsv("../working/gl-data/ground-truth.csv", names, data);
+    writeCsv("../working/gl-data/debug_output.csv", col_names, data);
 
     glDeleteProgram(shaderProgram);
     glDeleteShader(fragmentShader);
     glDeleteShader(vertexShader);
 
     glDeleteBuffers(1, &vbo);
-    //glDeleteBuffers(1, &tbo);
-
     glDeleteVertexArrays(1, &vao);
 
     glfwTerminate();
