@@ -78,23 +78,38 @@ class BlockModel
          * Observation model.
          * Draw block to current OpenGL context.
          *
+         * \param x_i Location of the i-th sigma point at time t. (If no
+         *   parameter is provided, the system draws its current state.)
+         */
+        void draw() const;
+        void draw(const VectorXf x_i) const;
+
+        /**
+         * Initialize locations for some GLSL uniform variables.
+         *
          * \param model_loc Location of the OpenGL uniform matrix representing
          *   the model transformation.
          * \param color_loc Location of the OpenGL uniform vector representing
          *   the block's color.
          * \param offset Index of the first vertex in the block's 3D model.
          */
-        void draw(const GLint model_loc, const GLint color_loc, const int offset)
-            const;
+        void setGlVars(const GLint model_loc, const GLint color_loc,
+            const int offset);
 
         /**
-         * \return out_image Current OpenGL context represented as a w-by-h-by-3
-         *    array, where w is the image width and h is the image height, in
-         *    pixels.
+         * Save the current OpenGL scene.
+         *
+         * \param image_fn Location where the scene should be saved (as PNG).
+         *   This argument is optional, and if omitted, no PNG is created.
+         * \return out_image Current OpenGL context represented as a vector
+         *    with w*h*3 entries, where w is the image width and h is the image
+         *    height (in pixels).
          */
-        Map<MatrixXf> sceneSnapshot() const;
+        Map<VectorXi> sceneSnapshot() const;
+        Map<VectorXi> sceneSnapshot(const char* image_fn) const;
 
-        VectorXf inferState(VectorXf x0, MatrixXf k0, VectorXf u, float dt);
+        VectorXf inferState(VectorXf u, VectorXf y, float dt);
+
 
     private:
 
@@ -109,6 +124,16 @@ class BlockModel
         Vector3f color;
 
         Vector3f a_gravity;
+
+        // Output image dimensions
+        int image_width;
+        int image_height;
+        int bytes_per_pixel = 3;    // RGB
+
+        // OpenGL variable locations
+        GLint model_loc;
+        GLint color_loc;
+        int offset;
 
         // UKF helper functions
         VectorXf weightedMean(const VectorXf, const MatrixXf) const;
