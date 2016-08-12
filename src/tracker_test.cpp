@@ -120,8 +120,8 @@ void writePng(const char* filename, png_byte* image, png_bytep* row_pointers, in
 
     png_init_io(png, fp);
 
-    // Output is 8-bit depth, RGBA format.
-    png_set_IHDR(png, info, width, height, 8, PNG_COLOR_TYPE_RGBA,
+    // Output is 8-bit depth, RGB format.
+    png_set_IHDR(png, info, width, height, 8, PNG_COLOR_TYPE_RGB,
             PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT,
             PNG_FILTER_TYPE_DEFAULT);
     png_write_info(png, info);
@@ -172,7 +172,7 @@ vector< vector<float> > readCsv(const char* filename)
     return cols;
 }
 
-void writeCsv(const char* filename, const vector<string>& colNames, const vector< vector<Vector3f> >& data)
+void writeCsv(const char* filename, const vector<string>& colNames, const vector< vector<VectorXf> >& data)
 {
     ofstream ofs(filename, ofstream::out);
     vector<string>::const_iterator it;
@@ -181,18 +181,15 @@ void writeCsv(const char* filename, const vector<string>& colNames, const vector
         ofs << *it << ",";
     }
     ofs << endl;
-   
+
+    IOFormat CommaInitFmt(StreamPrecision, DontAlignCols, ", ", ", ", "", "", "", "\n");
     // FIXME: assert all columns have the same number of entries
-    for (int i = 0; i < data[0].size(); ++i)
+    for (int i = 0; i < data.size(); ++i)
     {
-        vector< vector<Vector3f> >::const_iterator it;
-        for (it = data.begin(); it != data.end(); ++it)
+        for (int j = 0; j < data[i].size(); ++j)
         {
-            ofs << (*it)[i][0] << ",";
-            ofs << (*it)[i][1] << ",";
-            ofs << (*it)[i][2] << "\t";//",";
+            ofs << data[i][j].transpose() << endl;
         }
-        ofs << endl;
     }
 
     ofs.close();
@@ -333,9 +330,10 @@ void saveImage(const char* image_fn)
     int w = viewport[2];
     int h = viewport[3];
     glFinish();
-    unsigned int bytes_per_row = 4 * w;
+    unsigned int bytes_per_row = 3 * w;
     png_byte* out_image = new png_byte[h * bytes_per_row];
-    glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, out_image);
+    glReadPixels(0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, out_image);
+
     png_bytep* row_pointers = new png_bytep[h];
     for (int row = 0; row < h; row++)
         row_pointers[h - 1 - row] = out_image + row * bytes_per_row;
@@ -540,13 +538,13 @@ int main()
     vector<string> col_names;
     col_names.push_back("position (XYZ)");
     col_names.push_back("velocity (XYZ)");
-    col_names.push_back("acceleration (XYZ)");
     col_names.push_back("orientation (XYZ)");
+    col_names.push_back("acceleration (XYZ)");
     col_names.push_back("angular velocity (XYZ)");
-    vector< vector<Vector3f> > data;
-    for (int i = 0; i < col_names.size(); ++i)
+    vector< vector<VectorXf> > data;
+    for (int i = 0; i < 2; ++i)
     {
-        vector<Vector3f> col;
+        vector<VectorXf> col;
         data.push_back(col);
     }
 
@@ -566,7 +564,12 @@ int main()
     Vector3f v0(-r * rate * sin(angle), r * rate * cos(angle), 0.0f);
     Vector3f theta0(0.0f, 0.0f, 0.0f);
     Vector3f a_g(0.0f, 0.0f, 9810.0f);   // millimeters / second^2
-    BlockModel block(s0, v0, theta0, red, a_g);
+
+    // We are extremely confident about our initial condition
+    VectorXf x0(s0.size() + v0.size() + theta0.size());
+    x0 << s0, v0, theta0;
+    MatrixXf K0 = MatrixXf::Zero(x0.size(), x0.size());
+    BlockModel block(x0, K0, red, a_g);
 
     const vector<string> imagePaths = readImagePaths("../working/gl-render/png-files.txt");
     int num_frames = imagePaths.size();
@@ -591,9 +594,7 @@ int main()
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         // State at current time
-        Vector3f s_t = block.getPosition();
-        Vector3f v_t = block.getVelocity();
-        Vector3f theta_t = block.getOrientation();
+        VectorXf x_t = block.getState();
 
         // Input at current time
         //auto t_now = chrono::high_resolution_clock::now();
@@ -602,13 +603,12 @@ int main()
                      -r * rate * rate * sin(rate * frame * dt),
                      0.0f);
         Vector3f omega_t(0.0f, 0.0f, 0.0f);
+        VectorXf u_t(a_t.size() + omega_t.size());
+        u_t << a_t + a_g, omega_t;
         
         // Store data
-        data[0].push_back(s_t);
-        data[1].push_back(v_t);
-        data[2].push_back(a_t);
-        data[3].push_back(theta_t);
-        data[4].push_back(omega_t);
+        data[0].push_back(x_t);
+        data[1].push_back(u_t);
 
         // Render scene
         block.draw(uniModel, uniObjectColor, 0);
@@ -619,7 +619,7 @@ int main()
         saveImage(fn.c_str());
 
         // Take a step in state space
-        block.updateState(a_t + a_g, omega_t, dt);
+        block.updateState(u_t, dt);
 
         // Swap buffers
         glfwSwapBuffers(window);
