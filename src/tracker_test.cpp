@@ -329,6 +329,9 @@ int main()
     GLint uniProj = glGetUniformLocation(shaderProgram, "proj");
     glUniformMatrix4fv(uniProj, 1, GL_FALSE, glm::value_ptr(proj));
 
+    GLint uniModel = glGetUniformLocation(shaderProgram, "model");
+    GLint uniObjectColor = glGetUniformLocation(shaderProgram, "objectColor");
+
     // Generate vectors to hold simulation data
     vector<string> col_names;
     col_names.push_back("position (XYZ)");
@@ -343,28 +346,36 @@ int main()
         data.push_back(col);
     }
 
-    // Define block colors
-    Vector3f red(1.0f, 0.0f, 0.0f);
-    Vector3f green(0.0f, 1.0f, 0.0f);
-    Vector3f blue(0.0f, 0.0f, 1.0f);
-    Vector3f yellow(1.0f, 1.0f, 0.0f);
+    // Define block colors and gravity vector
+    const Vector3f red(1.0f, 0.0f, 0.0f);
+    const Vector3f green(0.0f, 1.0f, 0.0f);
+    const Vector3f blue(0.0f, 0.0f, 1.0f);
+    const Vector3f yellow(1.0f, 1.0f, 0.0f);
+    const Vector3f a_g(0.0f, 0.0f, 9810.0f);   // millimeters / second^2
+    const float dt = 1.0 / 100.0;   // seconds
+    const float r = 100.0;          // millimeters
+    const float rate = glm::radians(180.0f);  // pi radians per second
 
-    // Initialize block model(s)
-    Vector3f center(0.0f, 0.0f, 0.0f);
-    float angle = 0.0f;
-    float dt = 1.0 / 100.0;
-    float rate = glm::radians(180.0f);  // pi radians per second
-    float r = 100.0;
-    Vector3f s0 = center + Vector3f(r * cos(angle), r * sin(angle), 0.0f);
-    Vector3f v0(-r * rate * sin(angle), r * rate * cos(angle), 0.0f);
-    Vector3f theta0(0.0f, 0.0f, 0.0f);
-    Vector3f a_g(0.0f, 0.0f, 9810.0f);   // millimeters / second^2
+    // Initial conditions for the unscented kalman filter
+    int num_blocks = 1;
+    vector<BlockModel> blocks;
+    for (int i = 0; i < num_blocks; ++i)
+    {
+        Vector3f center(0.0f, 0.0f, 0.0f);
+        float angle = 0.0f;
+        Vector3f s0 = center + Vector3f(r * cos(angle), r * sin(angle), 0.0f);
+        Vector3f v0(-r * rate * sin(angle), r * rate * cos(angle), 0.0f);
+        Vector3f theta0(0.0f, 0.0f, 0.0f);
 
-    // We are extremely confident about our initial condition
-    VectorXf x0(s0.size() + v0.size() + theta0.size());
-    x0 << s0, v0, theta0;
-    MatrixXf K0 = MatrixXf::Zero(x0.size(), x0.size());
-    BlockModel block(x0, K0, red, a_g);
+        VectorXf x0(s0.size() + v0.size() + theta0.size());
+        x0 << s0, v0, theta0;
+        //MatrixXf K0 = MatrixXf::Zero(x0.size(), x0.size());
+
+        // Initialize block model
+        BlockModel block(x0, red, a_g);
+        block.setGlVars(uniModel, uniObjectColor, 0);
+        blocks.push_back(block);
+    }
 
     /*
     const vector<string> imagePaths = readImagePaths("../working/gl-render/png-files.txt");
@@ -373,9 +384,6 @@ int main()
     */
     int field_width = 6;
 
-    GLint uniModel = glGetUniformLocation(shaderProgram, "model");
-    GLint uniObjectColor = glGetUniformLocation(shaderProgram, "objectColor");
-    block.setGlVars(uniModel, uniObjectColor, 0);
 
     int frame = 0;
     while (!glfwWindowShouldClose(window))
@@ -393,7 +401,7 @@ int main()
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         // State at current time
-        VectorXf x_t = block.getState();
+        VectorXf x_t = blocks[0].getState();
 
         // Input at current time
         //auto t_now = chrono::high_resolution_clock::now();
@@ -410,7 +418,7 @@ int main()
         data[1].push_back(u_t);
 
         // Render scene
-        block.draw();
+        blocks[0].draw();
 
         // Save the image
         string frame_str = to_string(frame);
@@ -418,7 +426,7 @@ int main()
         saveImage(fn.c_str());
 
         // Take a step in state space
-        block.updateState(u_t, dt);
+        blocks[0].updateState(u_t, dt);
 
         // Swap buffers
         glfwSwapBuffers(window);
