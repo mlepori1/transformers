@@ -8,12 +8,15 @@
 
 #include "blockmodel.h"
 #include <vector>
+#include <GLFW/glfw3.h>
+#include <GL/glew.h>
 
 using namespace Eigen;
 using namespace std;
 
+
 /**
- * Use the unscented transform to estimate the state of a linear dynamical system.
+ * Use the unscented transform to estimate the state of a dynamical system.
  *
  * This implementation is optimized for situations where certain subspaces in
  * state space have independent dynamics, and the dimension of the observation
@@ -27,18 +30,25 @@ class UnscentedKalmanFilter
                 const vector<BlockModel> blocks);
 
         /**
-         * Save the current OpenGL scene.
+         * Process model.
+         * Take a step in state space by driving the dynamical system with
+         * input u.
          *
-         * \param image_fn Location where the scene should be saved (as PNG).
-         *   This argument is optional, and if omitted, no PNG is created.
-         * \return out_image Current OpenGL context represented as a vector
-         *    with w*h*3 entries, where w is the image width and h is the image
-         *    height (in pixels).
+         * \param u Input vector at time t
+         * \param dt Amount of time that has passed since previous update
          */
-        Map<VectorXi> sceneSnapshot() const;
-        Map<VectorXi> sceneSnapshot(const char* image_fn) const;
+        void updateState(const VectorXf u, const float dt);
+        VectorXf updateState(const VectorXf x, const VectorXf u, const float dt);
 
-        VectorXf inferState(VectorXf u, VectorXf y, float dt);
+        Map<VectorXi> generateObservation(GLFWwindow* window);
+        void generateObservation(GLFWwindow* window, const char* image_fn);
+
+        void inferState(const VectorXf u, const VectorXf y,  const float dt,
+                GLFWwindow* window);
+
+        VectorXf getState() const;
+        VectorXf getStateEstimate() { return mu_x; } const;
+        MatrixXf getErrorCovariance() { return K_x; } const;
 
 
     private:
@@ -59,18 +69,20 @@ class UnscentedKalmanFilter
 
 
         // (UKF helper functions below)
+        /**
+         * Save the current OpenGL scene.
+         *
+         * \param image_fn Location where the scene should be saved (as PNG).
+         *   This argument is optional, and if omitted, no PNG is created.
+         * \return out_image Current OpenGL context represented as a vector
+         *    with w*h*3 entries, where w is the image width and h is the image
+         *    height (in pixels).
+         */
+        Map<VectorXi> sceneSnapshot() const;
+        void sceneSnapshot(const char* image_fn) const;
 
         void initializeSigmaPoints(const VectorXf mean, const MatrixXf covariance,
                 const float w0);
-        /**
-         * Process model.
-         * Take a step in state space by driving the dynamical system with
-         * input u.
-         *
-         * \param u Input vector at time t
-         * \param dt Amount of time that has passed since previous update
-         */
-        void updateState(const VectorXf u, const float dt) const;
 };
 
 

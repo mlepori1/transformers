@@ -14,8 +14,10 @@
 
 #include "Eigen/Dense"
 
+
 using namespace std;
 using namespace Eigen;
+
 
 png_byte* readPng(const char* filename, int& width, int& height);
 
@@ -24,14 +26,20 @@ void writePng(const char* filename, png_byte* image, png_bytep* row_pointers,
         int width, int height);
 
 
-vector< vector<float> > readCsv(const char* filename);
+Map<VectorXf> toVector(png_byte* image_bytes, int num_bytes);
 
 
-void writeCsv(const char* filename, const vector<string>& colNames,
-        const vector< vector<VectorXf> >& data);
+vector<VectorXf> readCsv(const char* filename);
+
+
+void writeCsv(const char* filename, const vector<string>& col_names,
+        const vector<VectorXf>& data);
 
 
 const vector<string> readImagePaths(const char* filename);
+
+
+void writeImagePaths(const char* filename, vector<string> image_paths);
 
 
 void saveImage(const char* image_fn);

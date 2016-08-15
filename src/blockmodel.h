@@ -93,6 +93,8 @@ class BlockModel
          */
         void draw() const;
 
+        void printState();
+
 
     private:
 

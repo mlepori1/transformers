@@ -1,7 +1,6 @@
 #include "ukf.h"
 #include "libIO.h"
 
-
 using namespace Eigen;
 using namespace std;
 
@@ -14,6 +13,13 @@ UnscentedKalmanFilter::UnscentedKalmanFilter(const VectorXf x0, const MatrixXf K
     K_x = K0;
 
     this->blocks = blocks;
+
+    cout << "Number of objects: " << this->blocks.size() << endl;
+    vector<BlockModel>::iterator it;
+    for (it = this->blocks.begin(); it != this->blocks.end(); ++it)
+    {
+        it->printState();
+    }
 
     // Set sigma points
     // Apparently w0 = 1/3 is good if you believe the initial distribution is
@@ -52,7 +58,100 @@ void UnscentedKalmanFilter::initializeSigmaPoints(const VectorXf x0,
     w(0) = w0;
 }
 
-VectorXf UnscentedKalmanFilter::inferState(VectorXf u, VectorXf y, float dt)
+VectorXf UnscentedKalmanFilter::getState() const
+{
+    VectorXf x(mu_x.size());
+    vector<BlockModel>::const_iterator it;
+    for (it = blocks.begin(); it != blocks.end(); ++it)
+    {
+        x << it->getState();
+    }
+
+    return x;
+}
+
+VectorXf UnscentedKalmanFilter::updateState(const VectorXf x, const VectorXf u, const float dt)
+{
+    // Update and render each object in the scene
+    VectorXf x_i(x.size());
+    int cur_row_x = 0;
+    int cur_row_u = 0;
+    vector<BlockModel>::iterator it;
+    for (it = blocks.begin(); it != blocks.end(); ++it)
+    {
+        int state_dim = it->statesize;
+        int input_dim = 6;
+        x_i << it->updateState(x.segment(cur_row_x, state_dim),
+                               u.segment(cur_row_u, input_dim),
+                               dt);
+        cur_row_x += state_dim;
+        cur_row_u += input_dim;
+    }
+
+    return x_i;
+}
+
+void UnscentedKalmanFilter::updateState(const VectorXf u, const float dt)
+{
+    // Update and render each object in the scene
+    int cur_row_u = 0;
+    vector<BlockModel>::iterator it;
+    for (it = blocks.begin(); it != blocks.end(); ++it)
+    {
+        int input_dim = 6;
+        it->updateState(u.segment(cur_row_u, input_dim), dt);
+        cur_row_u += input_dim;
+    }
+}
+
+Map<VectorXi> UnscentedKalmanFilter::generateObservation(GLFWwindow* window)
+{
+    // Enable depth rendering, clear the screen to black and clear depth buffer
+    glEnable(GL_DEPTH_TEST);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    // Update and render each object in the scene
+    vector<BlockModel>::iterator it;
+    int cur_row = 0;
+    for (it = blocks.begin(); it != blocks.end(); ++it)
+    {
+        it->draw();
+    }
+
+    Map<VectorXi> image = sceneSnapshot();
+
+    // Swap buffers
+    glfwSwapBuffers(window);
+    glfwPollEvents();
+
+    return image;
+}
+
+void UnscentedKalmanFilter::generateObservation(GLFWwindow* window, const char* image_fn)
+{
+    // Enable depth rendering, clear the screen to black and clear depth buffer
+    glEnable(GL_DEPTH_TEST);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    // Update and render each object in the scene
+    vector<BlockModel>::iterator it;
+    int cur_row = 0;
+    for (it = blocks.begin(); it != blocks.end(); ++it)
+    {
+        it->draw();
+    }
+
+    sceneSnapshot(image_fn);
+
+    // Swap buffers
+    glfwSwapBuffers(window);
+    glfwPollEvents();
+}
+
+void UnscentedKalmanFilter::inferState(const VectorXf u, const VectorXf y, const float dt,
+        GLFWwindow* window)
 {
     int bytes_per_pixel = 3;
     int num_bytes = image_width * image_height * bytes_per_pixel;
@@ -61,44 +160,42 @@ VectorXf UnscentedKalmanFilter::inferState(VectorXf u, VectorXf y, float dt)
     MatrixXf Y = MatrixXf::Zero(num_bytes, X.cols());
     for (int i = 0; i < X.cols(); ++i)
     {
-        // Enable depth rendering, clear the screen to black and clear depth buffer
-        glEnable(GL_DEPTH_TEST);
-        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-        // Update and render each object in the scene
-        VectorXf x_i(X.rows());
-        vector<BlockModel>::iterator it;
-        int cur_row = 0;
-        for (it = blocks.begin(); it != blocks.end(); ++it)
-        {
-            int n_rows = it->statesize;
-            x_i << it->updateState(X.col(i).segment(n_rows, cur_row), u, dt);
-            it->draw();
-
-            cur_row += it->statesize;
-        }
-
-        // Update sigma points
-        X.col(i) = x_i;
-        Y.col(i) = sceneSnapshot().cast<float>();
+        X.col(i) = updateState(X.col(i), u, dt);
+        Y.col(i) = generateObservation(window).cast<float>();
     }
 
     // Calculate predicted mean and covariance
-    VectorXf mu_x = weightedMean(w, X);
-    MatrixXf K_x = weightedCovariance(w, X, mu_x);
+    VectorXf mean_x = weightedMean(w, X);
+    MatrixXf cov_x = weightedCovariance(w, X, mean_x);
 
     // Calculate predicted observation and innovation covariance
-    VectorXf mu_y = weightedMean(w, Y);
-    // Don't calculate the actual covariance of Y here
+    VectorXf mean_y = weightedMean(w, Y);
+    // This gives us everything we need to do computations with Ky
+    // But it avoids storing Ky
+    ArrayXf w_sqrt = w.array().sqrt();
+    for (int i = 0; i < Y.cols(); ++i)
+    {
+        // Center and weight the observation samples
+        Y.col(i) = w_sqrt(i) * (Y.col(i) - mean_y);
+    }
+    JacobiSVD<MatrixXf> svd(Y, ComputeThinU);
 
     // Calculate cross-covariance
-    MatrixXf K_xy = weightedCrossCovariance(w, X, Y, mu_x, mu_y);
+    MatrixXf cov_xy = weightedCrossCovariance(w, X, Y, mean_x, mean_y);
 
     // Perform update using standard Kalman filter equations
+    MatrixXf cov_y_inv_sqrt = svd.matrixU(); // We're not done with this yet
+    ArrayXf S_inv = svd.singularValues().array().inverse();
+    for (int i = 0; i < cov_y_inv_sqrt.cols(); ++i)
+    {
+        cov_y_inv_sqrt.col(i) = S_inv(i) * cov_y_inv_sqrt.col(i);
+    }
 
-    // FIXME
-    return VectorXf::Zero(1);
+    MatrixXf cov_x_sqrt = cov_xy * cov_y_inv_sqrt;
+    
+    // Update estimated moments
+    mu_x = mu_x + cov_x_sqrt * cov_y_inv_sqrt.transpose() * (y - mean_y);
+    K_x = K_x - cov_x_sqrt * cov_x_sqrt.transpose();
 }
 
 Map<VectorXi> UnscentedKalmanFilter::sceneSnapshot() const
@@ -121,9 +218,8 @@ Map<VectorXi> UnscentedKalmanFilter::sceneSnapshot() const
     return image;
 }
 
-Map<VectorXi> UnscentedKalmanFilter::sceneSnapshot(const char* image_fn) const
+void UnscentedKalmanFilter::sceneSnapshot(const char* image_fn) const
 {
-    // FIXME: This is just horribly stupid
 
     // Wait for OpenGL to finish rendering
     glFinish();
@@ -135,11 +231,6 @@ Map<VectorXi> UnscentedKalmanFilter::sceneSnapshot(const char* image_fn) const
     glReadPixels(0, 0, image_width, image_height, GL_RGB, GL_UNSIGNED_BYTE,
             image_bytes);
 
-    // Convert to vector
-    int* image_as_ints = new int[num_bytes];
-    memcpy(image_as_ints, image_bytes, num_bytes);
-    Map<VectorXi> image(image_as_ints, num_bytes);
-
     // Save image as PNG
     int bytes_per_row = image_width * bytes_per_pixel;
     unsigned char** row_pointers = new unsigned char*[image_height];
@@ -149,9 +240,6 @@ Map<VectorXi> UnscentedKalmanFilter::sceneSnapshot(const char* image_fn) const
 
     delete[] row_pointers;
     delete[] image_bytes;
-    delete[] image_as_ints;
-
-    return image;
 }
 
 

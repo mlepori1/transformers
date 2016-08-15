@@ -2,8 +2,8 @@
  *
  */
 
-
 #include "libIO.h"
+#include "assert.h"
 
 using namespace std;
 using namespace Eigen;
@@ -34,7 +34,7 @@ png_byte* readPng(const char* filename, int& width, int& height)
     png_byte color_type = png_get_color_type(png, info);
     png_byte bit_depth  = png_get_bit_depth(png, info);
 
-    // Read any color_type into 8-bit depth, RGBA format
+    // Read any color_type into 8-bit depth, RGB format
     // See http://www.libpng.org/pub/png/libpng-manual.txt
 
     if (bit_depth == 16)
@@ -50,11 +50,8 @@ png_byte* readPng(const char* filename, int& width, int& height)
     if (png_get_valid(png, info, PNG_INFO_tRNS))
         png_set_tRNS_to_alpha(png);
 
-    // These color_types don't have an alpha channel, so fill it with 0xff
-    if (color_type == PNG_COLOR_TYPE_RGB ||
-        color_type == PNG_COLOR_TYPE_GRAY ||
-        color_type == PNG_COLOR_TYPE_PALETTE)
-        png_set_filler(png, 0xFF, PNG_FILLER_AFTER);
+    if (color_type & PNG_COLOR_MASK_ALPHA)
+        png_set_strip_alpha(png);
 
     if (color_type == PNG_COLOR_TYPE_GRAY ||
         color_type == PNG_COLOR_TYPE_GRAY_ALPHA)
@@ -71,11 +68,25 @@ png_byte* readPng(const char* filename, int& width, int& height)
     png_read_image(png, row_pointers);
     delete[] row_pointers;
 
+    //cout << bytes_per_row << endl;
+
     fclose(fp);
     png_destroy_read_struct(&png, &info, NULL);
     png = NULL;
     info = NULL;
 
+    return image;
+}
+
+Map<VectorXf> toVector(png_byte* image_bytes, int num_bytes)
+{
+    // Convert to vector
+    float* image_floats = new float[num_bytes];
+    memcpy(image_floats, image_bytes, num_bytes);
+    Map<VectorXf> image(image_floats, num_bytes);
+
+    delete[] image_bytes;
+    delete[] image_floats;
     return image;
 }
 
@@ -120,59 +131,64 @@ void writePng(const char* filename, png_byte* image, png_bytep* row_pointers,
 }
 
 
-vector< vector<float> > readCsv(const char* filename)
+vector<VectorXf> readCsv(const char* filename)
 {
     ifstream ifs(filename, ifstream::in);
     string line;
     getline(ifs, line);
 
-    // Initialize one column for each column name in the CSV file
+    // Count the number of columns in the CSV file
     stringstream lineStream(line);
     string entry;
-    vector< vector<float> > cols;
+    int num_cols = 0;
     while (getline(lineStream, entry, ','))
     {
-        vector<float> col;
-        cols.push_back(col);
+        ++num_cols;
     }
 
     // Read the CSV data as floats
+    vector<VectorXf> data;
     while (getline(ifs, line))
     {
         stringstream lineStream(line);
         string entry;
-        int i = 0;
+        int cur_col = 0;
+        VectorXf row(num_cols);
         while (getline(lineStream, entry, ','))
         {
-            cols[i].push_back(stof(entry));
-            i++;
+            row(cur_col) = stof(entry);
+            ++cur_col;
         }
+
+        // If we haven't read num_cols by now, something's wrong
+        assert(cur_col == num_cols);
+
+        data.push_back(row);
     }
+
     ifs.close();
 
-    return cols;
+    return data;
 }
 
 
-void writeCsv(const char* filename, const vector<string>& colNames,
-        const vector< vector<VectorXf> >& data)
+void writeCsv(const char* filename, const vector<string>& col_names,
+        const vector<VectorXf>& data)
 {
     ofstream ofs(filename, ofstream::out);
-    vector<string>::const_iterator it;
-    for (it = colNames.begin(); it != colNames.end(); ++it)
+    vector<string>::const_iterator str_it;
+    for (str_it = col_names.begin(); str_it != col_names.end(); ++str_it)
     {
-        ofs << *it << ",";
+        ofs << *str_it << ",";
     }
     ofs << endl;
 
-    IOFormat CommaInitFmt(StreamPrecision, DontAlignCols, ", ", ", ", "", "", "", "\n");
-    // FIXME: assert all columns have the same number of entries
-    for (int i = 0; i < data.size(); ++i)
+    // FIXME: assert all vectors have the same number of entries
+    const static IOFormat csv_format(StreamPrecision, DontAlignCols, ",", "\n");
+    vector<VectorXf>::const_iterator vec_it;
+    for (vec_it = data.begin(); vec_it != data.end(); ++vec_it)
     {
-        for (int j = 0; j < data[i].size(); ++j)
-        {
-            ofs << data[i][j].transpose() << endl;
-        }
+        ofs << vec_it->transpose().format(csv_format) << endl;
     }
 
     ofs.close();
@@ -183,17 +199,30 @@ const vector<string> readImagePaths(const char* filename)
 {
     ifstream ifs(filename, ifstream::in);
     string line;
-    getline(ifs, line);
 
-    vector<string> imagePaths;
-    // Read the CSV data as floats
+    vector<string> image_paths;
     while (getline(ifs, line))
     {
-        imagePaths.push_back(line);
+        image_paths.push_back(line);
     }
+
     ifs.close();
 
-    return imagePaths;
+    return image_paths;
+}
+
+
+void writeImagePaths(const char* filename, vector<string> image_paths)
+{
+    ofstream ofs(filename, ofstream::out);
+
+    vector<string>::const_iterator it;
+    for (it = image_paths.begin(); it != image_paths.end(); ++it)
+    {
+        ofs << *it << endl;
+    }
+
+    ofs.close();
 }
 
 
