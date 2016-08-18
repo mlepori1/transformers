@@ -24,7 +24,7 @@ BlockModel::BlockModel(const VectorXf x, const Vector3f c, const Vector3f a_g)
 
 }
 
-void BlockModel::printState()
+void BlockModel::printState() const
 {
     cout << " s: " << s.transpose()
          << " v: " << v.transpose()
@@ -73,7 +73,6 @@ void BlockModel::updateState(const VectorXf u, const float dt)
 
     Vector3f theta_next = theta + omega * dt;
 
-    // FIXME: maybe using previous theta here accidentally
     // FIXME: Make sure orientation and angular velocity are in radians
     AngleAxis<float> Cx(theta(0), Vector3f(1.0f, 0.0f, 0.0f));
     AngleAxis<float> Cy(theta(1), Vector3f(0.0f, 1.0f, 0.0f));

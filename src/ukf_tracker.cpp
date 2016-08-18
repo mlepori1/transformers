@@ -215,7 +215,6 @@ GLint makeShaderProgram(const GLuint vertexShader, const GLuint fragmentShader)
     return shaderProgram;
 }
 
-
 GLFWwindow* initializeGlfwWindow()
 {
     // Initialize a GLFW window
@@ -255,8 +254,6 @@ vector<BlockModel> setInitialConditions(GLint uniModel, GLint uniObjectColor)
         BlockModel block(x0, red, a_g);
         block.setGlVars(uniModel, uniObjectColor, 0);
         blocks.push_back(block);
-        cout << "i = " << i << endl;
-        cout << "Number of objects: " << blocks.size() << endl;
     }
 
     return blocks;
@@ -286,25 +283,28 @@ void setTransformationMatrices(GLint shaderProgram)
 
 void simulate(GLFWwindow* window, UnscentedKalmanFilter ukf, vector<VectorXf>& state, vector<VectorXf>& input, vector<string>& output_fns)
 {
-    int field_width = 10;   // No sequence should need more than 10 digits (famous last words)
-    int frame = 0;
-    while (!glfwWindowShouldClose(window))
+    int field_width = 1;   // No sequence should need more than 10 digits (famous last words)
+    //int frame = 0;
+    //while (!glfwWindowShouldClose(window))
+    int num_samples = 5;
+    for (int frame_index = 0; frame_index < num_samples; ++frame_index)
     {
         // State at current time
         VectorXf x_t = ukf.getState();
 
         // Input at current time
-        Vector3f a_t(-r * rate * rate * cos(rate * frame * dt),
-                     -r * rate * rate * sin(rate * frame * dt),
+        Vector3f a_t(-r * rate * rate * cos(rate * frame_index * dt),
+                     -r * rate * rate * sin(rate * frame_index * dt),
                      0.0f);
         Vector3f omega_t(0.0f, 0.0f, 0.0f);
         VectorXf u_t(a_t.size() + omega_t.size());
         u_t << a_t + a_g, omega_t;
         
         // Render scene and save resulting image
-        string frame_str = to_string(frame);
+        string frame_str = to_string(frame_index);
         string fn = "../working/gl-render/" + frame_str.insert(0, field_width - frame_str.size(), '0') + ".png";
-        ukf.generateObservation(window, fn.c_str());
+        //ukf.generateObservation(window, GL_DEPTH_COMPONENT, fn.c_str());
+        ukf.generateObservation(window, GL_RGB, fn.c_str());
 
         // Store data
         state.push_back(x_t);
@@ -314,7 +314,7 @@ void simulate(GLFWwindow* window, UnscentedKalmanFilter ukf, vector<VectorXf>& s
         // Take a step in state space
         ukf.updateState(u_t, dt);
 
-        ++frame;
+        //++frame_index;
     }
 }
 
@@ -326,16 +326,16 @@ void estimate(GLFWwindow* window, UnscentedKalmanFilter ukf, vector<VectorXf>& s
     // Every state should have a corresponding input and output
     assert(u.size() == output_fns.size());
     
-    int field_width = 10;   // No sequence should need more than 10 digits (famous last words)
-
     for (int frame_index = 0; frame_index < output_fns.size(); ++frame_index)
+    //for (int frame_index = 0; frame_index < 1; ++frame_index)
     {
+        cout << "Processing frame " << frame_index << endl;
+
         // Load image
         int width, height;
         png_byte* image_bytes = readPng(output_fns[frame_index].c_str(), width, height);
         int num_bytes = width * height * 3;
-        Map<VectorXf> y = toVector(image_bytes, num_bytes);
-        delete[] image_bytes;
+        VectorXf y = toVector(image_bytes, num_bytes);
 
         // Estimate the latent state
         ukf.inferState(u[frame_index], y, dt, window);
@@ -346,8 +346,33 @@ void estimate(GLFWwindow* window, UnscentedKalmanFilter ukf, vector<VectorXf>& s
     }
 }
 
-int main()
+vector<VectorXf> calculateResidual(vector<VectorXf> x_estimated, vector<VectorXf> x_true)
 {
+    assert(x_estimated.size() == x_true.size());
+
+    vector<VectorXf> residual;
+    for (int i = 0; i < x_true.size(); ++i)
+        residual.push_back(x_true[i] - x_estimated[i]);
+
+    return residual;
+}
+
+int main(int argc, char* argv[])
+{
+    // Parse command line arguments
+    assert(argc == 2);
+    string arg_param(argv[1]);
+    bool do_simulate;
+    if (arg_param  == "simulate")
+        do_simulate = true;
+    else if (arg_param == "estimate")
+        do_simulate = false;
+    else
+    {
+        cerr << "Usage: " << argv[0] << " [simulate|estimate]" << endl;
+        return 1;
+    }
+
     // Initialize GLFW window and GLEW
     GLFWwindow* window = initializeGlfwWindow();
     glewExperimental = GL_TRUE;
@@ -388,7 +413,6 @@ int main()
     GLint uniModel = glGetUniformLocation(shaderProgram, "model");
     GLint uniObjectColor = glGetUniformLocation(shaderProgram, "objectColor");
     vector<BlockModel> blocks = setInitialConditions(uniModel, uniObjectColor);
-    cout << "Number of objects: " << blocks.size() << endl;
 
     // Generate vectors to hold simulation data
     vector<VectorXf> state;
@@ -415,31 +439,38 @@ int main()
     // Initialize unscented kalman filter
     int dim = 0;
     for (int i = 0; i < blocks.size(); ++i)
-    {
         dim += blocks[i].statesize;
-    }
     VectorXf x(dim);
     for (int i = 0; i < blocks.size(); ++i)
-    {
         x << blocks[i].getState();
-    }
-    MatrixXf cov = MatrixXf::Zero(dim, dim);
+    MatrixXf cov = MatrixXf::Identity(dim, dim);
     UnscentedKalmanFilter ukf(x, cov, blocks);
 
-    vector<string> output_fns;
-    simulate(window, ukf, state, input, output_fns);
-    string out_fn_state = "../working/gl-data/state-simulation.csv";
-    string out_fn_input = "../working/gl-data/input-simulation.csv";
-    string out_fn_output = "../working/gl-data/output-simulation.csv";
-    writeCsv(out_fn_input.c_str(), input_colnames, input);
-    writeImagePaths(out_fn_output.c_str(), output_fns);
+    cout << "Status: ";
+    if (do_simulate)
+    {
+        cout << "simulate" << endl;
+        vector<string> output_fns;
+        simulate(window, ukf, state, input, output_fns);
+        string out_fn_state = "../working/gl-data/state-simulation.csv";
+        string out_fn_input = "../working/gl-data/input-simulation.csv";
+        string out_fn_output = "../working/gl-data/output-simulation.csv";
+        writeCsv(out_fn_input.c_str(), input_colnames, input);
+        writeImagePaths(out_fn_output.c_str(), output_fns);
+        writeCsv(out_fn_state.c_str(), state_colnames, state);
+    }
+    else    // estimate
+    {
+        cout << "estimate" << endl;
+        estimate(window, ukf, state);
+        vector<VectorXf> true_state = readCsv("../working/gl-data/state-simulation.csv");
+        vector<VectorXf> residual = calculateResidual(state, true_state);
+        string out_fn_state = "../working/gl-data/state-estimation.csv";
+        string out_fn_resid = "../working/gl-data/state-residual.csv";
+        writeCsv(out_fn_resid.c_str(), state_colnames, residual);
+        writeCsv(out_fn_state.c_str(), state_colnames, state);
+    }
 
-    /*
-    estimate(window, ukf, state);
-    string out_fn_state = "../working/gl_data/state-estimation.csv";
-    */
-
-    writeCsv(out_fn_state.c_str(), state_colnames, state);
 
     glDeleteProgram(shaderProgram);
     glDeleteShader(fragmentShader);

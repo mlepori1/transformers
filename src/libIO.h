@@ -22,11 +22,11 @@ using namespace Eigen;
 png_byte* readPng(const char* filename, int& width, int& height);
 
 
-void writePng(const char* filename, png_byte* image, png_bytep* row_pointers,
-        int width, int height);
+void writePng(const char* filename, png_byte* image, int width, int height,
+        int color_type);
 
 
-Map<VectorXf> toVector(png_byte* image_bytes, int num_bytes);
+VectorXf toVector(png_byte* image_bytes, int num_bytes);
 
 
 vector<VectorXf> readCsv(const char* filename);
@@ -40,6 +40,3 @@ const vector<string> readImagePaths(const char* filename);
 
 
 void writeImagePaths(const char* filename, vector<string> image_paths);
-
-
-void saveImage(const char* image_fn);

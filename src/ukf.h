@@ -40,8 +40,10 @@ class UnscentedKalmanFilter
         void updateState(const VectorXf u, const float dt);
         VectorXf updateState(const VectorXf x, const VectorXf u, const float dt);
 
-        Map<VectorXi> generateObservation(GLFWwindow* window);
-        void generateObservation(GLFWwindow* window, const char* image_fn);
+        VectorXf generateObservation(GLFWwindow* window, const GLenum format)
+            const;
+        void generateObservation(GLFWwindow* window, const GLenum format,
+                const char* image_fn) const;
 
         void inferState(const VectorXf u, const VectorXf y,  const float dt,
                 GLFWwindow* window);
@@ -78,8 +80,8 @@ class UnscentedKalmanFilter
          *    with w*h*3 entries, where w is the image width and h is the image
          *    height (in pixels).
          */
-        Map<VectorXi> sceneSnapshot() const;
-        void sceneSnapshot(const char* image_fn) const;
+        VectorXf sceneSnapshot(const GLenum format) const;
+        void sceneSnapshot(const GLenum format, const char* image_fn) const;
 
         void initializeSigmaPoints(const VectorXf mean, const MatrixXf covariance,
                 const float w0);

@@ -1,5 +1,5 @@
 # OBJS specifies which files to compile as part of the project
-OBJS = tracker_test.cpp blockmodel.cpp ukf.cpp libIO.cpp
+OBJS = ukf_tracker.cpp blockmodel.cpp ukf.cpp libIO.cpp
 
 # CC specifies which compiler we're using
 CC = g++

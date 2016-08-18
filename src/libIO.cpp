@@ -68,8 +68,6 @@ png_byte* readPng(const char* filename, int& width, int& height)
     png_read_image(png, row_pointers);
     delete[] row_pointers;
 
-    //cout << bytes_per_row << endl;
-
     fclose(fp);
     png_destroy_read_struct(&png, &info, NULL);
     png = NULL;
@@ -78,25 +76,34 @@ png_byte* readPng(const char* filename, int& width, int& height)
     return image;
 }
 
-Map<VectorXf> toVector(png_byte* image_bytes, int num_bytes)
+VectorXf toVector(png_byte* image_bytes, int num_bytes)
 {
     // Convert to vector
-    float* image_floats = new float[num_bytes];
-    memcpy(image_floats, image_bytes, num_bytes);
-    Map<VectorXf> image(image_floats, num_bytes);
+    VectorXf image(num_bytes);
+    for (int i = 0; i < num_bytes; ++i)
+        image(i) = float(image_bytes[i]);
 
     delete[] image_bytes;
-    delete[] image_floats;
+
     return image;
 }
 
 
-void writePng(const char* filename, png_byte* image, png_bytep* row_pointers,
-        int width, int height)
+void writePng(const char* filename, png_byte* image, int width, int height,
+        int color_type)
 {
     /*
      * Copied with minor edits from https://gist.github.com/niw/5963798
      */
+
+    assert(color_type == PNG_COLOR_TYPE_RGB || color_type == PNG_COLOR_TYPE_GRAY);
+    int bytes_per_pixel = color_type == PNG_COLOR_TYPE_GRAY ? 1 : 3;
+
+    // Create row pointers
+    int bytes_per_row = width * bytes_per_pixel;
+    unsigned char** row_pointers = new unsigned char*[height];
+    for (int row = 0; row < height; row++)
+        row_pointers[height - 1 - row] = image + row * bytes_per_row;
 
     FILE *fp = fopen(filename, "wb");
     if (!fp) abort();
@@ -111,21 +118,19 @@ void writePng(const char* filename, png_byte* image, png_bytep* row_pointers,
 
     png_init_io(png, fp);
 
-    // Output is 8-bit depth, RGB format.
-    png_set_IHDR(png, info, width, height, 8, PNG_COLOR_TYPE_RGB,
+    // Output is 8-bit depth, either RGB or grayscale format.
+    png_set_IHDR(png, info, width, height, 8, color_type,
             PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT,
             PNG_FILTER_TYPE_DEFAULT);
     png_write_info(png, info);
    
-    // To remove the alpha channel for PNG_COLOR_TYPE_RGB format,
-    // Use png_set_filler().
-    //png_set_filler(png, 0, PNG_FILLER_AFTER);
-    
     png_write_image(png, row_pointers);
     png_write_end(png, NULL);
 
     if (png && info)
         png_destroy_write_struct(&png, &info);
+
+    delete[] row_pointers;
      
     fclose(fp);
 }
@@ -142,9 +147,7 @@ vector<VectorXf> readCsv(const char* filename)
     string entry;
     int num_cols = 0;
     while (getline(lineStream, entry, ','))
-    {
         ++num_cols;
-    }
 
     // Read the CSV data as floats
     vector<VectorXf> data;
@@ -178,18 +181,14 @@ void writeCsv(const char* filename, const vector<string>& col_names,
     ofstream ofs(filename, ofstream::out);
     vector<string>::const_iterator str_it;
     for (str_it = col_names.begin(); str_it != col_names.end(); ++str_it)
-    {
         ofs << *str_it << ",";
-    }
     ofs << endl;
 
     // FIXME: assert all vectors have the same number of entries
     const static IOFormat csv_format(StreamPrecision, DontAlignCols, ",", "\n");
     vector<VectorXf>::const_iterator vec_it;
     for (vec_it = data.begin(); vec_it != data.end(); ++vec_it)
-    {
         ofs << vec_it->transpose().format(csv_format) << endl;
-    }
 
     ofs.close();
 }
@@ -202,9 +201,7 @@ const vector<string> readImagePaths(const char* filename)
 
     vector<string> image_paths;
     while (getline(ifs, line))
-    {
         image_paths.push_back(line);
-    }
 
     ifs.close();
 
@@ -218,32 +215,7 @@ void writeImagePaths(const char* filename, vector<string> image_paths)
 
     vector<string>::const_iterator it;
     for (it = image_paths.begin(); it != image_paths.end(); ++it)
-    {
         ofs << *it << endl;
-    }
 
     ofs.close();
-}
-
-
-void saveImage(const char* image_fn)
-{
-    // Save image
-    GLint viewport[4];
-    glGetIntegerv(GL_VIEWPORT, viewport);
-    int w = viewport[2];
-    int h = viewport[3];
-
-    glFinish();
-
-    unsigned int bytes_per_row = 3 * w;
-    png_byte* out_image = new png_byte[h * bytes_per_row];
-    glReadPixels(0, 0, w, h, GL_RGB, GL_UNSIGNED_BYTE, out_image);
-
-    png_bytep* row_pointers = new png_bytep[h];
-    for (int row = 0; row < h; row++)
-        row_pointers[h - 1 - row] = out_image + row * bytes_per_row;
-    writePng(image_fn, out_image, row_pointers, w, h);
-    delete[] row_pointers;
-    delete[] out_image;
 }
