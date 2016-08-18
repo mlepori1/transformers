@@ -260,8 +260,8 @@ void UnscentedKalmanFilter::inferState(const VectorXf u, const VectorXf y,
     MatrixXf cov_x_sqrt = cov_xy * cov_y_inv_sqrt;
     
     // Update estimated moments
-    mu_x = mu_x + cov_x_sqrt * cov_y_inv_sqrt.transpose() * (y - mean_y);
-    K_x = K_x - cov_x_sqrt * cov_x_sqrt.transpose();
+    mu_x = mean_x + cov_x_sqrt * cov_y_inv_sqrt.transpose() * (y - mean_y);
+    K_x = cov_x - cov_x_sqrt * cov_x_sqrt.transpose();
 
     cout << "New state estimate:" << endl;
     cout << mu_x << endl;
