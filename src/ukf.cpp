@@ -8,6 +8,8 @@ using namespace std;
 UnscentedKalmanFilter::UnscentedKalmanFilter(const VectorXf x0, const MatrixXf K0,
         const vector<BlockModel> blocks)
 {
+    debug = false;
+
     // Set first and second moments of initial state space distribution
     mu_x = x0;
     K_x = K0;
@@ -15,10 +17,6 @@ UnscentedKalmanFilter::UnscentedKalmanFilter(const VectorXf x0, const MatrixXf K
     this->blocks = blocks;
 
     vector<BlockModel>::iterator it;
-    for (it = this->blocks.begin(); it != this->blocks.end(); ++it)
-    {
-        it->printState();
-    }
 
     // Set sigma points
     // Apparently w0 = 1/3 is good if you believe the initial distribution is
@@ -41,10 +39,13 @@ void UnscentedKalmanFilter::initializeSigmaPoints(const VectorXf x0,
     MatrixXf K_scaled = n / (1 - w0) * K0;
     MatrixXf K_scaled_sqrt = K_scaled.llt().matrixL(); // Cholesky decomposition
 
-    cout << "Dimensionality of state vector: " << n << endl;
-    cout << "Number of sigma points: " << 2 * n + 1 << endl;
-    cout << "(scaled) Square root of covariance matrix: " << endl;
-    cout << K_scaled_sqrt << endl;
+    if (debug)
+    {
+        cout << "Dimensionality of state vector: " << n << endl;
+        cout << "Number of sigma points: " << 2 * n + 1 << endl;
+        cout << "(scaled) Square root of covariance matrix: " << endl;
+        cout << K_scaled_sqrt << endl;
+    }
 
     // Define matrix with sigma points as columns
     X = MatrixXf::Zero(n, 2 * n + 1);
@@ -64,6 +65,8 @@ void UnscentedKalmanFilter::initializeSigmaPoints(const VectorXf x0,
 
 VectorXf UnscentedKalmanFilter::getState() const
 {
+    // FIXME
+
     VectorXf x(mu_x.size());
     vector<BlockModel>::const_iterator it;
     for (it = blocks.begin(); it != blocks.end(); ++it)
@@ -109,28 +112,6 @@ void UnscentedKalmanFilter::updateState(const VectorXf u, const float dt)
 }
 
 VectorXf UnscentedKalmanFilter::generateObservation(GLFWwindow* window,
-        const GLenum format) const
-{
-    // Enable depth rendering, clear the screen to white and clear depth buffer
-    glEnable(GL_DEPTH_TEST);
-    glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-    // Update and render each object in the scene
-    vector<BlockModel>::const_iterator it;
-    for (it = blocks.begin(); it != blocks.end(); ++it)
-        it->draw();
-
-    VectorXf image = sceneSnapshot(format);
-
-    // Swap buffers
-    glfwSwapBuffers(window);
-    glfwPollEvents();
-
-    return image;
-}
-
-void UnscentedKalmanFilter::generateObservation(GLFWwindow* window,
         const GLenum format, const char* image_fn) const
 {
     // Enable depth rendering, clear the screen to white and clear depth buffer
@@ -143,36 +124,16 @@ void UnscentedKalmanFilter::generateObservation(GLFWwindow* window,
     for (it = blocks.begin(); it != blocks.end(); ++it)
         it->draw();
 
-    sceneSnapshot(format, image_fn);
+    VectorXf image = sceneSnapshot(format, image_fn);
 
     // Swap buffers
     glfwSwapBuffers(window);
     glfwPollEvents();
+
+    return image;
 }
 
-VectorXf UnscentedKalmanFilter::sceneSnapshot(const GLenum format) const
-{
-    // rgb format has 3 bytes per pixel; depth format has 1.
-    assert(format == GL_RGB || format == GL_DEPTH_COMPONENT);
-    int bytes_per_pixel;
-    if (format == GL_RGB)
-        bytes_per_pixel = 3;
-    else
-        bytes_per_pixel = 1;
-
-    // Wait for OpenGL to finish rendering
-    glFinish();
-
-    // Read pixels on screen into a raw data buffer
-    int num_bytes = image_height * image_width * bytes_per_pixel;
-    unsigned char* image_bytes = new unsigned char[num_bytes];
-    glReadPixels(0, 0, image_width, image_height, format, GL_UNSIGNED_BYTE,
-            image_bytes);
-
-    return toVector(image_bytes, num_bytes);
-}
-
-void UnscentedKalmanFilter::sceneSnapshot(const GLenum format,
+VectorXf UnscentedKalmanFilter::sceneSnapshot(const GLenum format,
         const char* image_fn) const
 {
     // rgb format has 3 bytes per pixel; depth format has 1.
@@ -198,38 +159,44 @@ void UnscentedKalmanFilter::sceneSnapshot(const GLenum format,
     glReadPixels(0, 0, image_width, image_height, format, GL_UNSIGNED_BYTE,
             image_bytes);
 
+    VectorXf image = toVector(image_bytes, num_bytes);
+
     // Save image as PNG
-    writePng(image_fn, image_bytes, image_width, image_height, png_format);
+    if (image_fn)
+        writePng(image_fn, image_bytes, image_width, image_height, png_format);
 
     delete[] image_bytes;
+
+    return image;
 }
 
 void UnscentedKalmanFilter::inferState(const VectorXf u, const VectorXf y,
-        const float dt, GLFWwindow* window)
+        const float dt, GLFWwindow* window, const string fn_prefix)
 {
     int bytes_per_pixel = 3;    // FIXME
     int num_bytes = image_width * image_height * bytes_per_pixel;
-    int NUM_SINGULAR_DIMS = 2; // FIXME
+    //int NUM_SINGULAR_DIMS = 2; // FIXME
 
     // Propagate sigma points through process and observation models
+    stringstream ss;
+    string image_fn;
     MatrixXf Y = MatrixXf::Zero(y.size(), X.cols());
     for (int i = 0; i < X.cols(); ++i)
     {
         X.col(i) = updateState(X.col(i), u, dt);
-        Y.col(i) = generateObservation(window, GL_RGB);
+        if (!fn_prefix.empty() && debug)
+        {
+            ss << fn_prefix << i << ".png";
+            image_fn = ss.str();
+            ss.str("");
+            Y.col(i) = generateObservation(window, GL_RGB, image_fn.c_str());
+        } else
+            Y.col(i) = generateObservation(window, GL_RGB, NULL);
     }
-
-    cout << "Sigma points:" << endl;
-    cout << X << endl;
 
     // Calculate predicted mean and covariance
     VectorXf mean_x = weightedMean(w, X);
     MatrixXf cov_x = weightedCovariance(w, X, mean_x);
-
-    cout << "Expected state:" << endl;
-    cout << mean_x << endl;
-    cout << "State covariance:" << endl;
-    cout << cov_x << endl;
 
     // Calculate predicted observation and innovation covariance
     VectorXf mean_y = weightedMean(w, Y);
@@ -247,15 +214,8 @@ void UnscentedKalmanFilter::inferState(const VectorXf u, const VectorXf y,
     // Perform update using standard Kalman filter equations
     MatrixXf cov_y_inv_sqrt = svd.matrixU(); // We're not done with this yet
     ArrayXf S_inv = svd.singularValues().array().inverse();
-    for (int i = 0; i < NUM_SINGULAR_DIMS * 2; ++i)
-        S_inv(S_inv.size() - 1 - i) = 0;
     for (int i = 0; i < cov_y_inv_sqrt.cols(); ++i)
         cov_y_inv_sqrt.col(i) = S_inv(i) * cov_y_inv_sqrt.col(i);
-
-    cout << "Singular values:" << endl;
-    cout << svd.singularValues() << endl;
-    cout << "Inverse singular values:" << endl;
-    cout << S_inv << endl;
 
     MatrixXf cov_x_sqrt = cov_xy * cov_y_inv_sqrt;
     
@@ -263,11 +223,23 @@ void UnscentedKalmanFilter::inferState(const VectorXf u, const VectorXf y,
     mu_x = mean_x + cov_x_sqrt * cov_y_inv_sqrt.transpose() * (y - mean_y);
     K_x = cov_x - cov_x_sqrt * cov_x_sqrt.transpose();
 
-    cout << "New state estimate:" << endl;
-    cout << mu_x << endl;
-
-    cout << "Error covariance:" << endl;
-    cout << K_x << endl;
+    if (debug)
+    {
+        cout << "Sigma points:" << endl;
+        cout << X << endl;
+        cout << "Expected state:" << endl;
+        cout << mean_x << endl;
+        cout << "State covariance:" << endl;
+        cout << cov_x << endl;
+        cout << "Singular values:" << endl;
+        cout << svd.singularValues() << endl;
+        cout << "Inverse singular values:" << endl;
+        cout << S_inv << endl;
+        cout << "New state estimate:" << endl;
+        cout << mu_x << endl;
+        cout << "Error covariance:" << endl;
+        cout << K_x << endl;
+    }
 }
 
 // Helper functions for math operations

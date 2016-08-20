@@ -40,17 +40,17 @@ class UnscentedKalmanFilter
         void updateState(const VectorXf u, const float dt);
         VectorXf updateState(const VectorXf x, const VectorXf u, const float dt);
 
-        VectorXf generateObservation(GLFWwindow* window, const GLenum format)
-            const;
-        void generateObservation(GLFWwindow* window, const GLenum format,
+        VectorXf generateObservation(GLFWwindow* window, const GLenum format,
                 const char* image_fn) const;
 
         void inferState(const VectorXf u, const VectorXf y,  const float dt,
-                GLFWwindow* window);
+                GLFWwindow* window, const string fn_prefix);
 
         VectorXf getState() const;
         VectorXf getStateEstimate() { return mu_x; } const;
         MatrixXf getErrorCovariance() { return K_x; } const;
+
+        void setDebugStatus(const bool debug) { this->debug = debug; };
 
 
     private:
@@ -69,6 +69,9 @@ class UnscentedKalmanFilter
         int image_width;
         int image_height;
 
+        // Decides if debug output should be displayed
+        bool debug;
+
 
         // (UKF helper functions below)
         /**
@@ -80,8 +83,7 @@ class UnscentedKalmanFilter
          *    with w*h*3 entries, where w is the image width and h is the image
          *    height (in pixels).
          */
-        VectorXf sceneSnapshot(const GLenum format) const;
-        void sceneSnapshot(const GLenum format, const char* image_fn) const;
+        VectorXf sceneSnapshot(const GLenum format, const char* image_fn) const;
 
         void initializeSigmaPoints(const VectorXf mean, const MatrixXf covariance,
                 const float w0);

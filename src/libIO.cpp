@@ -76,6 +76,7 @@ png_byte* readPng(const char* filename, int& width, int& height)
     return image;
 }
 
+
 VectorXf toVector(png_byte* image_bytes, int num_bytes)
 {
     // Convert to vector
@@ -83,9 +84,16 @@ VectorXf toVector(png_byte* image_bytes, int num_bytes)
     for (int i = 0; i < num_bytes; ++i)
         image(i) = float(image_bytes[i]);
 
-    delete[] image_bytes;
-
     return image;
+}
+
+
+void toByteArray(VectorXf image, png_byte* image_bytes)
+{
+    for (int i = 0; i < image.size(); ++i)
+    {
+        image_bytes[i] = (unsigned char) (image(i));
+    }
 }
 
 

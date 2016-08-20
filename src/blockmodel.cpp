@@ -15,13 +15,21 @@ using namespace Eigen;
 using namespace std;
 
 
-BlockModel::BlockModel(const VectorXf x, const Vector3f c, const Vector3f a_g)
+BlockModel::BlockModel(const VectorXf x, const VectorXf sigma,
+        const Vector3f c, const Vector3f a_g)
 {
-    setState(x);
+    assert(x.size() == sigma.size());
+
+    initializeNoise(sigma);
+
+    // Construct the augmented state vector by concatenating
+    // noise variables
+    VectorXf x_a(x.size() + n_s.size() + n_v.size() + n_theta.size());
+    x_a << x, n_s, n_v, n_theta;
+    setState(x_a);
 
     color = c;
     a_gravity = a_g;
-
 }
 
 void BlockModel::printState() const
@@ -32,6 +40,20 @@ void BlockModel::printState() const
          << endl;
 }
 
+// Can only initialize an independent Gaussian random vector
+void BlockModel::initializeNoise(const VectorXf sigma)
+{
+    // Process noise
+    VectorXf sigma_s     = sigma.segment<3>(0);
+    VectorXf sigma_v     = sigma.segment<3>(3);
+    VectorXf sigma_theta = sigma.segment<3>(6);
+
+    // FIXME: EXTREMELY BAD -- I ignore all but the first entry of each sigma
+    N_s     = normal_distribution<float>(0.0, sigma_s(0));
+    N_v     = normal_distribution<float>(0.0, sigma_v(0));
+    N_theta = normal_distribution<float>(0.0, sigma_theta(0));
+}
+
 void BlockModel::setGlVars(const GLint model_loc, const GLint color_loc,
         const int offset)
 {
@@ -40,21 +62,37 @@ void BlockModel::setGlVars(const GLint model_loc, const GLint color_loc,
     this->offset = offset;
 }
 
-void BlockModel::setState(const VectorXf x)
+void BlockModel::setState(const VectorXf x_a)
 {
-    statesize = x.size();
+    // Augmented state concatenates state and process noise
+    statesize = x_a.size();
 
-    s     = x.segment<3>(0);
-    v     = x.segment<3>(3);
-    theta = x.segment<3>(6);
+    // State
+    s     = x_a.segment<3>(0);
+    v     = x_a.segment<3>(3);
+    theta = x_a.segment<3>(6);
+
+    // Process noise
+    n_s     = x_a.segment<3>(9);
+    n_v     = x_a.segment<3>(12);
+    n_theta = x_a.segment<3>(15);
 }
 
 VectorXf BlockModel::getState() const
 {
+    // State vector
     VectorXf x(s.size() + v.size() + theta.size());
     x << s, v, theta;
 
-    return x;
+    // Process noise vector
+    VectorXf n_x(n_s.size() + n_v.size() + n_theta.size());
+    n_x << n_s, n_v, n_theta;
+
+    // Augmented state vector
+    VectorXf x_a(x.size() + n_x.size());
+    x_a << x, n_x;
+
+    return x_a;
 }
 
 VectorXf BlockModel::updateState(const VectorXf x, const VectorXf u, const float dt)
@@ -71,7 +109,7 @@ void BlockModel::updateState(const VectorXf u, const float dt)
     Vector3f a     = u.segment<3>(0);
     Vector3f omega = u.segment<3>(3);
 
-    Vector3f theta_next = theta + omega * dt;
+    Vector3f theta_next = theta + omega * dt + n_theta;
 
     // FIXME: Make sure orientation and angular velocity are in radians
     AngleAxis<float> Cx(theta(0), Vector3f(1.0f, 0.0f, 0.0f));
@@ -79,13 +117,20 @@ void BlockModel::updateState(const VectorXf u, const float dt)
     AngleAxis<float> Cz(theta(2), Vector3f(0.0f, 0.0f, 1.0f));
     Vector3f a_global = Cx * Cy * Cz * a - a_gravity;
 
-    Vector3f v_next = v + a_global * dt;
-    Vector3f s_next = s + v * dt;
+    Vector3f v_next = v + a_global * dt + n_v;
+    Vector3f s_next = s + v * dt + n_s;
 
     // Update state vector
-    s = s_next;
-    v = v_next;
+    s     = s_next;
+    v     = v_next;
     theta = theta_next;
+
+    // Process noise is drawn IID from zero-mean multivariate Gaussian
+    // FIXME: Assuming additive noise is IID doesn't make sense when the state
+    //   vector represents a reference frame (maybe?)
+    n_s     << N_s(generator), N_s(generator), N_s(generator);
+    n_v     << N_v(generator), N_v(generator), N_v(generator);
+    n_theta << N_theta(generator), N_theta(generator), N_theta(generator);
 }
 
 void BlockModel::draw() const

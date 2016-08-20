@@ -10,6 +10,7 @@
 
 #include <GL/glew.h>
 #include "Eigen/Dense"
+#include <random>
 
 using namespace Eigen;
 using namespace std;
@@ -45,7 +46,8 @@ class BlockModel
          * \param c Block color
          * \param a_g Gravitational acceleration vector (in global reference frame)
          */
-        BlockModel(const VectorXf x, const Vector3f c, const Vector3f a_g);
+        BlockModel(const VectorXf x, const VectorXf sigma, const Vector3f c,
+                const Vector3f a_g);
 
         /**
          * Initialize locations for some GLSL uniform variables.
@@ -103,6 +105,16 @@ class BlockModel
         Vector3f v;
         Vector3f theta;
 
+        // Process noise
+        Vector3f n_s;
+        Vector3f n_v;
+        Vector3f n_theta;
+
+        default_random_engine generator;
+        normal_distribution<float> N_s; //(0.0f, 0.0f);
+        normal_distribution<float> N_v; //(0.0f, 0.0f);
+        normal_distribution<float> N_theta; //(0.0f, 0.0f);
+
         Vector3f color;
 
         Vector3f a_gravity;
@@ -116,4 +128,6 @@ class BlockModel
         GLint model_loc;
         GLint color_loc;
         int offset;
+
+        void initializeNoise(const VectorXf sigma);
 };

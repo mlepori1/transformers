@@ -145,8 +145,8 @@ const GLchar* vertexShaderSrc = GLSL(
     void main()
     {
         fPos = vec3(model * vec4(pos, 1.0f));
+        fNormal = mat3(model) * normal;
         gl_Position = proj * view * vec4(fPos, 1.0);
-        fNormal = normal;
     }
 );
 
@@ -227,17 +227,19 @@ GLFWwindow* initializeGlfwWindow()
     glfwWindowHint(GLFW_OPENGL_DEBUG_CONTEXT, GL_TRUE);
 
     glfwWindowHint(GLFW_RESIZABLE, GL_FALSE);
-    GLFWwindow* window = glfwCreateWindow(160, 120, "OpenGL", NULL, NULL);
+    GLFWwindow* window = glfwCreateWindow(2 * 160, 2 * 120, "OpenGL", NULL, NULL);
     glfwMakeContextCurrent(window);
 
     return window;
 }
 
-vector<BlockModel> setInitialConditions(GLint uniModel, GLint uniObjectColor)
+UnscentedKalmanFilter initializeUKF(GLint uniModel, GLint uniObjectColor)
 {
     // Initial conditions for the unscented kalman filter
     int num_blocks = 1;
     vector<BlockModel> blocks;
+    vector<VectorXf> means;
+    vector<VectorXf> diag_covariances;
     for (int i = 0; i < num_blocks; ++i)
     {
         Vector3f center(0.0f, 0.0f, 0.0f);
@@ -246,17 +248,51 @@ vector<BlockModel> setInitialConditions(GLint uniModel, GLint uniObjectColor)
         Vector3f v0(-r * rate * sin(angle), r * rate * cos(angle), 0.0f);
         Vector3f theta0(0.0f, 0.0f, 0.0f);
 
-        VectorXf x0(s0.size() + v0.size() + theta0.size());
-        x0 << s0, v0, theta0;
-        //MatrixXf K0 = MatrixXf::Zero(x0.size(), x0.size());
+        VectorXf mu(s0.size() + v0.size() + theta0.size());
+        mu << s0, v0, theta0;
+
+        VectorXf mu_noise = VectorXf::Zero(mu.size());
+        VectorXf mu_augmented(mu.size() + mu_noise.size());
+        mu_augmented << mu, mu_noise;
+        means.push_back(mu_augmented);
+        
+        Vector3f sigma_s     = Vector3f::Ones() * 0.01;
+        Vector3f sigma_v     = Vector3f::Ones() * 0.01;
+        Vector3f sigma_theta = Vector3f::Ones() * 0.05;
+        VectorXf sigma_noise(sigma_s.size() + sigma_v.size() + sigma_theta.size());
+        sigma_noise << sigma_s, sigma_v, sigma_theta;
+
+        VectorXf sigma = VectorXf::Ones(sigma_noise.size());
+        VectorXf sigma_augmented(sigma.size() + sigma_noise.size());
+        sigma_augmented << sigma, sigma_noise;
+        diag_covariances.push_back(sigma_augmented);
 
         // Initialize block model
-        BlockModel block(x0, red, a_g);
+        BlockModel block(mu, sigma_noise, red, a_g);
         block.setGlVars(uniModel, uniObjectColor, 0);
         blocks.push_back(block);
     }
 
-    return blocks;
+
+    // Initialize unscented kalman filter
+    int dim = 0;
+    for (int i = 0; i < blocks.size(); ++i)
+        dim += blocks[i].statesize;
+
+    int index = 0;
+    VectorXf x(dim);
+    MatrixXf cov = MatrixXf::Zero(dim, dim);
+    for (int i = 0; i < blocks.size(); ++i)
+    {
+        int dim_i = blocks[i].statesize;
+        cov.block(index, index, dim_i, dim_i) = diag_covariances[i].asDiagonal();
+        x.segment(index, dim_i) = means[i];
+        index += dim_i;
+    }
+
+    UnscentedKalmanFilter ukf(x, cov, blocks);
+
+    return ukf;
 }
 
 void setTransformationMatrices(GLint shaderProgram)
@@ -264,7 +300,7 @@ void setTransformationMatrices(GLint shaderProgram)
     // Set up projection
     // Camera located 600mm above the origin, pointing along -z.
     glm::mat4 view = glm::lookAt(
-        glm::vec3(0.0f, -50.0f, 600.0f),
+        glm::vec3(0.0f, -600.0f, 600.0f),
         glm::vec3(0.0f, 0.0f, 0.0f),
         glm::vec3(0.0f, 0.0f, 1.0f)
     );
@@ -281,12 +317,11 @@ void setTransformationMatrices(GLint shaderProgram)
     glUniformMatrix4fv(uniProj, 1, GL_FALSE, glm::value_ptr(proj));
 }
 
-void simulate(GLFWwindow* window, UnscentedKalmanFilter ukf, vector<VectorXf>& state, vector<VectorXf>& input, vector<string>& output_fns)
+void simulate(int num_samples, GLFWwindow* window, UnscentedKalmanFilter ukf, vector<VectorXf>& state, vector<VectorXf>& input, vector<string>& output_fns)
 {
-    int field_width = 1;   // No sequence should need more than 10 digits (famous last words)
+    int field_width = 10;   // No sequence should need more than 10 digits (famous last words)
     //int frame = 0;
     //while (!glfwWindowShouldClose(window))
-    int num_samples = 5;
     for (int frame_index = 0; frame_index < num_samples; ++frame_index)
     {
         // State at current time
@@ -318,18 +353,30 @@ void simulate(GLFWwindow* window, UnscentedKalmanFilter ukf, vector<VectorXf>& s
     }
 }
 
-void estimate(GLFWwindow* window, UnscentedKalmanFilter ukf, vector<VectorXf>& state)
+void estimate(int num_samples, GLFWwindow* window, UnscentedKalmanFilter ukf, vector<VectorXf>& state)
 {
     vector<VectorXf> u = readCsv("../working/gl-data/input-simulation.csv");
     vector<string> output_fns = readImagePaths("../working/gl-data/output-simulation.csv");
 
     // Every state should have a corresponding input and output
     assert(u.size() == output_fns.size());
+
+    // It isn't possible to process more frames than exist
+    assert(num_samples <= int(output_fns.size()));
+
+    // A negative value means: process all files in output_fns.
+    if (num_samples < 0)
+        num_samples = output_fns.size();
     
-    for (int frame_index = 0; frame_index < output_fns.size(); ++frame_index)
-    //for (int frame_index = 0; frame_index < 1; ++frame_index)
+    stringstream ss;
+    string fn_prefix;
+    for (int frame_index = 0; frame_index < num_samples; ++frame_index)
     {
         cout << "Processing frame " << frame_index << endl;
+
+        ss << "../working/gl-render/sigma/frame" << frame_index << "-point";
+        fn_prefix = ss.str();
+        ss.str("");
 
         // Load image
         int width, height;
@@ -338,7 +385,7 @@ void estimate(GLFWwindow* window, UnscentedKalmanFilter ukf, vector<VectorXf>& s
         VectorXf y = toVector(image_bytes, num_bytes);
 
         // Estimate the latent state
-        ukf.inferState(u[frame_index], y, dt, window);
+        ukf.inferState(u[frame_index], y, dt, window, fn_prefix);
         VectorXf x_t = ukf.getStateEstimate();
 
         // Store data
@@ -348,10 +395,10 @@ void estimate(GLFWwindow* window, UnscentedKalmanFilter ukf, vector<VectorXf>& s
 
 vector<VectorXf> calculateResidual(vector<VectorXf> x_estimated, vector<VectorXf> x_true)
 {
-    assert(x_estimated.size() == x_true.size());
+    assert(x_estimated.size() <= x_true.size());
 
     vector<VectorXf> residual;
-    for (int i = 0; i < x_true.size(); ++i)
+    for (int i = 0; i < x_estimated.size(); ++i)
         residual.push_back(x_true[i] - x_estimated[i]);
 
     return residual;
@@ -360,8 +407,31 @@ vector<VectorXf> calculateResidual(vector<VectorXf> x_estimated, vector<VectorXf
 int main(int argc, char* argv[])
 {
     // Parse command line arguments
-    assert(argc == 2);
-    string arg_param(argv[1]);
+    string arg_param;
+    int num_samples;
+    bool debug = false;
+    if (argc == 4)
+    {
+        if (string(argv[1]) != "--debug")
+        {
+            cerr << "Usage: " << argv[0] << " [--debug]  <simulate|estimate> <num samples>" << endl;
+            return 1;
+        }
+        debug = true;
+        arg_param = string(argv[2]);
+        num_samples = atoi(argv[3]);
+    }
+    else if (argc == 3)
+    {
+        arg_param = string(argv[1]);
+        num_samples = atoi(argv[2]);
+    }
+    else
+    {
+        cerr << "Usage: " << argv[0] << " [--debug]  <simulate|estimate> <num samples>" << endl;
+        return 1;
+    }
+
     bool do_simulate;
     if (arg_param  == "simulate")
         do_simulate = true;
@@ -369,9 +439,10 @@ int main(int argc, char* argv[])
         do_simulate = false;
     else
     {
-        cerr << "Usage: " << argv[0] << " [simulate|estimate]" << endl;
+        cerr << "Usage: " << argv[0] << " [--debug]  <simulate|estimate> <num samples>" << endl;
         return 1;
     }
+
 
     // Initialize GLFW window and GLEW
     GLFWwindow* window = initializeGlfwWindow();
@@ -412,7 +483,9 @@ int main(int argc, char* argv[])
 
     GLint uniModel = glGetUniformLocation(shaderProgram, "model");
     GLint uniObjectColor = glGetUniformLocation(shaderProgram, "objectColor");
-    vector<BlockModel> blocks = setInitialConditions(uniModel, uniObjectColor);
+    UnscentedKalmanFilter ukf = initializeUKF(uniModel, uniObjectColor);
+    if (debug)
+        ukf.setDebugStatus(debug);
 
     // Generate vectors to hold simulation data
     vector<VectorXf> state;
@@ -436,22 +509,11 @@ int main(int argc, char* argv[])
     input_colnames.push_back("angular-velocity_y");
     input_colnames.push_back("angular-velocity_z");
 
-    // Initialize unscented kalman filter
-    int dim = 0;
-    for (int i = 0; i < blocks.size(); ++i)
-        dim += blocks[i].statesize;
-    VectorXf x(dim);
-    for (int i = 0; i < blocks.size(); ++i)
-        x << blocks[i].getState();
-    MatrixXf cov = MatrixXf::Identity(dim, dim);
-    UnscentedKalmanFilter ukf(x, cov, blocks);
 
-    cout << "Status: ";
     if (do_simulate)
     {
-        cout << "simulate" << endl;
         vector<string> output_fns;
-        simulate(window, ukf, state, input, output_fns);
+        simulate(num_samples, window, ukf, state, input, output_fns);
         string out_fn_state = "../working/gl-data/state-simulation.csv";
         string out_fn_input = "../working/gl-data/input-simulation.csv";
         string out_fn_output = "../working/gl-data/output-simulation.csv";
@@ -461,8 +523,7 @@ int main(int argc, char* argv[])
     }
     else    // estimate
     {
-        cout << "estimate" << endl;
-        estimate(window, ukf, state);
+        estimate(num_samples, window, ukf, state);
         vector<VectorXf> true_state = readCsv("../working/gl-data/state-simulation.csv");
         vector<VectorXf> residual = calculateResidual(state, true_state);
         string out_fn_state = "../working/gl-data/state-estimation.csv";

@@ -22,11 +22,14 @@ using namespace Eigen;
 png_byte* readPng(const char* filename, int& width, int& height);
 
 
-void writePng(const char* filename, png_byte* image, int width, int height,
-        int color_type);
+void writePng(const char* filename, png_byte* image, const int width,
+        const int height, const int color_type);
 
 
 VectorXf toVector(png_byte* image_bytes, int num_bytes);
+
+
+void toByteArray(VectorXf image, png_byte* image_bytes);
 
 
 vector<VectorXf> readCsv(const char* filename);
