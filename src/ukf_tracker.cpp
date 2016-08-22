@@ -251,21 +251,25 @@ UnscentedKalmanFilter initializeUKF(GLint uniModel, GLint uniObjectColor)
         VectorXf mu(s0.size() + v0.size() + theta0.size());
         mu << s0, v0, theta0;
 
+        /*
         VectorXf mu_noise = VectorXf::Zero(mu.size());
         VectorXf mu_augmented(mu.size() + mu_noise.size());
         mu_augmented << mu, mu_noise;
-        means.push_back(mu_augmented);
+        */
+        means.push_back(mu);
         
-        Vector3f sigma_s     = Vector3f::Ones() * 0.01;
-        Vector3f sigma_v     = Vector3f::Ones() * 0.01;
-        Vector3f sigma_theta = Vector3f::Ones() * 0.05;
+        Vector3f sigma_s     = Vector3f::Ones() * 0.0; //0.01;
+        Vector3f sigma_v     = Vector3f::Ones() * 0.0; //0.01;
+        Vector3f sigma_theta = Vector3f::Ones() * 0.0; //0.05;
         VectorXf sigma_noise(sigma_s.size() + sigma_v.size() + sigma_theta.size());
         sigma_noise << sigma_s, sigma_v, sigma_theta;
 
         VectorXf sigma = VectorXf::Ones(sigma_noise.size());
+        /*
         VectorXf sigma_augmented(sigma.size() + sigma_noise.size());
         sigma_augmented << sigma, sigma_noise;
-        diag_covariances.push_back(sigma_augmented);
+        */
+        diag_covariances.push_back(sigma);
 
         // Initialize block model
         BlockModel block(mu, sigma_noise, red, a_g);
@@ -367,6 +371,9 @@ void estimate(int num_samples, GLFWwindow* window, UnscentedKalmanFilter ukf, ve
     // A negative value means: process all files in output_fns.
     if (num_samples < 0)
         num_samples = output_fns.size();
+
+    MatrixXf Q = MatrixXf::Zero(ukf.stateSize(), ukf.stateSize());
+    float R_var = 1;
     
     stringstream ss;
     string fn_prefix;
@@ -385,7 +392,7 @@ void estimate(int num_samples, GLFWwindow* window, UnscentedKalmanFilter ukf, ve
         VectorXf y = toVector(image_bytes, num_bytes);
 
         // Estimate the latent state
-        ukf.inferState(u[frame_index], y, dt, window, fn_prefix);
+        ukf.inferState(u[frame_index], y, dt, Q, R_var, window, fn_prefix);
         VectorXf x_t = ukf.getStateEstimate();
 
         // Store data

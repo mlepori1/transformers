@@ -105,15 +105,10 @@ class BlockModel
         Vector3f v;
         Vector3f theta;
 
-        // Process noise
-        Vector3f n_s;
-        Vector3f n_v;
-        Vector3f n_theta;
-
         default_random_engine generator;
-        normal_distribution<float> N_s; //(0.0f, 0.0f);
-        normal_distribution<float> N_v; //(0.0f, 0.0f);
-        normal_distribution<float> N_theta; //(0.0f, 0.0f);
+        normal_distribution<float> N_s;
+        normal_distribution<float> N_v;
+        normal_distribution<float> N_theta;
 
         Vector3f color;
 

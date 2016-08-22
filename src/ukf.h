@@ -44,8 +44,10 @@ class UnscentedKalmanFilter
                 const char* image_fn) const;
 
         void inferState(const VectorXf u, const VectorXf y,  const float dt,
-                GLFWwindow* window, const string fn_prefix);
+                const MatrixXf Q, const float R_var, GLFWwindow* window,
+                const string fn_prefix);
 
+        int stateSize() const;
         VectorXf getState() const;
         VectorXf getStateEstimate() { return mu_x; } const;
         MatrixXf getErrorCovariance() { return K_x; } const;

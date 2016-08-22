@@ -22,11 +22,7 @@ BlockModel::BlockModel(const VectorXf x, const VectorXf sigma,
 
     initializeNoise(sigma);
 
-    // Construct the augmented state vector by concatenating
-    // noise variables
-    VectorXf x_a(x.size() + n_s.size() + n_v.size() + n_theta.size());
-    x_a << x, n_s, n_v, n_theta;
-    setState(x_a);
+    setState(x);
 
     color = c;
     a_gravity = a_g;
@@ -40,7 +36,7 @@ void BlockModel::printState() const
          << endl;
 }
 
-// Can only initialize an independent Gaussian random vector
+// FIXME: Can only initialize an independent Gaussian random vector
 void BlockModel::initializeNoise(const VectorXf sigma)
 {
     // Process noise
@@ -71,11 +67,6 @@ void BlockModel::setState(const VectorXf x_a)
     s     = x_a.segment<3>(0);
     v     = x_a.segment<3>(3);
     theta = x_a.segment<3>(6);
-
-    // Process noise
-    n_s     = x_a.segment<3>(9);
-    n_v     = x_a.segment<3>(12);
-    n_theta = x_a.segment<3>(15);
 }
 
 VectorXf BlockModel::getState() const
@@ -84,15 +75,7 @@ VectorXf BlockModel::getState() const
     VectorXf x(s.size() + v.size() + theta.size());
     x << s, v, theta;
 
-    // Process noise vector
-    VectorXf n_x(n_s.size() + n_v.size() + n_theta.size());
-    n_x << n_s, n_v, n_theta;
-
-    // Augmented state vector
-    VectorXf x_a(x.size() + n_x.size());
-    x_a << x, n_x;
-
-    return x_a;
+    return x;
 }
 
 VectorXf BlockModel::updateState(const VectorXf x, const VectorXf u, const float dt)
@@ -105,6 +88,13 @@ VectorXf BlockModel::updateState(const VectorXf x, const VectorXf u, const float
 
 void BlockModel::updateState(const VectorXf u, const float dt)
 {
+    // Process noise is drawn IID from zero-mean multivariate Gaussian
+    // FIXME: Assuming additive noise is IID doesn't make sense when the state
+    //   vector represents a reference frame (maybe?)
+    Vector3f n_s (N_s(generator), N_s(generator), N_s(generator));
+    Vector3f n_v (N_v(generator), N_v(generator), N_v(generator));
+    Vector3f n_theta (N_theta(generator), N_theta(generator), N_theta(generator));
+
     // Split input vector
     Vector3f a     = u.segment<3>(0);
     Vector3f omega = u.segment<3>(3);
@@ -124,13 +114,6 @@ void BlockModel::updateState(const VectorXf u, const float dt)
     s     = s_next;
     v     = v_next;
     theta = theta_next;
-
-    // Process noise is drawn IID from zero-mean multivariate Gaussian
-    // FIXME: Assuming additive noise is IID doesn't make sense when the state
-    //   vector represents a reference frame (maybe?)
-    n_s     << N_s(generator), N_s(generator), N_s(generator);
-    n_v     << N_v(generator), N_v(generator), N_v(generator);
-    n_theta << N_theta(generator), N_theta(generator), N_theta(generator);
 }
 
 void BlockModel::draw() const

@@ -52,8 +52,8 @@ void UnscentedKalmanFilter::initializeSigmaPoints(const VectorXf x0,
     X.col(0) = x0;
     for (int i = 1; i <= n; ++i)
     {
-        X.col(i) = x0 + n * K_scaled_sqrt.col(i - 1);
-        X.col(i + n) = x0 - n * K_scaled_sqrt.col(i - 1);
+        X.col(i) = x0 + K_scaled_sqrt.col(i - 1);
+        X.col(i + n) = x0 - K_scaled_sqrt.col(i - 1);
     }
 
     // Define vector of sigma point weights
@@ -63,10 +63,18 @@ void UnscentedKalmanFilter::initializeSigmaPoints(const VectorXf x0,
     w(0) = w0;
 }
 
+int UnscentedKalmanFilter::stateSize() const
+{
+    vector<BlockModel>::const_iterator it;
+    int statesize = 0;
+    for (it = blocks.begin(); it != blocks.end(); ++it)
+        statesize += it->statesize;
+
+    return statesize;
+}
+
 VectorXf UnscentedKalmanFilter::getState() const
 {
-    // FIXME
-
     VectorXf x(mu_x.size());
     vector<BlockModel>::const_iterator it;
     for (it = blocks.begin(); it != blocks.end(); ++it)
@@ -171,7 +179,8 @@ VectorXf UnscentedKalmanFilter::sceneSnapshot(const GLenum format,
 }
 
 void UnscentedKalmanFilter::inferState(const VectorXf u, const VectorXf y,
-        const float dt, GLFWwindow* window, const string fn_prefix)
+        const float dt, const MatrixXf Q, const float R_var, 
+        GLFWwindow* window, const string fn_prefix)
 {
     int bytes_per_pixel = 3;    // FIXME
     int num_bytes = image_width * image_height * bytes_per_pixel;
@@ -194,12 +203,13 @@ void UnscentedKalmanFilter::inferState(const VectorXf u, const VectorXf y,
             Y.col(i) = generateObservation(window, GL_RGB, NULL);
     }
 
-    // Calculate predicted mean and covariance
+    // Calculate predicted means and covariances for terms that permit direct
+    // computation
     VectorXf mean_x = weightedMean(w, X);
-    MatrixXf cov_x = weightedCovariance(w, X, mean_x);
-
-    // Calculate predicted observation and innovation covariance
     VectorXf mean_y = weightedMean(w, Y);
+    MatrixXf cov_x = weightedCovariance(w, X, mean_x) + Q;
+    MatrixXf cov_xy = weightedCrossCovariance(w, X, Y, mean_x, mean_y);
+
     // This gives us everything we need to do computations with Ky
     // But it avoids storing Ky
     ArrayXf w_sqrt = w.array().sqrt();
@@ -208,10 +218,9 @@ void UnscentedKalmanFilter::inferState(const VectorXf u, const VectorXf y,
         Y.col(i) = w_sqrt(i) * (Y.col(i) - mean_y);
     JacobiSVD<MatrixXf> svd(Y, ComputeThinU);
 
-    // Calculate cross-covariance
-    MatrixXf cov_xy = weightedCrossCovariance(w, X, Y, mean_x, mean_y);
-
     // Perform update using standard Kalman filter equations
+    // (modulo some algebraic manipulation to make the updates computable)
+    /*
     MatrixXf cov_y_inv_sqrt = svd.matrixU(); // We're not done with this yet
     ArrayXf S_inv = svd.singularValues().array().inverse();
     for (int i = 0; i < cov_y_inv_sqrt.cols(); ++i)
@@ -222,6 +231,18 @@ void UnscentedKalmanFilter::inferState(const VectorXf u, const VectorXf y,
     // Update estimated moments
     mu_x = mean_x + cov_x_sqrt * cov_y_inv_sqrt.transpose() * (y - mean_y);
     K_x = cov_x - cov_x_sqrt * cov_x_sqrt.transpose();
+    */
+    float R_var_inv = 1.0 / R_var;
+    ArrayXf S = svd.singularValues().array();
+    MatrixXf S_tilde_inv = ((S.pow(2) + R_var * R_var).inverse() - R_var_inv)
+        .matrix().asDiagonal();
+
+    MatrixXf A = cov_xy * svd.matrixU();
+    VectorXf v = svd.matrixU().transpose() * (y - mean_y);
+
+    mu_x = mean_x + A * S_tilde_inv * v + R_var_inv * cov_xy * (y - mean_y);
+    K_x = cov_x - A * S_tilde_inv * A.transpose()
+        - R_var_inv * cov_xy * cov_xy.transpose();
 
     if (debug)
     {
@@ -231,10 +252,13 @@ void UnscentedKalmanFilter::inferState(const VectorXf u, const VectorXf y,
         cout << mean_x << endl;
         cout << "State covariance:" << endl;
         cout << cov_x << endl;
-        cout << "Singular values:" << endl;
-        cout << svd.singularValues() << endl;
-        cout << "Inverse singular values:" << endl;
-        cout << S_inv << endl;
+        cout << "Singular values, Kyy:" << endl;
+        cout << S << endl;
+        cout << "Inverse singular values, Kyy:" << endl;
+        cout << S_tilde_inv.diagonal() << endl;
+        JacobiSVD<MatrixXf> svd_xy(cov_xy);
+        cout << "Singular values, Kxy:" << endl;
+        cout << svd_xy.singularValues() << endl;
         cout << "New state estimate:" << endl;
         cout << mu_x << endl;
         cout << "Error covariance:" << endl;
