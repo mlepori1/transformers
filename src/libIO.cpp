@@ -227,3 +227,104 @@ void writeImagePaths(const char* filename, vector<string> image_paths)
 
     ofs.close();
 }
+
+
+void parseConfigFile(const char* config_fn, configParams& params)
+{
+    ifstream ifs(config_fn, ifstream::in);
+    stringstream lineStream;
+    string line, parameter, value;
+
+    // Weight on centroid
+    getline(ifs, line);
+    lineStream.str(line);
+    getline(lineStream, parameter, '=');
+    getline(lineStream, value);
+    params.w0 = stof(value);
+    lineStream.clear();
+    cout << parameter << ": " << value << endl;
+
+    // timestep
+    getline(ifs, line);
+    lineStream.str(line);
+    getline(lineStream, parameter, '=');
+    getline(lineStream, value);
+    params.dt = stof(value);
+    lineStream.clear();
+    cout << parameter << ": " << value << endl;
+
+    // process noise covariance
+    getline(ifs, line);
+    lineStream.str(line);
+    getline(lineStream, parameter, '=');
+    getline(lineStream, value);
+    params.q = stof(value);
+    lineStream.clear();
+    cout << parameter << ": " << value << endl;
+
+    // observation noise covariance
+    getline(ifs, line);
+    lineStream.str(line);
+    getline(lineStream, parameter, '=');
+    getline(lineStream, value);
+    params.r = stof(value);
+    lineStream.clear();
+    cout << parameter << ": " << value << endl;
+
+    // observation type
+    getline(ifs, line);
+    lineStream.str(line);
+    getline(lineStream, parameter, '=');
+    getline(lineStream, value);
+    params.observation = value;
+    lineStream.clear();
+    cout << parameter << ": " << value << endl;
+
+    // path to input file
+    getline(ifs, line);
+    lineStream.str(line);
+    getline(lineStream, parameter, '=');
+    getline(lineStream, value);
+    params.u_path = value;
+    lineStream.clear();
+    cout << parameter << ": " << value << endl;
+
+    // path to state file
+    getline(ifs, line);
+    lineStream.str(line);
+    getline(lineStream, parameter, '=');
+    getline(lineStream, value);
+    params.x_path = value;
+    lineStream.clear();
+    cout << parameter << ": " << value << endl;
+
+    // path to output file
+    getline(ifs, line);
+    lineStream.str(line);
+    getline(lineStream, parameter, '=');
+    getline(lineStream, value);
+    params.y_path = value;
+    lineStream.clear();
+    cout << parameter << ": " << value << endl;
+
+    // save simulated RGB frames?
+    getline(ifs, line);
+    lineStream.str(line);
+    getline(lineStream, parameter, '=');
+    getline(lineStream, value);
+    params.save_rgb = stoi(value);
+    lineStream.clear();
+    cout << parameter << ": " << value << endl;
+
+    // save simulated depth frames?
+    getline(ifs, line);
+    lineStream.str(line);
+    getline(lineStream, parameter, '=');
+    getline(lineStream, value);
+    params.save_depth = stoi(value);
+    lineStream.clear();
+    cout << parameter << ": " << value << endl;
+    
+    ifs.close();
+}
+

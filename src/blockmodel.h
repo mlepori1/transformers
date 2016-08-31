@@ -72,6 +72,10 @@ class BlockModel
 
         VectorXf getState() const;
 
+        Vector3f observePosition() const { return s; };
+        Vector3f observeVelocity() const { return v; };
+        Vector3f observeOrientation() const { return theta; };
+
         /**
          * Process model.
          * Take a step in state space by driving the dynamical system with
@@ -96,7 +100,6 @@ class BlockModel
         void draw() const;
 
         void printState() const;
-
 
     private:
 

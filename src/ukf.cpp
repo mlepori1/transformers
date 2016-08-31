@@ -1,5 +1,4 @@
 #include "ukf.h"
-#include "libIO.h"
 
 using namespace Eigen;
 using namespace std;
@@ -16,51 +15,11 @@ UnscentedKalmanFilter::UnscentedKalmanFilter(const VectorXf x0, const MatrixXf K
 
     this->blocks = blocks;
 
-    vector<BlockModel>::iterator it;
-
-    // Set sigma points
-    // Apparently w0 = 1/3 is good if you believe the initial distribution is
-    // Gaussian
-    float w0 = 1.0 / 3.0;
-    initializeSigmaPoints(x0, K0, w0);
-
     // Set image dimensions
     GLint viewport[4];
     glGetIntegerv(GL_VIEWPORT, viewport);
     image_width = viewport[2];
     image_height = viewport[3];
-}
-
-void UnscentedKalmanFilter::initializeSigmaPoints(const VectorXf x0,
-        const MatrixXf K0, const float w0)
-{
-    // Calculate matrix square root used in sigma point calculations
-    float n = x0.size();
-    MatrixXf K_scaled = n / (1 - w0) * K0;
-    MatrixXf K_scaled_sqrt = K_scaled.llt().matrixL(); // Cholesky decomposition
-
-    if (debug)
-    {
-        cout << "Dimensionality of state vector: " << n << endl;
-        cout << "Number of sigma points: " << 2 * n + 1 << endl;
-        cout << "(scaled) Square root of covariance matrix: " << endl;
-        cout << K_scaled_sqrt << endl;
-    }
-
-    // Define matrix with sigma points as columns
-    X = MatrixXf::Zero(n, 2 * n + 1);
-    X.col(0) = x0;
-    for (int i = 1; i <= n; ++i)
-    {
-        X.col(i) = x0 + K_scaled_sqrt.col(i - 1);
-        X.col(i + n) = x0 - K_scaled_sqrt.col(i - 1);
-    }
-
-    // Define vector of sigma point weights
-    w = VectorXf::Zero(2 * n + 1);
-    float w_constant = (1 - w0) / (2 * n);
-    w.fill(w_constant);
-    w(0) = w0;
 }
 
 int UnscentedKalmanFilter::stateSize() const
@@ -141,6 +100,28 @@ VectorXf UnscentedKalmanFilter::generateObservation(GLFWwindow* window,
     return image;
 }
 
+VectorXf UnscentedKalmanFilter::observePosition() const
+{
+    Vector3f position;
+
+    vector<BlockModel>::const_iterator it;
+    for (it = blocks.begin(); it != blocks.end(); ++it)
+        position << it->observePosition();
+
+    return position;
+}
+
+VectorXf UnscentedKalmanFilter::observeOrientation() const
+{
+    Vector3f orientation;
+
+    vector<BlockModel>::const_iterator it;
+    for (it = blocks.begin(); it != blocks.end(); ++it)
+        orientation << it->observeOrientation();
+
+    return orientation;
+}
+
 VectorXf UnscentedKalmanFilter::sceneSnapshot(const GLenum format,
         const char* image_fn) const
 {
@@ -178,13 +159,88 @@ VectorXf UnscentedKalmanFilter::sceneSnapshot(const GLenum format,
     return image;
 }
 
-void UnscentedKalmanFilter::inferState(const VectorXf u, const VectorXf y,
-        const float dt, const MatrixXf Q, const float R_var, 
-        GLFWwindow* window, const string fn_prefix)
+void UnscentedKalmanFilter::setSigmaPoints(const float w0)
 {
-    int bytes_per_pixel = 3;    // FIXME
-    int num_bytes = image_width * image_height * bytes_per_pixel;
-    //int NUM_SINGULAR_DIMS = 2; // FIXME
+    // Calculate matrix square root used in sigma point calculations
+    float n = mu_x.size();
+    MatrixXf K_scaled = n / (1 - w0) * K_x;
+    MatrixXf K_scaled_sqrt = K_scaled.llt().matrixL(); // Cholesky decomposition
+
+    if (debug)
+    {
+        //cout << "Dimensionality of state vector: " << n << endl;
+        //cout << "Number of sigma points: " << 2 * n + 1 << endl;
+    }
+
+    // Define matrix with sigma points as columns
+    X = MatrixXf::Zero(n, 2 * n + 1);
+    X.col(0) = mu_x;
+    for (int i = 1; i <= n; ++i)
+    {
+        X.col(i) = mu_x + K_scaled_sqrt.col(i - 1);
+        X.col(i + n) = mu_x - K_scaled_sqrt.col(i - 1);
+    }
+
+    // Define vector of sigma point weights
+    w = VectorXf::Zero(2 * n + 1);
+    float w_constant = (1 - w0) / (2 * n);
+    w.fill(w_constant);
+    w(0) = w0;
+}
+
+void UnscentedKalmanFilter::inferState(const VectorXf u, const VectorXf y,
+        const configParams params)
+{
+    MatrixXf Q = params.q * MatrixXf::Identity(mu_x.size(), mu_x.size());
+    MatrixXf R = params.r * MatrixXf::Identity(y.size(), y.size());
+
+    setSigmaPoints(params.w0);
+
+    // Propagate sigma points through process and observation models
+    MatrixXf Y = MatrixXf::Zero(y.size(), X.cols());
+    for (int i = 0; i < X.cols(); ++i)
+    {
+        X.col(i) = updateState(X.col(i), u, params.dt);
+
+        if (params.observation == "position")
+            Y.col(i) = observePosition();
+        else if (params.observation == "orientation")
+            Y.col(i) = observeOrientation();
+    }
+
+    // Calculate predicted means and covariances
+    VectorXf mean_x = weightedMean(w, X);
+    VectorXf mean_y = weightedMean(w, Y);
+    MatrixXf cov_xx = weightedCovariance(w, X, mean_x) + Q;
+    MatrixXf cov_yy = weightedCovariance(w, Y, mean_y) + R;
+    MatrixXf cov_xy = weightedCrossCovariance(w, X, Y, mean_x, mean_y);
+
+    // solve for the transpose of the Kalman gain matrix
+    MatrixXf GT = cov_yy.transpose().ldlt().solve(cov_xy.transpose());
+    mu_x = mean_x + GT.transpose() * (y - mean_y);
+    K_x  = cov_xx - GT.transpose() * cov_yy * GT;
+
+    if (debug)
+    {
+        cout << "INPUT (U)  : ";
+        cout << u.transpose() << endl;
+        cout << "INNOVATION : ";
+        cout << (y - mean_y).transpose() << endl;
+        cout << "X UPDATE   : ";
+        cout << (GT.transpose() * (y - mean_y)).transpose() << endl;
+        cout << "X EXPECTED : ";
+        cout << mean_x.transpose() << endl;
+        cout << "X ESTIMATED: ";
+        cout << mu_x.transpose() << endl;
+    }
+}
+
+void UnscentedKalmanFilter::inferState(const VectorXf u, const VectorXf y,
+        const configParams params, GLFWwindow* window, const string fn_prefix)
+{
+    MatrixXf Q = params.q * MatrixXf::Identity(mu_x.size(), mu_x.size());
+
+    setSigmaPoints(params.w0);
 
     // Propagate sigma points through process and observation models
     stringstream ss;
@@ -192,7 +248,7 @@ void UnscentedKalmanFilter::inferState(const VectorXf u, const VectorXf y,
     MatrixXf Y = MatrixXf::Zero(y.size(), X.cols());
     for (int i = 0; i < X.cols(); ++i)
     {
-        X.col(i) = updateState(X.col(i), u, dt);
+        X.col(i) = updateState(X.col(i), u, params.dt);
         if (!fn_prefix.empty() && debug)
         {
             ss << fn_prefix << i << ".png";
@@ -207,7 +263,7 @@ void UnscentedKalmanFilter::inferState(const VectorXf u, const VectorXf y,
     // computation
     VectorXf mean_x = weightedMean(w, X);
     VectorXf mean_y = weightedMean(w, Y);
-    MatrixXf cov_x = weightedCovariance(w, X, mean_x) + Q;
+    MatrixXf cov_x  = weightedCovariance(w, X, mean_x) + Q;
     MatrixXf cov_xy = weightedCrossCovariance(w, X, Y, mean_x, mean_y);
 
     // This gives us everything we need to do computations with Ky
@@ -220,49 +276,42 @@ void UnscentedKalmanFilter::inferState(const VectorXf u, const VectorXf y,
 
     // Perform update using standard Kalman filter equations
     // (modulo some algebraic manipulation to make the updates computable)
-    /*
-    MatrixXf cov_y_inv_sqrt = svd.matrixU(); // We're not done with this yet
-    ArrayXf S_inv = svd.singularValues().array().inverse();
-    for (int i = 0; i < cov_y_inv_sqrt.cols(); ++i)
-        cov_y_inv_sqrt.col(i) = S_inv(i) * cov_y_inv_sqrt.col(i);
-
-    MatrixXf cov_x_sqrt = cov_xy * cov_y_inv_sqrt;
-    
-    // Update estimated moments
-    mu_x = mean_x + cov_x_sqrt * cov_y_inv_sqrt.transpose() * (y - mean_y);
-    K_x = cov_x - cov_x_sqrt * cov_x_sqrt.transpose();
-    */
-    float R_var_inv = 1.0 / R_var;
+    float r_inv = 1.0 / params.r;
     ArrayXf S = svd.singularValues().array();
-    MatrixXf S_tilde_inv = ((S.pow(2) + R_var * R_var).inverse() - R_var_inv)
+    MatrixXf S_tilde_inv = ((S.pow(2) + params.r * params.r).inverse() - r_inv)
         .matrix().asDiagonal();
 
     MatrixXf A = cov_xy * svd.matrixU();
-    VectorXf v = svd.matrixU().transpose() * (y - mean_y);
+    MatrixXf B = A * S_tilde_inv * svd.matrixU().transpose()
+        + r_inv * cov_xy;
 
-    mu_x = mean_x + A * S_tilde_inv * v + R_var_inv * cov_xy * (y - mean_y);
+    VectorXf update = B * (y - mean_y);
+    mu_x = mean_x + update;
     K_x = cov_x - A * S_tilde_inv * A.transpose()
-        - R_var_inv * cov_xy * cov_xy.transpose();
+        - r_inv * cov_xy * cov_xy.transpose();
 
     if (debug)
     {
-        cout << "Sigma points:" << endl;
-        cout << X << endl;
-        cout << "Expected state:" << endl;
-        cout << mean_x << endl;
-        cout << "State covariance:" << endl;
-        cout << cov_x << endl;
-        cout << "Singular values, Kyy:" << endl;
-        cout << S << endl;
-        cout << "Inverse singular values, Kyy:" << endl;
-        cout << S_tilde_inv.diagonal() << endl;
-        JacobiSVD<MatrixXf> svd_xy(cov_xy);
-        cout << "Singular values, Kxy:" << endl;
-        cout << svd_xy.singularValues() << endl;
-        cout << "New state estimate:" << endl;
-        cout << mu_x << endl;
-        cout << "Error covariance:" << endl;
-        cout << K_x << endl;
+        JacobiSVD<MatrixXf> svd_B(B, ComputeThinU | ComputeThinV);
+
+        cout << "INPUT (U)  : ";
+        cout << u.transpose() << endl;
+        cout << "SING VALS Y: ";
+        cout << S.transpose() << endl;
+        cout << "SVALS Y INV: ";
+        cout << S_tilde_inv.diagonal().transpose() << endl;
+        cout << "I NORM     : ";
+        cout << (y - mean_y).norm() << endl;
+        cout << "I PROJECTED: ";
+        cout << (y - mean_y).transpose() * svd_B.matrixV() << endl;
+        cout << "SIGMA B    : ";
+        cout << svd_B.singularValues().transpose() << endl;
+        cout << "X UPDATE   : ";
+        cout << (update).transpose() << endl;
+        cout << "X EXPECTED : ";
+        cout << mean_x.transpose() << endl;
+        cout << "X ESTIMATED: ";
+        cout << mu_x.transpose() << endl;
     }
 }
 

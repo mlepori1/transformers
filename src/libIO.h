@@ -19,6 +19,22 @@ using namespace std;
 using namespace Eigen;
 
 
+struct configParams
+{
+    float w0;
+    float dt;
+    float q;
+    float r;
+
+    string observation;
+    string u_path;
+    string x_path;
+    string y_path;
+
+    bool save_rgb;
+    bool save_depth;
+};
+
 png_byte* readPng(const char* filename, int& width, int& height);
 
 
@@ -43,3 +59,6 @@ const vector<string> readImagePaths(const char* filename);
 
 
 void writeImagePaths(const char* filename, vector<string> image_paths);
+
+
+void parseConfigFile(const char* config_fn, configParams & params);

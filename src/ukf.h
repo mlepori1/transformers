@@ -6,6 +6,7 @@
  * 2016-08-13: Created by Jonathan D. Jones
  */
 
+#include "libIO.h"
 #include "blockmodel.h"
 #include <vector>
 #include <GLFW/glfw3.h>
@@ -43,8 +44,10 @@ class UnscentedKalmanFilter
         VectorXf generateObservation(GLFWwindow* window, const GLenum format,
                 const char* image_fn) const;
 
-        void inferState(const VectorXf u, const VectorXf y,  const float dt,
-                const MatrixXf Q, const float R_var, GLFWwindow* window,
+        void inferState(const VectorXf u, const VectorXf y,
+                const configParams params);
+        void inferState(const VectorXf u, const VectorXf y,
+                const configParams params, GLFWwindow* window,
                 const string fn_prefix);
 
         int stateSize() const;
@@ -75,6 +78,9 @@ class UnscentedKalmanFilter
         bool debug;
 
 
+        VectorXf observePosition() const;
+        VectorXf observeOrientation() const;
+
         // (UKF helper functions below)
         /**
          * Save the current OpenGL scene.
@@ -87,8 +93,7 @@ class UnscentedKalmanFilter
          */
         VectorXf sceneSnapshot(const GLenum format, const char* image_fn) const;
 
-        void initializeSigmaPoints(const VectorXf mean, const MatrixXf covariance,
-                const float w0);
+        void setSigmaPoints(const float w0);
 };
 
 

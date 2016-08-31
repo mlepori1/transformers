@@ -106,6 +106,7 @@ void BlockModel::updateState(const VectorXf u, const float dt)
     AngleAxis<float> Cy(theta(1), Vector3f(0.0f, 1.0f, 0.0f));
     AngleAxis<float> Cz(theta(2), Vector3f(0.0f, 0.0f, 1.0f));
     Vector3f a_global = Cx * Cy * Cz * a - a_gravity;
+    //Vector3f a_global = a;
 
     Vector3f v_next = v + a_global * dt + n_v;
     Vector3f s_next = s + v * dt + n_s;
