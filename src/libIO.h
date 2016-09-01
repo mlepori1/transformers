@@ -26,7 +26,11 @@ struct configParams
     float q;
     float r;
 
-    string observation;
+    bool observe_image;
+    bool observe_position;
+    bool observe_velocity;
+    bool observe_orientation;
+
     string u_path;
     string x_path;
     string y_path;

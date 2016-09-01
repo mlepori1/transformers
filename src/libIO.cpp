@@ -276,7 +276,34 @@ void parseConfigFile(const char* config_fn, configParams& params)
     lineStream.str(line);
     getline(lineStream, parameter, '=');
     getline(lineStream, value);
-    params.observation = value;
+    params.observe_image = stoi(value);
+    lineStream.clear();
+    cout << parameter << ": " << value << endl;
+
+    // observation type
+    getline(ifs, line);
+    lineStream.str(line);
+    getline(lineStream, parameter, '=');
+    getline(lineStream, value);
+    params.observe_position = stoi(value);
+    lineStream.clear();
+    cout << parameter << ": " << value << endl;
+
+    // observation type
+    getline(ifs, line);
+    lineStream.str(line);
+    getline(lineStream, parameter, '=');
+    getline(lineStream, value);
+    params.observe_velocity = stoi(value);
+    lineStream.clear();
+    cout << parameter << ": " << value << endl;
+
+    // observation type
+    getline(ifs, line);
+    lineStream.str(line);
+    getline(lineStream, parameter, '=');
+    getline(lineStream, value);
+    params.observe_orientation = stoi(value);
     lineStream.clear();
     cout << parameter << ": " << value << endl;
 

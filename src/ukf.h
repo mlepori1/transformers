@@ -28,7 +28,7 @@ class UnscentedKalmanFilter
     public:
 
         UnscentedKalmanFilter(const VectorXf x0, const MatrixXf K0,
-                const vector<BlockModel> blocks);
+                const vector<BlockModel> blocks, const configParams params);
 
         /**
          * Process model.
@@ -51,14 +51,19 @@ class UnscentedKalmanFilter
                 const string fn_prefix);
 
         int stateSize() const;
+
         VectorXf getState() const;
         VectorXf getStateEstimate() { return mu_x; } const;
         MatrixXf getErrorCovariance() { return K_x; } const;
+
+        MatrixXf getObservationMatrix() { return H; } const;
 
         void setDebugStatus(const bool debug) { this->debug = debug; };
 
 
     private:
+
+        configParams params;
 
         vector<BlockModel> blocks;
 
@@ -70,6 +75,9 @@ class UnscentedKalmanFilter
         MatrixXf X;
         VectorXf w;
 
+        // Observation matrix used when system is partially linear
+        MatrixXf H;
+
         // For reading pixels from the OpenGL context
         int image_width;
         int image_height;
@@ -78,8 +86,12 @@ class UnscentedKalmanFilter
         bool debug;
 
 
+        MatrixXf constructObservationMatrix(const configParams params);
+
+        /*
         VectorXf observePosition() const;
         VectorXf observeOrientation() const;
+        */
 
         // (UKF helper functions below)
         /**

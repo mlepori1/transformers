@@ -238,7 +238,7 @@ GLFWwindow* initializeGlfwWindow()
     return window;
 }
 
-UnscentedKalmanFilter initializeUKF(GLint uniModel, GLint uniObjectColor)
+UnscentedKalmanFilter initializeUKF(const configParams params, GLint uniModel, GLint uniObjectColor)
 {
     // Initial conditions for the unscented kalman filter
     int num_blocks = 1;
@@ -299,7 +299,7 @@ UnscentedKalmanFilter initializeUKF(GLint uniModel, GLint uniObjectColor)
         index += dim_i;
     }
 
-    UnscentedKalmanFilter ukf(x, cov, blocks);
+    UnscentedKalmanFilter ukf(x, cov, blocks, params);
 
     return ukf;
 }
@@ -385,14 +385,19 @@ void estimate(int num_samples, UnscentedKalmanFilter ukf,
     if (num_samples < 0)
         num_samples = output.size();
 
+    MatrixXf H = ukf.getObservationMatrix();
     for (int frame_index = 0; frame_index < num_samples; ++frame_index)
     {
         VectorXf u = input[frame_index];
-        VectorXf y;
+        VectorXf x = output[frame_index];
+        VectorXf y = H * x;
+
+        /*
         if (params.observation == "position")
             y = output[frame_index].segment<3>(0);
         else if (params.observation == "orientation")   // orientation
-            y = output[frame_index].segment<3>(3);
+            y = output[frame_index].segment<3>(6);
+        */
 
         // Estimate and store the latent state
         ukf.inferState(u, y, params);
@@ -563,7 +568,7 @@ int main(int argc, char* argv[])
 
     GLint uniModel = glGetUniformLocation(shaderProgram, "model");
     GLint uniObjectColor = glGetUniformLocation(shaderProgram, "objectColor");
-    UnscentedKalmanFilter ukf = initializeUKF(uniModel, uniObjectColor);
+    UnscentedKalmanFilter ukf = initializeUKF(params, uniModel, uniObjectColor);
     if (cl_args.debug)
         ukf.setDebugStatus(cl_args.debug);
 
@@ -600,9 +605,9 @@ int main(int argc, char* argv[])
     }
     else    // estimate
     {
-        if (params.observation == "image")
+        if (params.observe_image)
             estimate(cl_args.num_samples, ukf, params, window, state);
-        else 
+        else // state is partially observed
             estimate(cl_args.num_samples, ukf, params, state);
 
         string out_fn_state = "../working/gl-data/state-estimation.csv";

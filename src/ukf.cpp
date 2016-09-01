@@ -5,7 +5,7 @@ using namespace std;
 
 
 UnscentedKalmanFilter::UnscentedKalmanFilter(const VectorXf x0, const MatrixXf K0,
-        const vector<BlockModel> blocks)
+        const vector<BlockModel> blocks, const configParams params)
 {
     debug = false;
 
@@ -15,11 +15,66 @@ UnscentedKalmanFilter::UnscentedKalmanFilter(const VectorXf x0, const MatrixXf K
 
     this->blocks = blocks;
 
+    this->params = params;
+    
+    if (!params.observe_image)
+        H = constructObservationMatrix(params);
+
     // Set image dimensions
     GLint viewport[4];
     glGetIntegerv(GL_VIEWPORT, viewport);
     image_width = viewport[2];
     image_height = viewport[3];
+}
+
+MatrixXf UnscentedKalmanFilter::constructObservationMatrix(const configParams params)
+{
+    int statesize = stateSize();
+
+    // Count the number of dimensions observed for each block
+    int num_observed_dims = 0;
+    if (params.observe_position)
+        num_observed_dims += 3;
+    if (params.observe_velocity)
+        num_observed_dims += 3;
+    if (params.observe_orientation)
+        num_observed_dims += 3;
+
+    MatrixXf H = MatrixXf::Zero(num_observed_dims * blocks.size(), mu_x.size());
+
+    int row = 0;
+    int col = 0;
+    for (int i = 0; i < blocks.size(); ++i)
+    {
+        MatrixXf Hi = MatrixXf::Zero(num_observed_dims, blocks[i].statesize);
+
+        int row_i = 0;
+        int col_i = 0;
+        if (params.observe_position)
+        {
+            Hi.block<3,3>(row_i, col_i) = MatrixXf::Identity(3, 3);
+            row_i += 3;
+        }
+        col_i += 3;
+        if (params.observe_velocity)
+        {
+            Hi.block<3,3>(row_i, col_i) = MatrixXf::Identity(3, 3);
+            row_i += 3;
+        }
+        col_i += 3;
+        if (params.observe_orientation)
+        {
+            Hi.block<3,3>(row_i, col_i) = MatrixXf::Identity(3, 3);
+            row_i += 3;
+        }
+        col_i += 3;
+
+        H.block(row, col, num_observed_dims, statesize) = Hi;
+        row += num_observed_dims;
+        col += blocks[i].statesize;
+    }
+
+    return H;
 }
 
 int UnscentedKalmanFilter::stateSize() const
@@ -100,6 +155,7 @@ VectorXf UnscentedKalmanFilter::generateObservation(GLFWwindow* window,
     return image;
 }
 
+/*
 VectorXf UnscentedKalmanFilter::observePosition() const
 {
     Vector3f position;
@@ -121,6 +177,7 @@ VectorXf UnscentedKalmanFilter::observeOrientation() const
 
     return orientation;
 }
+*/
 
 VectorXf UnscentedKalmanFilter::sceneSnapshot(const GLenum format,
         const char* image_fn) const
@@ -196,32 +253,55 @@ void UnscentedKalmanFilter::inferState(const VectorXf u, const VectorXf y,
 
     setSigmaPoints(params.w0);
 
+    cout << endl << "=========================" << endl;
+    cout << endl << "mu_x  " << endl << mu_x.transpose() << endl;
+    cout << endl << "K_x   " << endl << K_x << endl;
+    cout << endl << "w     " << endl << w.transpose() << endl;
+    cout << endl << "X     " << endl << X << endl;
+    cout << endl << "u     " << endl << u.transpose() << endl;
+
     // Propagate sigma points through process and observation models
-    MatrixXf Y = MatrixXf::Zero(y.size(), X.cols());
     for (int i = 0; i < X.cols(); ++i)
     {
         X.col(i) = updateState(X.col(i), u, params.dt);
 
+        /*
         if (params.observation == "position")
             Y.col(i) = observePosition();
         else if (params.observation == "orientation")
             Y.col(i) = observeOrientation();
+        */
     }
 
     // Calculate predicted means and covariances
     VectorXf mean_x = weightedMean(w, X);
-    VectorXf mean_y = weightedMean(w, Y);
     MatrixXf cov_xx = weightedCovariance(w, X, mean_x) + Q;
+
+    /*
+    VectorXf mean_y = weightedMean(w, Y);
     MatrixXf cov_yy = weightedCovariance(w, Y, mean_y) + R;
     MatrixXf cov_xy = weightedCrossCovariance(w, X, Y, mean_x, mean_y);
+    */
+
+    VectorXf mean_y = H * mean_x;
+    MatrixXf cov_yy = H * cov_xx * H.transpose();
+    MatrixXf cov_xy = cov_xx * H.transpose();
 
     // solve for the transpose of the Kalman gain matrix
     MatrixXf GT = cov_yy.transpose().ldlt().solve(cov_xy.transpose());
     mu_x = mean_x + GT.transpose() * (y - mean_y);
     K_x  = cov_xx - GT.transpose() * cov_yy * GT;
 
+    cout << endl << "X     " << endl << X << endl;
+    cout << endl << "cov_xx" << endl << cov_xx << endl;
+    cout << endl << "cov_yy" << endl << cov_yy << endl;
+    cout << endl << "cov_xy" << endl << cov_xy << endl;
+    cout << endl << "GT"     << endl << GT << endl;
+    cout << endl << "=========================" << endl;
+
     if (debug)
     {
+        cout << endl;
         cout << "INPUT (U)  : ";
         cout << u.transpose() << endl;
         cout << "INNOVATION : ";
@@ -230,6 +310,8 @@ void UnscentedKalmanFilter::inferState(const VectorXf u, const VectorXf y,
         cout << (GT.transpose() * (y - mean_y)).transpose() << endl;
         cout << "X EXPECTED : ";
         cout << mean_x.transpose() << endl;
+        cout << "Y EXPECTED : ";
+        cout << mean_y.transpose() << endl;
         cout << "X ESTIMATED: ";
         cout << mu_x.transpose() << endl;
     }
