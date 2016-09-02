@@ -52,9 +52,12 @@ class Application:
         self.corpus = DuploCorpus()
         self.trial_id = self.corpus.meta_data.shape[0]
         self.blocks = ('red', 'yellow', 'green', 'blue')
-        self.task2block = {1: self.blocks[:2], 2: self.blocks[2:],
-                           3: self.blocks, 4: self.blocks, 5: self.blocks,
-                           6: self.blocks}
+        # 1: ./img/4-1.png -- 2: ./img/4-2.png
+        # 3: ./img/6-1.png -- 4: ./img/6-2.png
+        # 5: ./img/8-1.png -- 6: ./img/8-2.png
+        self.task2block = {1: self.blocks[:2], 2: self.blocks[0:1] + self.blocks[2:],
+                           3: self.blocks, 4: self.blocks[0:2] + self.blocks[3:4],
+                           5: self.blocks, 6: self.blocks}
         self.imu2block = {imu: 'UNUSED' for imu in self.corpus.imu_ids}
         
         #===[DATA FIELDS]======================================================
