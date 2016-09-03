@@ -96,7 +96,7 @@ void BlockModel::updateState(const VectorXf u, const float dt)
     Vector3f n_theta (N_theta(generator), N_theta(generator), N_theta(generator));
 
     // Split input vector
-    Vector3f a     = u.segment<3>(0) - a_gravity;
+    Vector3f a     = u.segment<3>(0);
     Vector3f omega = u.segment<3>(3);
 
     Vector3f theta_next = theta + omega * dt; // + n_theta;
@@ -105,9 +105,7 @@ void BlockModel::updateState(const VectorXf u, const float dt)
     AngleAxis<float> Cx(theta(0), Vector3f::UnitX());
     AngleAxis<float> Cy(theta(1), Vector3f::UnitY());
     AngleAxis<float> Cz(theta(2), Vector3f::UnitZ());
-    //Vector3f a_global = Cz * Cy * Cx * a - a_gravity;
-    //cout << a_global.transpose() << endl;
-    Vector3f a_global = Cz * Cy * Cz * a;
+    Vector3f a_global = Cz * Cy * Cx * a - a_gravity;
 
     Vector3f v_next = v + a_global * dt; // + n_v;
     Vector3f s_next = s + v * dt; // + n_s;

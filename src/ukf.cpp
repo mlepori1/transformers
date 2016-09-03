@@ -253,12 +253,15 @@ void UnscentedKalmanFilter::inferState(const VectorXf u, const VectorXf y,
 
     setSigmaPoints(params.w0);
 
-    cout << endl << "=========================" << endl;
-    cout << endl << "mu_x  " << endl << mu_x.transpose() << endl;
-    cout << endl << "K_x   " << endl << K_x << endl;
-    cout << endl << "w     " << endl << w.transpose() << endl;
-    cout << endl << "X     " << endl << X << endl;
-    cout << endl << "u     " << endl << u.transpose() << endl;
+    if (debug)
+    {
+        //cout << endl << "=========================" << endl;
+        cout << endl << "mu_x  " << endl << mu_x.transpose() << endl;
+        cout << endl << "K_x   " << endl << K_x << endl;
+        cout << endl << "w     " << endl << w.transpose() << endl;
+        cout << endl << "X     " << endl << X << endl;
+        //cout << endl << "u     " << endl << u.transpose() << endl;
+    }
 
     // Propagate sigma points through process and observation models
     for (int i = 0; i < X.cols(); ++i)
@@ -292,28 +295,41 @@ void UnscentedKalmanFilter::inferState(const VectorXf u, const VectorXf y,
     mu_x = mean_x + GT.transpose() * (y - mean_y);
     K_x  = cov_xx - GT.transpose() * cov_yy * GT;
 
+    /*
     cout << endl << "X     " << endl << X << endl;
     cout << endl << "cov_xx" << endl << cov_xx << endl;
     cout << endl << "cov_yy" << endl << cov_yy << endl;
     cout << endl << "cov_xy" << endl << cov_xy << endl;
     cout << endl << "GT"     << endl << GT << endl;
     cout << endl << "=========================" << endl;
+    */
 
     if (debug)
     {
+        /*
         cout << endl;
-        cout << "INPUT (U)  : ";
+        cout << "INPUT (U)   : ";
         cout << u.transpose() << endl;
-        cout << "INNOVATION : ";
-        cout << (y - mean_y).transpose() << endl;
-        cout << "X UPDATE   : ";
-        cout << (GT.transpose() * (y - mean_y)).transpose() << endl;
-        cout << "X EXPECTED : ";
-        cout << mean_x.transpose() << endl;
-        cout << "Y EXPECTED : ";
+        cout << "Y EXPECTED  : ";
         cout << mean_y.transpose() << endl;
-        cout << "X ESTIMATED: ";
+        cout << "Y INNOVATION: ";
+        cout << (y - mean_y).transpose() << endl;
+        cout << "X INNOVATION: ";
+        */
+        cout << endl << X << endl;
+        cout << endl << cov_xx << endl;
+        cout << endl << cov_xy << endl;
+        cout << endl << cov_yy << endl;
+        cout << endl << (y - mean_y).transpose() << endl;
+        cout << endl << GT.transpose() << endl;
+        cout << endl << (GT.transpose() * (y - mean_y)).transpose() << endl;
+        cout << endl << "=========================" << endl;
+        /*
+        cout << "X EXPECTED  : ";
+        cout << mean_x.transpose() << endl;
+        cout << "X ESTIMATED : ";
         cout << mu_x.transpose() << endl;
+        */
     }
 }
 

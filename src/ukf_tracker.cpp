@@ -269,11 +269,11 @@ UnscentedKalmanFilter initializeUKF(const configParams params, GLint uniModel, G
         VectorXf sigma_noise(sigma_s.size() + sigma_v.size() + sigma_theta.size());
         sigma_noise << sigma_s, sigma_v, sigma_theta;
 
-        VectorXf sigma = VectorXf::Ones(sigma_noise.size());
-        /*
-        VectorXf sigma_augmented(sigma.size() + sigma_noise.size());
-        sigma_augmented << sigma, sigma_noise;
-        */
+        VectorXf sigma(sigma_noise.size());
+        float s_s = 1.0;
+        float s_v = 1.0;
+        float s_theta = 0.01;
+        sigma << s_s * Vector3f::Ones(), s_v * Vector3f::Ones(), s_theta * Vector3f::Ones();
         diag_covariances.push_back(sigma);
 
         // Initialize block model
@@ -369,7 +369,8 @@ void simulate(int num_samples,  UnscentedKalmanFilter ukf,
 }
 
 void estimate(int num_samples, UnscentedKalmanFilter ukf,
-        const configParams params, vector<VectorXf>& state)
+        const configParams params, vector<VectorXf>& state,
+        vector<VectorXf>& err_cov)
 {
     // In this case the state vector is partially observed, so the input is x
     vector<VectorXf> input = readCsv(params.u_path.c_str());
@@ -402,7 +403,11 @@ void estimate(int num_samples, UnscentedKalmanFilter ukf,
         // Estimate and store the latent state
         ukf.inferState(u, y, params);
         VectorXf x_t = ukf.getStateEstimate();
+        MatrixXf K_t = ukf.getErrorCovariance();
+        VectorXf K_flat(Map<VectorXf>(K_t.data(), K_t.cols() * K_t.rows()));
+
         state.push_back(x_t);
+        err_cov.push_back(K_flat);
     }
 }
 
@@ -605,18 +610,23 @@ int main(int argc, char* argv[])
     }
     else    // estimate
     {
+        vector<VectorXf> err_cov;
+        vector<string> cov_colnames;
         if (params.observe_image)
             estimate(cl_args.num_samples, ukf, params, window, state);
         else // state is partially observed
-            estimate(cl_args.num_samples, ukf, params, state);
+            estimate(cl_args.num_samples, ukf, params, state, err_cov);
 
         string out_fn_state = "../working/gl-data/state-estimation.csv";
         writeCsv(out_fn_state.c_str(), state_colnames, state);
 
-        vector<VectorXf> true_state = readCsv(params.x_path.c_str());
-        vector<VectorXf> residual = calculateResidual(state, true_state);
-        string out_fn_resid = "../working/gl-data/state-residual.csv";
-        writeCsv(out_fn_resid.c_str(), state_colnames, residual);
+        string out_fn_err_cov = "../working/gl-data/state-error-covariance.csv";
+        writeCsv(out_fn_err_cov.c_str(), cov_colnames, err_cov);
+
+        //vector<VectorXf> true_state = readCsv(params.x_path.c_str());
+        //vector<VectorXf> residual = calculateResidual(state, true_state);
+        //string out_fn_resid = "../working/gl-data/state-residual.csv";
+        //writeCsv(out_fn_resid.c_str(), state_colnames, residual);
     }
 
 
