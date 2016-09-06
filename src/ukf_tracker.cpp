@@ -262,10 +262,11 @@ UnscentedKalmanFilter initializeUKF(const configParams params, GLint uniModel, G
         mu_augmented << mu, mu_noise;
         */
         means.push_back(mu);
-        
-        Vector3f sigma_s     = Vector3f::Ones() * 0.0; //0.01;
-        Vector3f sigma_v     = Vector3f::Ones() * 0.0; //0.01;
-        Vector3f sigma_theta = Vector3f::Ones() * 0.0; //0.05;
+       
+        // Process noise
+        Vector3f sigma_s     = params.sigma_position * Vector3f::Ones();
+        Vector3f sigma_v     = params.sigma_velocity * Vector3f::Ones();
+        Vector3f sigma_theta = params.sigma_orientation * Vector3f::Ones();
         VectorXf sigma_noise(sigma_s.size() + sigma_v.size() + sigma_theta.size());
         sigma_noise << sigma_s, sigma_v, sigma_theta;
 
@@ -328,12 +329,17 @@ void setTransformationMatrices(GLint shaderProgram)
 
 void simulate(int num_samples,  UnscentedKalmanFilter ukf,
         configParams params, GLFWwindow* window, vector<VectorXf>& state,
-        vector<VectorXf>& input, vector<string>& output_fns)
+        vector<VectorXf>& input, vector<VectorXf>& output,
+        vector<string>& image_fns)
 {
-    int field_width = 10;   // No sequence should need more than 10 digits (famous last words)
+    // No sequence should need more than 10 digits (famous last words)
+    int field_width = 10;
     for (int frame_index = 0; frame_index < num_samples; ++frame_index)
     {
-        // State at current time
+        // Observed (noise-corrupted) state at current time
+        VectorXf y_t = ukf.observeState();
+        
+        // True state at current time
         VectorXf x_t = ukf.getState();
 
         // Input at current time
@@ -343,7 +349,7 @@ void simulate(int num_samples,  UnscentedKalmanFilter ukf,
         Vector3f omega_t(0.0f, 0.0f, 0.0f);
         VectorXf u_t(a_t.size() + omega_t.size());
         u_t << a_t + a_g, omega_t;
-        
+
         // Render scene and save resulting image
         string frame_str = to_string(frame_index);
         string fn;
@@ -361,7 +367,8 @@ void simulate(int num_samples,  UnscentedKalmanFilter ukf,
         // Store data
         state.push_back(x_t);
         input.push_back(u_t);
-        output_fns.push_back(fn);
+        output.push_back(y_t);
+        image_fns.push_back(fn);
 
         // Take a step in state space
         ukf.updateState(u_t, dt);
@@ -386,12 +393,11 @@ void estimate(int num_samples, UnscentedKalmanFilter ukf,
     if (num_samples < 0)
         num_samples = output.size();
 
-    MatrixXf H = ukf.getObservationMatrix();
     for (int frame_index = 0; frame_index < num_samples; ++frame_index)
     {
         VectorXf u = input[frame_index];
         VectorXf x = output[frame_index];
-        VectorXf y = H * x;
+        VectorXf y = ukf.observeState(x);
 
         /*
         if (params.observation == "position")
@@ -602,11 +608,14 @@ int main(int argc, char* argv[])
 
     if (cl_args.simulate)
     {
-        vector<string> output_fns;
-        simulate(cl_args.num_samples, ukf, params, window, state, input, output_fns);
+        vector<string> image_fns;
+        vector<VectorXf> output;
+        simulate(cl_args.num_samples, ukf, params, window, state, input, output,
+                 image_fns);
         writeCsv(params.u_path.c_str(), input_colnames, input);
         writeCsv(params.x_path.c_str(), state_colnames, state);
-        writeImagePaths(params.y_path.c_str(), output_fns);
+        writeCsv(params.y_path.c_str(), state_colnames, output);
+        writeImagePaths(params.images_path.c_str(), image_fns);
     }
     else    // estimate
     {

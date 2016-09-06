@@ -97,6 +97,13 @@ class BlockModel
 
         void printState() const;
 
+        void setObservationMatrix(const MatrixXf H) { this->H = H; };
+        MatrixXf getObservationMatrix() const { return H; };
+
+        VectorXf sampleNoise();
+        VectorXf observeState();
+
+
     private:
 
         // Block position and orientation (used when rendering)
@@ -108,6 +115,9 @@ class BlockModel
         normal_distribution<float> N_s;
         normal_distribution<float> N_v;
         normal_distribution<float> N_theta;
+
+        // Observation matrix
+        MatrixXf H;
 
         Vector3f color;
 

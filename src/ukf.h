@@ -60,6 +60,9 @@ class UnscentedKalmanFilter
 
         void setDebugStatus(const bool debug) { this->debug = debug; };
 
+        VectorXf observeState(VectorXf x);
+        VectorXf observeState();
+
 
     private:
 

@@ -69,6 +69,7 @@ MatrixXf UnscentedKalmanFilter::constructObservationMatrix(const configParams pa
         }
         col_i += 3;
 
+        blocks[i].setObservationMatrix(Hi);
         H.block(row, col, num_observed_dims, statesize) = Hi;
         row += num_observed_dims;
         col += blocks[i].statesize;
@@ -245,6 +246,43 @@ void UnscentedKalmanFilter::setSigmaPoints(const float w0)
     w(0) = w0;
 }
 
+VectorXf UnscentedKalmanFilter::observeState(VectorXf x)
+{
+    // Pass each part of state through i-th block's observation model
+    int cur_idx_x  = 0;
+    int cur_idx_xn = 0;
+    VectorXf x_noise(H.cols());
+    for (int i = 0; i < blocks.size(); ++i)
+    {
+        VectorXf x_cur = x.segment(cur_idx_x, blocks[i].statesize);
+        VectorXf n_cur = blocks[i].sampleNoise();
+        x_noise.segment(cur_idx_xn, n_cur.size()) = x_cur + n_cur;
+
+        cur_idx_x = blocks[i].statesize;
+        cur_idx_xn = x_noise.size();
+    }
+
+    return H * x_noise;
+}
+
+VectorXf UnscentedKalmanFilter::observeState()
+{
+    // Pass each part of state through i-th block's observation model
+    int cur_idx_x = 0;
+    int cur_idx_y = 0;
+    VectorXf y(H.rows());
+    for (int i = 0; i < blocks.size(); ++i)
+    {
+        VectorXf y_cur = blocks[i].observeState();
+        y.segment(cur_idx_y, y.size()) = y_cur;
+
+        cur_idx_x = blocks[i].statesize;
+        cur_idx_y = y.size();
+    }
+
+    return y;
+}
+
 void UnscentedKalmanFilter::inferState(const VectorXf u, const VectorXf y,
         const configParams params)
 {
@@ -265,16 +303,7 @@ void UnscentedKalmanFilter::inferState(const VectorXf u, const VectorXf y,
 
     // Propagate sigma points through process and observation models
     for (int i = 0; i < X.cols(); ++i)
-    {
         X.col(i) = updateState(X.col(i), u, params.dt);
-
-        /*
-        if (params.observation == "position")
-            Y.col(i) = observePosition();
-        else if (params.observation == "orientation")
-            Y.col(i) = observeOrientation();
-        */
-    }
 
     // Calculate predicted means and covariances
     VectorXf mean_x = weightedMean(w, X);
