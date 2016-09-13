@@ -190,7 +190,7 @@ def sample(socket):
     sample = recvAll(socket, 1)
 
     return sample
-
+    
 
 def stream(connected_devices, path, die, q):
     """
@@ -390,14 +390,14 @@ def setDataMode(socket, datamode):
 
 def setRate(socket, rate):
     """
-    Set WAX9 device's output rate. This is mostly for debug use.
+    Set WAX9 device's output rate.
 
     Args:
     -----
     socket: bluetooth socket
       Connection to WAX9 device
     rate: int
-      New output rate (default is 50Hz)
+      New output rate in samples per second (Hz) (default is 50Hz)
 
     Returns:
     --------
@@ -410,3 +410,106 @@ def setRate(socket, rate):
 
     return settings
 
+
+def setThreshold(socket, threshold):
+    """
+    Set the number of samples to log before transmitting a packet.
+    
+    Args:
+    -----
+    socket: bluetooth socket
+      Connection to WAX9 device
+    threshold: int
+      Number of samples to log before transmitting a packet
+    
+    Returns:
+    --------
+    settings: str
+      Device's settings after threshold has been changed
+    """
+    
+    socket.sendall("threshold {}\r\n".format(threshold))
+    settings = recvAll(socket, 1)
+    
+    return settings
+
+
+def newStream(devices, names, filename):
+    
+    dev2name = {devices[i]: names[i] for i in range(len(names))}
+    
+    import datetime
+    
+    f = open(filename, 'wb')
+    
+    for device in devices:
+        device.sendall('stream\r\n')
+    
+    """
+    ready, _, _ = select.select(devices, [], [])
+    while ready:
+        for device in ready:
+            byte_str, addr = device.recvfrom(4096)
+            f.write(byte_str)
+            cur_time = datetime.datetime.now()
+            prev_time = cur_time
+            print(len(byte_str))
+            print(byte_str.encode('hex'))
+        ready, _, _ = select.select([device], [], [], 0)
+    """
+    prev_time = datetime.datetime.now()
+    
+    ready, _, _ = select.select(devices, [], [])
+    while ready:
+        for device in ready:
+            byte_str, addr = device.recvfrom(4096)
+            f.write(byte_str)
+            
+            name = dev2name[device]
+            cur_time = datetime.datetime.now()
+            print('{}  |  {}  |  {}'.format(name, cur_time - prev_time, len(byte_str)))
+            prev_time = cur_time
+            #print(byte_str.encode('hex'))
+        ready, _, _ = select.select(devices, [], []) #, 0)
+    
+    device.sendall('\r\n')    
+    
+    f.close()
+
+
+def decodeStream(filename):
+    
+    with open(filename, 'rb') as f:
+        for line in f:
+            print(line.encode('hex'))
+
+
+if __name__ == '__main__':
+    
+    filename = 'test'
+    target_addresses = ('00:17:E9:D7:09:49', '00:17:E9:D7:09:0F',
+                        '00:17:E9:D7:09:5D', '00:17:E9:D7:08:F1')
+    rate = 150
+    threshold = 512
+    
+    devices = {}
+    for address in target_addresses:
+        socket, name = connect(address)
+        devices[name] = socket
+        print(name)
+    
+    for socket in devices.values():
+        settings = getSettings(socket)
+        print(settings)
+    
+    for socket in devices.values():
+        settings = setRate(socket, rate)
+        print(settings)
+    
+    for socket in devices.values():
+        settings = setThreshold(socket, threshold)
+        print(settings)
+    
+    newStream(devices.values(), devices.keys(), filename)
+    
+    decodeStream(filename)
