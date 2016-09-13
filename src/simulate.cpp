@@ -262,18 +262,19 @@ UnscentedKalmanFilter initializeUKF(const configParams params, GLint uniModel, G
         mu_augmented << mu, mu_noise;
         */
         means.push_back(mu);
-        
-        Vector3f sigma_s     = Vector3f::Ones() * 0.0; //0.01;
-        Vector3f sigma_v     = Vector3f::Ones() * 0.0; //0.01;
-        Vector3f sigma_theta = Vector3f::Ones() * 0.0; //0.05;
+       
+        // Process noise
+        Vector3f sigma_s     = params.sigma_position * Vector3f::Ones();
+        Vector3f sigma_v     = params.sigma_velocity * Vector3f::Ones();
+        Vector3f sigma_theta = params.sigma_orientation * Vector3f::Ones();
         VectorXf sigma_noise(sigma_s.size() + sigma_v.size() + sigma_theta.size());
         sigma_noise << sigma_s, sigma_v, sigma_theta;
 
-        VectorXf sigma = VectorXf::Ones(sigma_noise.size());
-        /*
-        VectorXf sigma_augmented(sigma.size() + sigma_noise.size());
-        sigma_augmented << sigma, sigma_noise;
-        */
+        VectorXf sigma(sigma_noise.size());
+        float s_s = 1.0;
+        float s_v = 1.0;
+        float s_theta = 0.01;
+        sigma << s_s * Vector3f::Ones(), s_v * Vector3f::Ones(), s_theta * Vector3f::Ones();
         diag_covariances.push_back(sigma);
 
         // Initialize block model
@@ -328,12 +329,17 @@ void setTransformationMatrices(GLint shaderProgram)
 
 void simulate(int num_samples,  UnscentedKalmanFilter ukf,
         configParams params, GLFWwindow* window, vector<VectorXf>& state,
-        vector<VectorXf>& input, vector<string>& output_fns)
+        vector<VectorXf>& input, vector<VectorXf>& output,
+        vector<string>& image_fns)
 {
-    int field_width = 10;   // No sequence should need more than 10 digits (famous last words)
+    // No sequence should need more than 10 digits (famous last words)
+    int field_width = 10;
     for (int frame_index = 0; frame_index < num_samples; ++frame_index)
     {
-        // State at current time
+        // Observed (noise-corrupted) state at current time
+        VectorXf y_t = ukf.observeState();
+        
+        // True state at current time
         VectorXf x_t = ukf.getState();
 
         // Input at current time
@@ -343,7 +349,7 @@ void simulate(int num_samples,  UnscentedKalmanFilter ukf,
         Vector3f omega_t(0.0f, 0.0f, 0.0f);
         VectorXf u_t(a_t.size() + omega_t.size());
         u_t << a_t + a_g, omega_t;
-        
+
         // Render scene and save resulting image
         string frame_str = to_string(frame_index);
         string fn;
@@ -361,105 +367,17 @@ void simulate(int num_samples,  UnscentedKalmanFilter ukf,
         // Store data
         state.push_back(x_t);
         input.push_back(u_t);
-        output_fns.push_back(fn);
+        output.push_back(y_t);
+        image_fns.push_back(fn);
 
         // Take a step in state space
         ukf.updateState(u_t, dt);
     }
 }
 
-void estimate(int num_samples, UnscentedKalmanFilter ukf,
-        const configParams params, vector<VectorXf>& state)
-{
-    // In this case the state vector is partially observed, so the input is x
-    vector<VectorXf> input = readCsv(params.u_path.c_str());
-    vector<VectorXf> output = readCsv(params.x_path.c_str());
-
-    // Every state should have a corresponding input and output
-    assert(input.size() == output.size());
-
-    // It isn't possible to process more frames than exist
-    assert(num_samples <= int(output.size()));
-
-    // A negative value means: process all files in output.
-    if (num_samples < 0)
-        num_samples = output.size();
-
-    MatrixXf H = ukf.getObservationMatrix();
-    for (int frame_index = 0; frame_index < num_samples; ++frame_index)
-    {
-        VectorXf u = input[frame_index];
-        VectorXf x = output[frame_index];
-        VectorXf y = H * x;
-
-        /*
-        if (params.observation == "position")
-            y = output[frame_index].segment<3>(0);
-        else if (params.observation == "orientation")   // orientation
-            y = output[frame_index].segment<3>(6);
-        */
-
-        // Estimate and store the latent state
-        ukf.inferState(u, y, params);
-        VectorXf x_t = ukf.getStateEstimate();
-        state.push_back(x_t);
-    }
-}
-
-void estimate(int num_samples, UnscentedKalmanFilter ukf,
-        const configParams params, GLFWwindow* window, vector<VectorXf> state)
-{
-    vector<VectorXf> input = readCsv(params.u_path.c_str());
-    vector<string> output = readImagePaths(params.y_path.c_str());
-
-    // Every state should have a corresponding input and output
-    assert(input.size() == output.size());
-
-    // It isn't possible to process more frames than exist
-    assert(num_samples <= int(output.size()));
-
-    // A negative value means: process all files in output_fns.
-    if (num_samples < 0)
-        num_samples = output.size();
-
-    stringstream ss;
-    string fn_prefix;
-    for (int frame_index = 0; frame_index < num_samples; ++frame_index)
-    {
-        ss << "../working/gl-render/sigma/frame" << frame_index << "-point";
-        fn_prefix = ss.str();
-        ss.str("");
-
-        // Load image
-        int width, height;
-        png_byte* image_bytes = readPng(output[frame_index].c_str(), width, height);
-        int num_bytes = width * height * 3;
-        VectorXf y = toVector(image_bytes, num_bytes);
-
-        VectorXf u = input[frame_index];
-
-        // Estimate and store the latent state
-        ukf.inferState(u, y, params, window, fn_prefix);
-        VectorXf x_t = ukf.getStateEstimate();
-        state.push_back(x_t);
-    }
-}
-
-vector<VectorXf> calculateResidual(vector<VectorXf> x_estimated, vector<VectorXf> x_true)
-{
-    assert(x_estimated.size() <= x_true.size());
-
-    vector<VectorXf> residual;
-    for (int i = 0; i < x_estimated.size(); ++i)
-        residual.push_back(x_true[i] - x_estimated[i]);
-
-    return residual;
-}
-
 void printUsage(char* argv[])
 {
     cerr << "Usage: " << argv[0] << " simulate <num samples>" << endl;
-    cerr << "   OR: " << argv[0] << " [--debug] [--observe i|s|t]  estimate <num samples>" << endl;
 }
 
 struct args
@@ -469,9 +387,6 @@ struct args
 
     // Print debug output?
     bool debug;
-
-    // Operation mode: generate simulation data or estimate state
-    bool simulate;
 };
 
 int parseArgs(int argc, char* argv[], args& cl_args)
@@ -479,7 +394,7 @@ int parseArgs(int argc, char* argv[], args& cl_args)
     cl_args.debug = false;
 
     string mode;
-    if (argc == 4)
+    if (argc == 3)
     {
         if (string(argv[1]) != "--debug")
         {
@@ -488,29 +403,15 @@ int parseArgs(int argc, char* argv[], args& cl_args)
         }
 
         cl_args.debug = true;
-        mode = string(argv[2]);
-        cl_args.num_samples = atoi(argv[3]);
-    }
-    else if (argc == 3)
-    {
-        mode = string(argv[1]);
         cl_args.num_samples = atoi(argv[2]);
+    }
+    else if (argc == 2)
+    {
+        cl_args.num_samples = atoi(argv[1]);
     }
     else
     {
         cout << argc << endl;
-        printUsage(argv);
-        return 1;
-    }
-
-    // Set operation mode
-    if (mode == "simulate")
-        cl_args.simulate = true;
-    else if (mode == "estimate")
-        cl_args.simulate = false;
-    else
-    {
-        cout << mode << endl;
         printUsage(argv);
         return 1;
     }
@@ -556,7 +457,8 @@ int main(int argc, char* argv[])
 
     GLint normAttrib = glGetAttribLocation(shaderProgram, "normal");
     glEnableVertexAttribArray(normAttrib);
-    glVertexAttribPointer(normAttrib, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(GLfloat), (void*)(3 * sizeof(GLfloat)));
+    glVertexAttribPointer(normAttrib, 3, GL_FLOAT, GL_FALSE,
+            6 * sizeof(GLfloat), (void*)(3 * sizeof(GLfloat)));
 
     // Set up lighting uniforms
     GLint uniLightColor = glGetUniformLocation(shaderProgram, "lightColor");
@@ -595,29 +497,15 @@ int main(int argc, char* argv[])
     input_colnames.push_back("angular-velocity_z");
 
 
-    if (cl_args.simulate)
-    {
-        vector<string> output_fns;
-        simulate(cl_args.num_samples, ukf, params, window, state, input, output_fns);
-        writeCsv(params.u_path.c_str(), input_colnames, input);
-        writeCsv(params.x_path.c_str(), state_colnames, state);
-        writeImagePaths(params.y_path.c_str(), output_fns);
-    }
-    else    // estimate
-    {
-        if (params.observe_image)
-            estimate(cl_args.num_samples, ukf, params, window, state);
-        else // state is partially observed
-            estimate(cl_args.num_samples, ukf, params, state);
-
-        string out_fn_state = "../working/gl-data/state-estimation.csv";
-        writeCsv(out_fn_state.c_str(), state_colnames, state);
-
-        vector<VectorXf> true_state = readCsv(params.x_path.c_str());
-        vector<VectorXf> residual = calculateResidual(state, true_state);
-        string out_fn_resid = "../working/gl-data/state-residual.csv";
-        writeCsv(out_fn_resid.c_str(), state_colnames, residual);
-    }
+    // Simulate data
+    vector<string> image_fns;
+    vector<VectorXf> output;
+    simulate(cl_args.num_samples, ukf, params, window, state, input, output,
+             image_fns);
+    writeCsv(params.u_path.c_str(), input_colnames, input);
+    writeCsv(params.x_path.c_str(), state_colnames, state);
+    writeCsv(params.y_path.c_str(), state_colnames, output);
+    writeImagePaths(params.images_path.c_str(), image_fns);
 
 
     glDeleteProgram(shaderProgram);

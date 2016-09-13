@@ -26,6 +26,10 @@ struct configParams
     float q;
     float r;
 
+    float sigma_position;
+    float sigma_velocity;
+    float sigma_orientation;
+
     bool observe_image;
     bool observe_position;
     bool observe_velocity;
@@ -34,6 +38,7 @@ struct configParams
     string u_path;
     string x_path;
     string y_path;
+    string images_path;
 
     bool save_rgb;
     bool save_depth;

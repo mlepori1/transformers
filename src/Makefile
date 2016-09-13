@@ -1,5 +1,6 @@
 # OBJS specifies which files to compile as part of the project
-OBJS = ukf_tracker.cpp blockmodel.cpp ukf.cpp libIO.cpp
+SIM_OBJS = simulate.cpp blockmodel.cpp ukf.cpp libIO.cpp
+EST_OBJS = estimate.cpp blockmodel.cpp ukf.cpp libIO.cpp
 
 # CC specifies which compiler we're using
 CC = g++
@@ -22,5 +23,15 @@ LINKER_FLAGS = -lz -lpng -framework OpenGL -lglfw3 -lglew
 OBJ_NAME = main
 
 # This is the target that compiles our executable
-all : $(OBJS)
-	$(CC) $(OBJS) $(INCLUDE_PATHS) $(LIBRARY_PATHS) $(COMPILER_FLAGS) $(LINKER_FLAGS) -o $(OBJ_NAME)
+#all : $(OBJS)
+#	$(CC) $(OBJS) $(INCLUDE_PATHS) $(LIBRARY_PATHS) $(COMPILER_FLAGS) $(LINKER_FLAGS) -o $(OBJ_NAME)
+all : simulate estimate
+
+simulate : $(SIM_OBJS)
+	$(CC) $(SIM_OBJS) $(INCLUDE_PATHS) $(LIBRARY_PATHS) $(COMPILER_FLAGS) $(LINKER_FLAGS) -o simulate
+
+estimate : $(EST_OBJS)
+	$(CC) $(EST_OBJS) $(INCLUDE_PATHS) $(LIBRARY_PATHS) $(COMPILER_FLAGS) $(LINKER_FLAGS) -o estimate
+
+clean :
+	\rm *.o *~ simulate estimate

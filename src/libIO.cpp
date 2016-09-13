@@ -271,6 +271,33 @@ void parseConfigFile(const char* config_fn, configParams& params)
     lineStream.clear();
     cout << parameter << ": " << value << endl;
 
+    // standard deviation of position noise
+    getline(ifs, line);
+    lineStream.str(line);
+    getline(lineStream, parameter, '=');
+    getline(lineStream, value);
+    params.sigma_position = stof(value);
+    lineStream.clear();
+    cout << parameter << ": " << value << endl;
+
+    // standard deviation of velocity noise
+    getline(ifs, line);
+    lineStream.str(line);
+    getline(lineStream, parameter, '=');
+    getline(lineStream, value);
+    params.sigma_velocity = stof(value);
+    lineStream.clear();
+    cout << parameter << ": " << value << endl;
+
+    // standard deviation of position noise
+    getline(ifs, line);
+    lineStream.str(line);
+    getline(lineStream, parameter, '=');
+    getline(lineStream, value);
+    params.sigma_orientation = stof(value);
+    lineStream.clear();
+    cout << parameter << ": " << value << endl;
+
     // observation type
     getline(ifs, line);
     lineStream.str(line);
@@ -331,6 +358,15 @@ void parseConfigFile(const char* config_fn, configParams& params)
     getline(lineStream, parameter, '=');
     getline(lineStream, value);
     params.y_path = value;
+    lineStream.clear();
+    cout << parameter << ": " << value << endl;
+
+    // path to image filenames
+    getline(ifs, line);
+    lineStream.str(line);
+    getline(lineStream, parameter, '=');
+    getline(lineStream, value);
+    params.images_path = value;
     lineStream.clear();
     cout << parameter << ": " << value << endl;
 
