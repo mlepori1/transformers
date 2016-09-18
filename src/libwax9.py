@@ -435,12 +435,13 @@ def setThreshold(socket, threshold):
 
 
 def newStream(devices, names, filename):
-    
-    dev2name = {devices[i]: names[i] for i in range(len(names))}
+
+    dev2name = {device: name for device, name in zip(devices, names)}
+    prev_parsed = {name: '' for name in names}
     
     import datetime
     
-    f = open(filename, 'wb')
+    #f = open(filename, 'wb')
     
     for device in devices:
         device.sendall('stream\r\n')
@@ -462,19 +463,81 @@ def newStream(devices, names, filename):
     ready, _, _ = select.select(devices, [], [])
     while ready:
         for device in ready:
-            byte_str, addr = device.recvfrom(4096)
-            f.write(byte_str)
-            
             name = dev2name[device]
+            
+            byte_str, addr = device.recvfrom(4096)
+            data, incomplete = parseBytes(byte_str, prev_parsed[name])
+            prev_parsed[name] = incomplete
+            #f.write(byte_str)
+            
             cur_time = datetime.datetime.now()
             print('{}  |  {}  |  {}'.format(name, cur_time - prev_time, len(byte_str)))
+            for datum in data: print(datum) #.encode('hex'))
+            print('')
             prev_time = cur_time
-            #print(byte_str.encode('hex'))
         ready, _, _ = select.select(devices, [], []) #, 0)
     
     device.sendall('\r\n')    
     
-    f.close()
+    #f.close()
+
+
+def parseBytes(byte_str, prev_parsed):
+        
+    # Special SLIP bytes
+    SLIP_END = '\xc0'
+    SLIP_ESC = '\xdb'
+    SLIP_ESC_END = '\xdc'
+    SLIP_ESC_ESC = '\xdd'
+    
+    data = []
+    
+    # Read bytes from the current sensor until we have a complete
+    # packet or hang on a timeout
+    prev_escaped = False
+    #packet_ready = False
+    #timeout = False
+    packet = prev_parsed
+    for byte in byte_str:                
+        
+        if prev_escaped:
+            prev_escaped = False
+            if byte == SLIP_ESC_END:
+                packet += SLIP_END
+            elif byte == SLIP_ESC_ESC:
+                packet += SLIP_ESC
+            else:
+                # Anything else means we received an unexpected
+                # escaped byte
+                msg = 'ERR | {} | unexpected byte'
+                print(msg.format(byte.encode('hex')))
+        elif byte == SLIP_END and len(packet) > 0:
+            packet += byte
+            if packet[2] == '\x01' and len(packet) == 28:  # Standard packet
+                # Convert data from hex representation (see p. 7, 'WAX9
+                # application developer's guide')
+                # Zero-pad this packet at the end so it's the same length
+                # and format as the long packet
+                fmtstr = '<' + 3 * 'B' + 'H' + 'I' + 9 * 'h' + 'B'
+                unpacked = list(struct.unpack(fmtstr, packet))
+                data.append(unpacked)
+            elif packet[2] == '\x02' and len(packet) == 36:  # Long packet
+                # Convert data from hex representation (see p. 7, 'WAX9
+                # application developer's guide')
+                fmtstr = '<' + 3 * 'B' + 'H' + 'I' + 9 * 'h' + 'H' + 'h' + 'I' + 'B'
+                unpacked = list(struct.unpack(fmtstr, packet))
+                data.append(unpacked)
+            else:
+                # Record an error
+                fmtstr = 'ERR | Bad packet | {}'
+                print(fmtstr.format(packet.encode('hex')))
+            packet = ''
+        elif byte == SLIP_ESC:
+            prev_escaped = True
+        else:
+            packet += byte
+        
+    return data, packet
 
 
 def decodeStream(filename):
