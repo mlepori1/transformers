@@ -296,7 +296,7 @@ class Application:
         # Draw annotation frame
         ann_frame = tk.Frame(frame1)
         
-        # Action label (radio buttons)
+        # Action label
         action_label = tk.Label(ann_frame, text='Action')
         action_label.grid(row=0, column=0)
         self.action_field = tk.IntVar()
@@ -304,8 +304,8 @@ class Application:
             action_button = tk.Radiobutton(ann_frame, text=label,
                                     variable=self.action_field, value=i+1)
             action_button.grid(sticky=tk.W, row=i+1, column=0)
-        """
-        # Object label (radio buttons)
+        
+        # Object label
         obj_label = tk.Label(ann_frame, text='Object')
         obj_label.grid(row=0, column=1)
         self.object_field = tk.IntVar()
@@ -314,14 +314,15 @@ class Application:
                                     variable=self.object_field, value=i+1)
             button.grid(sticky=tk.W, row=i+1, column=1)
         
-        # Target label(s) (check boxes)
+        # Target label
         target_label = tk.Label(ann_frame, text='Target(s)')
         target_label.grid(row=0, column=2)
+        self.target_field = tk.IntVar()
         for i, block in enumerate(self.blocks):
-            self.target_fields[block] = tk.IntVar()
-            target_box = tk.Checkbutton(ann_frame, text=block,
-                                        variable=self.target_fields[block])
-            target_box.grid(sticky=tk.W, row=i+1, column=2)
+            target_button = tk.Radiobutton(ann_frame, text=block,
+                                    variable=self.target_field, value=i+1)
+            target_button.grid(sticky=tk.W, row=i+1, column=2)
+            
         """
         
         #labels for object and target blocks\
@@ -435,7 +436,7 @@ class Application:
             kt.grid(row=2*i+2, column=7)
             lt.grid(row=2*i, column=6)
             xt.grid(row=2*1, column=4)
-        
+        """
         ann_frame.pack(side=tk.RIGHT)
         frame1.pack(side=tk.TOP)
         
