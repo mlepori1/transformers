@@ -324,6 +324,18 @@ class Application:
             target_box.grid(sticky=tk.W, row=i+1, column=2)
         """
         
+        #labels for object and target blocks\
+        
+        obj_square_label = tk.Label(ann_frame, text='Object squares')
+        obj_square_label.grid(row=0, column=1) 
+        obj_rect_label = tk.Label(ann_frame, text='Object rectangles')
+        obj_rect_label.grid(row=0, column=3)
+        
+        target_square_label = tk.Label(ann_frame, text='Target squares')
+        target_square_label.grid(row=0, column=5) 
+        target_rect_label = tk.Label(ann_frame, text='Target rectangles')
+        target_rect_label.grid(row=0, column=7) 
+        
         #define object buttons for square shapes
         self.button_dict_square = {}
         names = ('red square','green square','yellow square','blue square')        
@@ -616,6 +628,19 @@ class Application:
         #append the event to the event queue
         self.event_queue.append(event)
         
+        #write target indices to a variable for parseAction
+        target_indices = (event[2],)
+        object_index = event[1]
+        action_index = event[0]
+        action = self.actions[action_index]
+        
+        #parse actions to create state image
+        self.parseAction(action, object_index, target_indices)
+        
+        #update world state
+        self.updateWorldState()
+        
+        
     def undoAction(self):
         """
         Delete the previous action annotation and re-draw block configuration.
@@ -740,14 +765,17 @@ class Application:
         #write event queue (which represents one action) to action queue (called 'labels')
         self.labels.append(self.event_queue)
         
+        """
         #write target indices to a variable for parseAction
         target_indices = (x[4] for x in self.event_queue)
         object_index = self.event_queue[0][3]
         action_index = self.event_queue[0][2]
         action = self.actions[action_index]
         
+        
         #parse actions to create state image
         self.parseAction(action, object_index, target_indices)        
+        """
         
         #reset event queue
         self.event_queue = None
@@ -756,11 +784,13 @@ class Application:
         self.action_start_index = -1
         self.action_end_index = -1
         
+        """
         #Redraw world state image and start/end button
         self.updateWorldState()
         self.start_end.configure(text='Start of action',
                                  command=self.startAction)
-                                 
+        """
+                         
         #disable queue event button
         self.queue_button.configure(state=tk.DISABLED)
         
@@ -784,8 +814,8 @@ class Application:
         Args:
         -----
         [str] action: Action label (one of self.actions)
-        [str] object_block: Block that was placed (index in self.blocks)
-        [list(str)] target_blocks: Blocks near the one that was placed
+        [int] object_block: Block that was placed (index in self.blocks)
+        [list(int)] target_blocks: Blocks near the one that was placed
         """
         
         # TODO: validate the provided action by making sure it is a possible
