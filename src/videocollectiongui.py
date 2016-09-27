@@ -125,7 +125,7 @@ class Application:
         master = self.content_frame
         
         # Draw instructions
-        user_text = 'Please enter the following information for this child.'
+        user_text = 'Please enter the following information for this participant.'
         instructions = tk.Label(master, text=user_text)
         instructions.grid(row=0, columnspan=3)
         
@@ -139,17 +139,17 @@ class Application:
         birth_date_label = tk.Label(master, text='Date of birth: ')
         birth_date_label.grid(sticky=tk.E, row=2, column=0)
         months = ('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug',
-                  'Sep', 'Oct', 'Nov', 'Dec')
+                  'Sep', 'Oct', 'Nov', 'Dec', '---')
         self.birth_month_field = tk.StringVar(master)
         if not self.birth_month:
-            self.birth_month_field.set(months[0])
+            self.birth_month_field.set(months[-1])
         else:
             self.birth_month_field.set(self.birth_month)
         month_menu = apply(tk.OptionMenu, (master, self.birth_month_field) + months)
         month_menu.grid(sticky=tk.W, row=2, column=1)
         
         # Draw birth year field
-        years = (2010, 2011, 2012, 2013)
+        years = tuple(range(1980, 2000))
         self.birth_year_field = tk.StringVar(master)
         if not self.birth_year:
             self.birth_year_field.set(years[0])
@@ -161,10 +161,10 @@ class Application:
         # Draw gender field
         gender_label = tk.Label(master, text='Gender: ')
         gender_label.grid(sticky=tk.E, row=3, column=0)
-        genders = ('Male', 'Female', 'Not disclosed')
+        genders = ('Male', 'Female', '---')
         self.gender_field = tk.StringVar(master)
         if not self.gender:
-            self.gender_field.set(genders[0])
+            self.gender_field.set(genders[-1])
         else:
             self.gender_field.set(self.gender)
         gender_menu = apply(tk.OptionMenu, (master, self.gender_field) + genders)
