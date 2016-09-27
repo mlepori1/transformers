@@ -462,26 +462,35 @@ class DuploCorpus:
     
         Args:
         -----
-        path:  string
-          Path (full or relative) to raw data file
-        imu_dev_names:  list of strings
-          List of IMU ID strings; define p as the number of items in this list
-        img_dev_names:  list of strings
-          List of image capture device ID strings; define q as the number of
-          items in this list
-    
+        trial_id:  int
+          Trial identifier. This is the trial's index in the corpus metadata
+          array.
+          
         Returns:
         --------
-        imu_data:  dict of str -> numpy array
-          Size n-by-p*d, where n is the number of IMU
-          samples, p is the number of IMU devices, and d is the length of one IMU
-          sample. Each holds p length-d IMU samples, concatenated in the order
-          seen in imu_dev_names
-        img_data:  numpy array
-          Size m-by-p. Contains the global timestamp for every video
-          frame recorded
-        sample_len:  int
-          Length of one IMU sample (d)
+        [TODO]
+        """
+        
+        imu_data = parseImuData(trial_id)
+        
+        frame_timestamps = parseVideoData(trial_id)
+        
+        return (imu_data, frame_timestamps)
+    
+    
+    def parseImuData(self, trial_id):
+        """
+        Read raw data from file and convert to numpy arrays
+    
+        Args:
+        -----
+        trial_id:  int
+          Trial identifier. This is the trial's index in the corpus metadata
+          array.
+          
+        Returns:
+        --------
+        [TODO]
         """
         
         imu_data = {}
@@ -518,6 +527,24 @@ class DuploCorpus:
         for key, entry in imu_data.items():
             imu_data[key] = np.array(entry)
         
+        return imu_data
+    
+    
+    def parseVideoData(self, trial_id):
+        """
+        Read raw data from file and convert to numpy arrays
+    
+        Args:
+        -----
+        trial_id:  int
+          Trial identifier. This is the trial's index in the corpus metadata
+          array.
+          
+        Returns:
+        --------
+        [TODO]
+        """
+        
         path = os.path.join(self.paths['raw'], '{}-timestamps.csv'.format(trial_id))
         frame_timestamps = {}
         with open(path, 'r') as csvfile:
@@ -545,7 +572,7 @@ class DuploCorpus:
         for key, entry in frame_timestamps.items():
             frame_timestamps[key] = np.array(entry)
         
-        return (imu_data, frame_timestamps)
+        return frame_timestamps
     
     
     def postprocess(self, trial_id, trial_metadata, imu2block, imu_settings):
