@@ -336,7 +336,7 @@ class Application:
                             self.corpus.image_types, self.die, self.video_q)
         imustream_args = (active_devices, raw_imu_path, self.die, self.imu_q)
         self.processes = (mp.Process(target=ps.stream, args=videostream_args),
-                          mp.Process(target=wax9.stream, args=imustream_args),)
+                          mp.Process(target=wax9.burstStream, args=imustream_args),)
         
         for p in self.processes:
             p.start()
@@ -356,12 +356,13 @@ class Application:
         if not self.imu_q.empty():
             samples = self.imu_q.get()
             for sample in samples:
-                imu_id = sample[-1]
-                # Calculate (unitless) l1 norm of acceleration
-                # (4096 bits in 1 g --> why I use 5000 as the threshold)
-                accel_mag = abs(sample[4]) + abs(sample[5]) + abs(sample[6])
-                bg_color = 'green' if accel_mag > 4950 else 'yellow'
-                self.imu_id2activity_color[imu_id].configure(background=bg_color)
+                if sample:
+                    imu_id = sample[-1]
+                    # Calculate (unitless) l1 norm of acceleration
+                    # (4096 bits in 1 g --> why I use 5000 as the threshold)
+                    accel_mag = abs(sample[4]) + abs(sample[5]) + abs(sample[6])
+                    bg_color = 'green' if accel_mag > 4950 else 'yellow'
+                    self.imu_id2activity_color[imu_id].configure(background=bg_color)
         
         # Draw a new frame if one has been sent by the video stream
         if not self.video_q.empty():

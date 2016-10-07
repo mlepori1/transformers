@@ -471,9 +471,9 @@ class DuploCorpus:
         [TODO]
         """
         
-        imu_data = parseImuData(trial_id)
+        imu_data = self.parseImuData(trial_id)
         
-        frame_timestamps = parseVideoData(trial_id)
+        frame_timestamps = self.parseVideoData(trial_id)
         
         return (imu_data, frame_timestamps)
     
