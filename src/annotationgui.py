@@ -28,7 +28,7 @@ class Application:
         self.blocks = ('red square', 'yellow square', 'green square',
                        'blue square', 'red rect', 'yellow rect', 'green rect',
                        'blue rect')
-        self.block2index = {block: i for i, block in enumerate(self.blocks)}
+        self.block2index = {block: str(i) for i, block in enumerate(self.blocks)}
         
         # Corpus object manages file I/O -- filenames and paths are filled in
         # after reading input from trial selection interface
@@ -39,17 +39,29 @@ class Application:
         
         # Initial values
         self.action_start_index = -1
-        self.action_end_index = -1
         self.cur_frame = 0
         self.states = []
         self.labels = []
         
-        
         # User input (to be read from interface later)
         self.action_field = None
         self.object_field = None
-        self.target_fields = {}
+        self.target_field = None
         self.trial_field = None
+        
+        """
+        #create object arrays for square blocks
+        self.arrays_square_object = {}
+        names = ('red square','green square','yellow square','blue square')
+        for n in names:
+            a = np.zeros((2,2), dtype=bool)
+            self.arrays_square_object[n] = a
+        """
+        
+        # These are placeholders for boolean arrays representing if studs are
+        # selected or not
+        self.object_studs = None
+        self.target_studs = None
         
         # Start drawing annotation interface
         self.content_frame = tk.Frame(self.parent)
@@ -57,51 +69,7 @@ class Application:
         self.defineTrialSelectionInterface()
         self.drawInterface()
         
-        #define matrix for object studs
-        #may be deprecated - consider removing
-        self.obj_studs = np.zeros((2,2), dtype=bool)
-        
-        #create object arrays for square blocks
-        self.arrays = {}
-        names = ('red square','green square','yellow square','blue square')
-        for n in names:
-            a = np.zeros((2,2), dtype=bool)
-            self.arrays[n] = a
-        
-        #relate names of square blocks and colors
-        names = ('red square','green square','yellow square','blue square')
-        colors = ('red','green','yellow','blue')
-        self.name2color_square = {n:c for n,c in zip(names, colors)}
-        
-        #create object arrays for rectangular blocks
-        self.arrays_rect = {}
-        names_rect = ('red rect','green rect','yellow rect','blue rect')
-        for n in names_rect:
-            a = np.zeros((2,4), dtype=bool)
-            self.arrays_rect[n] = a
-            
-        #relate names of rectangular blocks and colors
-        names_rect = ('red rect','green rect','yellow rect','blue rect')
-        colors = ('red','green','yellow','blue')
-        self.name2color_rect = {n:c for n,c in zip(names_rect, colors)}
-        
-        #create target arrays for square blocks
-        self.arrays_target = {}
-        names = ('red square','green square','yellow square','blue square')
-        for n in names:
-            a = np.zeros((2,2), dtype=bool)
-            self.arrays_target[n] = a       
-            
-        #create object arrays for rectangular blocks
-        self.arrays_rect_target = {}
-        names_rect = ('red rect','green rect','yellow rect','blue rect')
-        for n in names_rect:
-            a = np.zeros((2,4), dtype=bool)
-            self.arrays_rect_target[n] = a
-            
-        #define event queue
-        self.event_queue = None
-            
+    
     def initState(self):
         """
         Initialize the world state as an unconnected graph with one node for
@@ -109,8 +77,8 @@ class Application:
         
         Returns:
         --------
-        [gv digraph] state: graphviz directed graph representing the initial
-          world state.
+        state: graphviz Digraph
+          graphviz directed graph representing the initial world state.
         """
         
         # Block height when drawn as graph node, in inches
@@ -215,63 +183,8 @@ class Application:
         self.clearInterface()
         self.defineAnnotationInterface()
         self.drawInterface()
-  
-    def assignVar_square(self, x,y,z):
-        a = self.arrays[z]
-        a[x][y] = not a[x][y]
-        b = self.button_dict_square[z]
         
-        if a[x][y]:
-            b[x][y].config(bg='black')
-            b[x][y].config(activebackground='black')
-            b[x][y].config(relief='sunken')
-        else:
-            b[x][y].config(bg=self.name2color_square[z])
-            b[x][y].config(activebackground=self.name2color_square[z])
-            b[x][y].config(relief='raised')
-            
-    def assignVar_rect(self, x,y,z):
-        a = self.arrays_rect[z]
-        a[x][y] = not a[x][y]
-        b = self.button_dict_rect[z]
         
-        if a[x][y]:
-            b[x][y].config(bg='black')
-            b[x][y].config(activebackground='black')
-            b[x][y].config(relief='sunken')
-        else:
-            b[x][y].config(bg=self.name2color_rect[z])
-            b[x][y].config(activebackground=self.name2color_rect[z])
-            b[x][y].config(relief='raised')
-    
-    def assignVar_square_target(self, x,y,z):
-        a = self.arrays_target[z]
-        a[x][y] = not a[x][y]
-        b = self.button_dict_square_target[z]
-        
-        if a[x][y]:
-            b[x][y].config(bg='black')
-            b[x][y].config(activebackground='black')
-            b[x][y].config(relief='sunken')
-        else:
-            b[x][y].config(bg=self.name2color_square[z])
-            b[x][y].config(activebackground=self.name2color_square[z])
-            b[x][y].config(relief='raised')
-            
-    def assignVar_rect_target(self, x,y,z):
-        a = self.arrays_rect_target[z]
-        a[x][y] = not a[x][y]
-        b = self.button_dict_rect_target[z]
-        
-        if a[x][y]:
-            b[x][y].config(bg='black')
-            b[x][y].config(activebackground='black')
-            b[x][y].config(relief='sunken')
-        else:
-            b[x][y].config(bg=self.name2color_rect[z])
-            b[x][y].config(activebackground=self.name2color_rect[z])
-            b[x][y].config(relief='raised')
-            
     def defineAnnotationInterface(self):
         """
         Draw the annotation interface with RGB frame.
@@ -296,16 +209,16 @@ class Application:
         # Draw annotation frame
         ann_frame = tk.Frame(frame1)
         
-        # Action label
+        # Action label (radio buttons)
         action_label = tk.Label(ann_frame, text='Action')
         action_label.grid(row=0, column=0)
         self.action_field = tk.IntVar()
         for i, label in enumerate(self.actions):
-            action_button = tk.Radiobutton(ann_frame, text=label,
+            button = tk.Radiobutton(ann_frame, text=label,
                                     variable=self.action_field, value=i+1)
-            action_button.grid(sticky=tk.W, row=i+1, column=0)
+            button.grid(sticky=tk.W, row=i+1, column=0)
         
-        # Object label
+        # Object label (radio buttons)
         obj_label = tk.Label(ann_frame, text='Object')
         obj_label.grid(row=0, column=1)
         self.object_field = tk.IntVar()
@@ -314,129 +227,15 @@ class Application:
                                     variable=self.object_field, value=i+1)
             button.grid(sticky=tk.W, row=i+1, column=1)
         
-        # Target label
-        target_label = tk.Label(ann_frame, text='Target(s)')
+        # Target label (radio buttons)
+        target_label = tk.Label(ann_frame, text='Target')
         target_label.grid(row=0, column=2)
         self.target_field = tk.IntVar()
         for i, block in enumerate(self.blocks):
-            target_button = tk.Radiobutton(ann_frame, text=block,
+            button = tk.Radiobutton(ann_frame, text=block,
                                     variable=self.target_field, value=i+1)
-            target_button.grid(sticky=tk.W, row=i+1, column=2)
-            
-        """
+            button.grid(sticky=tk.W, row=i+1, column=2)
         
-        #labels for object and target blocks\
-        
-        obj_square_label = tk.Label(ann_frame, text='Object squares')
-        obj_square_label.grid(row=0, column=1) 
-        obj_rect_label = tk.Label(ann_frame, text='Object rectangles')
-        obj_rect_label.grid(row=0, column=3)
-        
-        target_square_label = tk.Label(ann_frame, text='Target squares')
-        target_square_label.grid(row=0, column=5) 
-        target_rect_label = tk.Label(ann_frame, text='Target rectangles')
-        target_rect_label.grid(row=0, column=7) 
-        
-        #define object buttons for square shapes
-        self.button_dict_square = {}
-        names = ('red square','green square','yellow square','blue square')        
-        for i,n in enumerate(names):
-            self.annotate_buttons = []
-            f = tk.Frame(ann_frame)
-            g = tk.Frame(ann_frame)
-            square_colors = ('red','green','yellow','blue')
-            for r in range(2):
-                self.annotate_buttons.append([])
-                for c in range(2):
-                    func=lambda x=r, y=c, z=n: self.assignVar_square(x,y,z)
-                    b = tk.Button(f, command=func, bg=square_colors[i], 
-                                  activebackground=square_colors[i])
-                    b.grid(row=r, column=c)
-                    a = tk.Label(g, text='\t', font=("TkDefaultFont",1))
-                    a.grid(row=r-r+1, column=c-c+1)
-                    self.annotate_buttons[-1].append(b)
-            self.button_dict_square[n] = self.annotate_buttons
-            f.grid(row=2*i+1, column=1)
-            g.grid(row=2*i+2, column=1)
-        
-        #define object buttons for rectangular shapes
-        self.button_dict_rect = {}
-        names_rect = ('red rect','green rect','yellow rect','blue rect')        
-        for i,n in enumerate(names_rect):
-            self.annotate_buttons_rect = []
-            h = tk.Frame(ann_frame)
-            k = tk.Frame(ann_frame)
-            l = tk.Frame(ann_frame)
-            rect_colors = ('red','green','yellow','blue')
-            for r in range(2):
-                self.annotate_buttons_rect.append([])
-                for c in range(4):
-                    func=lambda x=r, y=c, z=n: self.assignVar_rect(x,y,z)
-                    br = tk.Button(h, command=func, bg=rect_colors[i], 
-                                   activebackground=rect_colors[i])
-                    br.grid(row=r, column=c)
-                    ar = tk.Label(k, text='\t', font=("TkDefaultFont",1))
-                    ar.grid(row=r-r+1, column=c-c+3)
-                    cr = tk.Label(l, text='    ', font=("TkDefaultFont",14))
-                    cr.grid(row=r-r+1, column=c-c+2)
-                    self.annotate_buttons_rect[-1].append(br)
-            self.button_dict_rect[n] = self.annotate_buttons_rect
-            h.grid(row=2*i+1, column=3)
-            k.grid(row=2*i+2, column=3)
-            l.grid(row=2*i, column=2)
-            
-        #define target buttons for square shapes
-        self.button_dict_square_target = {}
-        names = ('red square','green square','yellow square','blue square')        
-        for i,n in enumerate(names):
-            self.annotate_buttons_target = []
-            ft = tk.Frame(ann_frame)
-            gt = tk.Frame(ann_frame)
-            square_colors = ('red','green','yellow','blue')
-            for r in range(2):
-                self.annotate_buttons_target.append([])
-                for c in range(2):
-                    func=lambda x=r, y=c, z=n: self.assignVar_square_target(x,y,z)
-                    bt = tk.Button(ft, command=func, bg=square_colors[i], 
-                                  activebackground=square_colors[i])
-                    bt.grid(row=r, column=c)
-                    at = tk.Label(gt, text='\t', font=("TkDefaultFont",1))
-                    at.grid(row=r-r+1, column=c-c+1)
-                    self.annotate_buttons_target[-1].append(bt)
-            self.button_dict_square_target[n] = self.annotate_buttons_target
-            ft.grid(row=2*i+1, column=5)
-            gt.grid(row=2*i+2, column=5)
-        
-        #define target buttons for rectangular shapes
-        self.button_dict_rect_target = {}
-        names_rect = ('red rect','green rect','yellow rect','blue rect')        
-        for i,n in enumerate(names_rect):
-            self.annotate_buttons_rect_target = []
-            ht = tk.Frame(ann_frame)
-            kt = tk.Frame(ann_frame)
-            lt = tk.Frame(ann_frame)
-            xt = tk.Frame(ann_frame)
-            rect_colors = ('red','green','yellow','blue')
-            for r in range(2):
-                self.annotate_buttons_rect_target.append([])
-                for c in range(4):
-                    func=lambda x=r, y=c, z=n: self.assignVar_rect_target(x,y,z)
-                    brt = tk.Button(ht, command=func, bg=rect_colors[i], 
-                                   activebackground=rect_colors[i])
-                    brt.grid(row=r, column=c)
-                    art = tk.Label(kt, text='\t', font=("TkDefaultFont",1))
-                    art.grid(row=r-r+1, column=c-c+3)
-                    crt = tk.Label(lt, text='    ', font=("TkDefaultFont",14))
-                    crt.grid(row=r-r+1, column=c-c+2)
-                    xrt = tk.Label(xt, text='              ', font=("TkDefaultFont",14))
-                    xrt.grid(row=r-r+1, column=c-c+4)
-                    self.annotate_buttons_rect_target[-1].append(brt)
-            self.button_dict_rect_target[n] = self.annotate_buttons_rect_target
-            ht.grid(row=2*i+1, column=7)
-            kt.grid(row=2*i+2, column=7)
-            lt.grid(row=2*i, column=6)
-            xt.grid(row=2*1, column=4)
-        """
         ann_frame.pack(side=tk.RIGHT)
         frame1.pack(side=tk.TOP)
         
@@ -450,221 +249,272 @@ class Application:
         self.state_display.pack()
         frame2.pack(side=tk.BOTTOM)
         
-        # Draw start/end, undo, restart, quit, and queue event buttons
+        # Draw start/end, undo, restart, and quit buttons
         master = self.navigation_frame
-        self.start_end = tk.Button(master, text='Start of action',
+        actions_frame = tk.Frame(master)
+        self.start_end = tk.Button(actions_frame, text='Start of action',
                                    command=self.startAction, default=tk.ACTIVE)
-        self.start_end.grid(sticky=tk.E, row=0, column=1)
-        undo = tk.Button(master, text='Undo annotation',
+        self.start_end.grid(sticky=tk.E, row=0, column=0)
+        select = tk.Button(actions_frame, text='Add connection', command=self.studSelectionDialog)
+        select.grid(sticky=tk.W, row=0, column=1)
+        undo = tk.Button(actions_frame, text='Undo connection',
                          command=self.undoAction)
-        undo.grid(sticky=tk.W, row=0, column=0)
-        restart = tk.Button(master, text='Start new trial', command=self.restart)
-        restart.grid(sticky=tk.W, row=0, column=3)
-        restart = tk.Button(master, text='Quit', command=self.close)
-        restart.grid(sticky=tk.W, row=0, column=4)
-        self.queue_button = tk.Button(master, text='Queue event', 
-                                      command = self.queue_event, state=tk.DISABLED)
-        self.queue_button.grid(stick=tk.W, row=0, column=2)
+        undo.grid(sticky=tk.W, row=0, column=2)
+        actions_frame.pack(side=tk.TOP)
+        
+        # Draw restart and quit buttons
+        end_frame = tk.Frame(master)
+        restart = tk.Button(end_frame, text='Start new trial', command=self.restart)
+        restart.grid(sticky=tk.W, row=0, column=0)
+        close = tk.Button(end_frame, text='Quit', command=self.close)
+        close.grid(sticky=tk.W, row=0, column=1)
+        end_frame.pack(side=tk.TOP)
+        
+        
+    def studSelectionDialog(self):
+        """
+        Create a popup window to code block relations.
+        """
+        # Destroy the popup window if it exists
+        if self.popup:
+            self.cancel()
+        
+        self.popup = tk.Toplevel(self.parent)
+        self.popup.geometry('{0}x{1}'.format(screen_width/4, screen_height/4))    
+        
+        # Create object block
+        object_index = self.object_field.get() - 1
+        object_name = self.blocks[object_index]
+        object_color, object_shape = object_name.split(' ')
+        object_color_str = object_color + '2'
+        self.object_frame = tk.Frame(self.popup, bg=object_color_str)
+        if object_shape == 'square':    # Draw a square
+            rows, cols = 2, 2
+        elif object_shape == 'rect':    # Draw a rectangle
+            rows, cols = 2, 4
+        self.object_studs = np.zeros((rows, cols), dtype=bool)
+        
+        self.object_stud_buttons = [] 
+        for r in range(rows):
+            self.object_stud_buttons.append([])
+            for c in range(cols):
+                func = lambda b='object', n=object_name, r=r, c=c: self.toggleStud(b,n,r,c)
+                b = tk.Button(self.object_frame, command=func, bg=object_color_str, 
+                              activebackground=object_color_str, relief='ridge')
+                b.grid(row=r, column=c)
+                self.object_stud_buttons[-1].append(b)
+        
+        self.object_frame.place(relx=0.25, rely=0.33, anchor='center')
+        rotate_object = lambda x='object', n=object_name, o='vertical': self.rotate(x, n, o)
+        self.object_button = tk.Button(self.popup, command=rotate_object, text='rotate')
+        self.object_button.place(relx=0.25, rely=0.75, anchor='center')
+        
+        # Create target block
+        target_index = self.target_field.get() - 1
+        target_name = self.blocks[target_index]
+        target_color, target_shape = target_name.split(' ')
+        target_color_str = target_color + '2'
+        self.target_frame = tk.Frame(self.popup, bg=target_color_str)
+        if target_shape == 'square':    # Draw a square
+            rows, cols = 2, 2
+        elif target_shape == 'rect':    # Draw a rectangle
+            rows, cols = 2, 4
+        self.target_studs = np.zeros((rows, cols), dtype=bool)
+        
+        self.target_stud_buttons = []
+        for r in range(rows):
+            self.target_stud_buttons.append([])
+            for c in range(cols):
+                func = lambda b='target', n=target_name, r=r, c=c: self.toggleStud(b,n,r,c)
+                b = tk.Button(self.target_frame, command=func, bg=target_color_str, 
+                              activebackground=target_color_str, relief='ridge')
+                b.grid(row=r, column=c)
+                self.target_stud_buttons[-1].append(b)
+       
+        self.target_frame.place(relx=0.75, rely=0.33, anchor='center')
+        rotate_target = lambda x='target', n=target_name, o='vertical': self.rotate(x, n, o)
+        self.target_button = tk.Button(self.popup, command=rotate_target, text='rotate')
+        self.target_button.place(relx=0.75, rely=0.75, anchor='center')
+        
+        swap_button = tk.Button(self.popup, command=self.swap, text='swap')
+        swap_button.place(relx=0.5, rely=0.75, anchor='center')
+        
+        select_ok = tk.Button(self.popup, text='OK', command=self.addConnection)
+        select_ok.place(relx=0.5, rely=0.9, anchor='center')
     
-    def queue_event(self):
+    def swap(self):
         """
-        Adds array values for obj/target block into event queue
         """
         
-        # Make sure the user has selected an action
-        # (Value of -1 means original value was zero, ie empty)
+        # TODO
+    
+    
+    def rotate(self, block, name, orientation):
+        """
+        Rotate a rectangular block by 90 degrees.
         
-        #get action index
-        action_index = self.action_field.get() - 1
+        Args:
+        -----
+        block: str
+          'object' or 'target'
+        """
         
-        #check to make sure there is an action index
-        if action_index == -1:
-            err_str = 'Please select an action and an object block.'
-            self.badInputDialog(err_str)
-            return         
+        # Toggle between horizontal and vertical orientations
+        rows, cols = None, None
+        next_orientation = None
+        if orientation == 'horizontal':
+            rows, cols = 2, 4
+            next_orientation = 'vertical'
+        elif orientation == 'vertical':
+            rows, cols = 4, 2
+            next_orientation = 'horizontal'
         
-        #if 'remove' is the selected action, only an object is needed
-        if action_index == 2:
-            self.arrays.update(self.arrays_rect)
-            names = ('red square','green square','yellow square','blue square', 
-            'red rect','green rect','yellow rect','blue rect')
-            selected_object = ""
-            count = 0
-            for n in names:
-                val = self.arrays[n].any()
-                count += val
-                if count >1:
-                    queue_error_object = 'Only one object block may be selected at a time'
-                    self.badInputDialog(queue_error_object)
-                    return
-                elif val:
-                    selected_object = n
-            selected_object_block = self.arrays[selected_object]   
-            selected_object_coords_temp = np.where(selected_object_block ==1)        
-            selected_object_coords = zip(*selected_object_coords_temp)
-            selected_object_coords_array = np.array(selected_object_coords)
-            selected_object_coords_str = ':'.join([''.join(x) for x in 
-            selected_object_coords_array.astype(str).tolist()])
+        color, shape = name.split(' ')
+        color_str = color + '2'
+        
+        if block == 'object':
+            if shape == 'rect':
+                # Update block buttons
+                self.object_frame.destroy()
+                self.object_frame = tk.Frame(self.popup, bg=color_str)
+                self.object_studs = np.zeros((rows, cols), dtype=bool)
+                self.object_stud_buttons = []
+                for r in range(rows):
+                    self.object_stud_buttons.append([])
+                    for c in range(cols):
+                        func = lambda b=block, n=name, r=r, c=c: self.toggleStud(b,n,r,c)
+                        b = tk.Button(self.object_frame, command=func, bg=color_str, 
+                                      activebackground=color_str, relief='ridge')
+                        b.grid(row=r, column=c)
+                        self.object_stud_buttons[-1].append(b)
+                self.object_frame.place(relx=0.25, rely=0.33, anchor='center')
+                
+                # Update rotate button
+                rotate_object = lambda x='object', n=name, o=next_orientation: self.rotate(x, n, o)
+                self.object_button.configure(command=rotate_object)
+                
+        elif block == 'target':
+            if shape == 'rect':
+                # Update block buttons
+                self.target_frame.destroy()
+                self.target_frame = tk.Frame(self.popup, bg=color_str)
+                self.target_studs = np.zeros((rows, cols), dtype=bool)
+                self.target_stud_buttons = []
+                for r in range(rows):
+                    self.target_stud_buttons.append([])
+                    for c in range(cols):
+                        func = lambda b=block, n=name, r=r, c=c: self.toggleStud(b,n,r,c)
+                        b = tk.Button(self.target_frame, command=func, bg=color_str, 
+                                      activebackground=color_str, relief='ridge')
+                        b.grid(row=r, column=c)
+                        self.target_stud_buttons[-1].append(b)
+                self.target_frame.place(relx=0.75, rely=0.33, anchor='center')
+                
+                # Update rotate button
+                rotate_target = lambda x='target', n=name, o=next_orientation: self.rotate(x, n, o)
+                self.target_button.configure(command=rotate_target)
+    
+    
+    def toggleStud(self, block, name, row, col):
+        """
+        """
+        
+        color, shape = name.split(' ')
+        
+        # These are standard Tkinter color shades. Greater values are darker.
+        color_str = color + '2'
+        dark_color_str = color + '4'
+        
+        if block == 'object':
+            self.object_studs[row, col] = not self.object_studs[row, col]
+            bg_color = dark_color_str if self.object_studs[row, col] else color_str
+            self.object_stud_buttons[row][col].config(bg=bg_color, activebackground=bg_color)
+        elif block == 'target':
+            self.target_studs[row, col] = not self.target_studs[row, col]
+            bg_color = dark_color_str if self.target_studs[row, col] else color_str
+            self.target_stud_buttons[row][col].config(bg=bg_color, activebackground=bg_color)
             
-            #define event
-            event = (action_index, self.block2index[selected_object], '',
-                 '', '')       
+    
+    def addConnection(self):
+        """
+        """
         
-            #append the event to the event queue
-            self.event_queue.append(event)
+        # Get action annotation (action and object fields are one-indexed, so
+        # convert to zero-indexing)
+        action_index = self.action_field.get() - 1
+        object_index = self.object_field.get() - 1
+        target_index = self.target_field.get() - 1
+
+        rows, cols = self.object_studs.nonzero()
+        object_stud_str = ':'.join([''.join([str(r), str(c)]) for r, c in zip(rows, cols)])
+        rows, cols = self.target_studs.nonzero()
+        target_stud_str = ':'.join([''.join([str(r), str(c)]) for r, c in zip(rows, cols)])
+        
+        """
+        # Make sure the user has selected an action and an object
+        # (Value of -1 means original value was zero, ie empty)
+        if action_index == -1 or object_index == -1:
+            err_str = 'Please select and action and an object block.'
+            self.badInputDialog(err_str)
             return
         
-        ##validate data
+        action = self.actions[action_index]
+        object_block = self.blocks[object_index]
+        target_block = self.blocks[target_index]
         
-        #no self edges check
-        names = ('red square','green square','yellow square','blue square')
-        for n in names:
-            if np.any(self.arrays[n]) and np.any(self.arrays_target[n]):
-                queue_error = 'A block cannot be attached to itself'
-                self.badInputDialog(queue_error)
-                return
-        names_rect = ('red rect','green rect','yellow rect','blue rect')
-        for n in names_rect:
-            if np.any(self.arrays_rect[n]) and np.any(self.arrays_rect_target[n]):
-                queue_error = 'A block cannot be attached to itself'
-                self.badInputDialog(queue_error)
-                return
-                
-        #
-        #check to make sure only one block per column(obj/target) is selected
-        #as well as record which block was selected
+        # Make sure the user has selected targets for actions that require them
+        if not target_block and not action in ('remove', 'rotate'):
+            err_str = 'Please select one or more target blocks.'
+            self.badInputDialog(err_str)
+            return
+        """
         
-            #object blocks        
-                #concatenate dictionaries for object blocks first
-        self.arrays.update(self.arrays_rect)
-        names = ('red square','green square','yellow square','blue square', 
-        'red rect','green rect','yellow rect','blue rect')
-        selected_object = ""
-        count = 0
-        for n in names:
-            val = self.arrays[n].any()
-            count += val
-            if count >1:
-                queue_error_object = 'Only one object block may be selected at a time'
-                self.badInputDialog(queue_error_object)
-                return
-            elif val:
-                selected_object = n
-        selected_object_block = self.arrays[selected_object]
-        
-        self.arrays_target.update(self.arrays_rect_target)
-        names = ('red square','green square','yellow square','blue square', 
-        'red rect','green rect','yellow rect','blue rect')
-        selected_target = ""
-        count = 0
-        for n in names:
-            val = self.arrays_target[n].any()
-            count += val
-            if count >1:
-                queue_error_target = 'Only one target block may be selected at a time'
-                self.badInputDialog(queue_error_target)
-                return
-            elif val:
-                selected_target = n
-        selected_target_block = self.arrays_target[selected_target]
-        
-        #retrieve selected stud coordinates for object and target
-        selected_object_coords_temp = np.where(selected_object_block ==1)        
-        selected_object_coords = zip(*selected_object_coords_temp)
-        selected_object_coords_array = np.array(selected_object_coords)
-        selected_target_coords_temp = np.where(selected_target_block == 1)  
-        selected_target_coords = zip(*selected_target_coords_temp)  
-        selected_target_coords_array = np.array(selected_target_coords)
-        
-        #check to see if coordinates of obj and target are aligned on the same axis
-        obj_alignment = []
-        test_obj_x = [pair[0] for pair in selected_object_coords]
-        test_obj_y = [pair[1] for pair in selected_object_coords]
-        if all([x == test_obj_x[0] for x in test_obj_x]):
-            obj_alignment = "y"
-            ax_object = 1
-        elif all([x == test_obj_y[0] for x in test_obj_y]):
-            obj_alignment = "x"
-            ax_object = 0
-        else:
-            obj_alignment = "x"
-            ax_object = 0
-
-        target_alignment = []
-        test_target_x = [pair[0] for pair in selected_target_coords]
-        test_target_y = [pair[1] for pair in selected_target_coords]
-        if all([x == test_target_x[0] for x in test_target_x]):
-            target_alignment = "y"
-            ax_target = 1
-        elif all([x == test_target_y[0] for x in test_target_y]):
-            target_alignment = "x"
-            ax_target = 0
-        else:
-            target_alignment = "x"
-            ax_target = 0
-            
-        alignment = [obj_alignment, target_alignment]
-        if not all([x == alignment[0] for x in alignment]):
-            sorted_obj_coords_idx = selected_object_coords_array[:,ax_object].argsort()
-            selected_object_coords_array = selected_object_coords_array[sorted_obj_coords_idx,:]
-            sorted_target_coords_idx = selected_target_coords_array[:,ax_target].argsort()
-            selected_target_coords_array = selected_target_coords_array[sorted_target_coords_idx,:]                
-        else:
-            sorted_obj_coords_idx = selected_object_coords_array[:,ax_object].argsort()
-            selected_object_coords_array = selected_object_coords_array[sorted_obj_coords_idx,:]
-            sorted_target_coords_idx = selected_target_coords_array[:,ax_target].argsort()
-            selected_target_coords_array = selected_target_coords_array[sorted_target_coords_idx,:]
-        
-        #convert array to strings for later writing
-        selected_object_coords_str = ':'.join([''.join(x) for x in 
-            selected_object_coords_array.astype(str).tolist()])
-            
-        selected_target_coords_str = ':'.join([''.join(x) for x in 
-            selected_target_coords_array.astype(str).tolist()])
-            
-        #define event
-        event = (action_index, self.block2index[selected_object], self.block2index[selected_target],
-                 selected_target_coords_str, selected_object_coords_str)       
-        
-        #append the event to the event queue
-        self.event_queue.append(event)
-        
-        #write target indices to a variable for parseAction
-        target_indices = (event[2],)
-        object_index = event[1]
-        action_index = event[0]
         action = self.actions[action_index]
         
-        #parse actions to create state image
-        self.parseAction(action, object_index, target_indices)
+        # Parse and validate annotation
+        err_str = self.parseAction(action, object_index, target_index)
+        if err_str:
+            self.badInputDialog(err_str)
+            return
         
-        #update world state
+        # Store the action annotation
+        connection = None
+        if action in ('remove', 'rotate'):  # No targets
+            connection = (self.action_start_index, self.cur_frame,
+                          action_index, object_index, -1, '', '')
+        else:
+            connection = (self.action_start_index, self.cur_frame,
+                          action_index, object_index, target_index,
+                          object_stud_str, target_stud_str)
+        self.labels.append(connection)
+        print(connection)
+        
+        # Reset object stud and target stud arrays
+        self.object_studs = None
+        self.target_studs = None
+        
+        # Redraw world state image and stard/end button
         self.updateWorldState()
-        
-        
+        self.cancel()
+    
+    
     def undoAction(self):
         """
         Delete the previous action annotation and re-draw block configuration.
         """
-        """
+        
         if not self.states:
             error_string = 'No annotation to undo'
             self.badInputDialog(error_string)
         
-        
         # Delete all labels associated with the last annotation
         last_label = self.labels[-1]
         while self.labels[-1][:3] == last_label[:3]:
-            self.labels.pop(-1)
+            self.labels.pop()
         
         self.states = self.states[:-1]
         self.updateWorldState()
-        """
         
-        #delete last action
-        self.labels.pop()
-        self.states = self.states[:-1]        
-        self.updateWorldState()
         return
     
     
@@ -686,17 +536,9 @@ class Application:
         Save labels and exit the annotation interface.
         """
         
-        
-        
-        
-        
-        
         # Save labels if they exist and update metadata file to reflect changes
         if self.labels:
-            self.labels_fixed = []
-            for l in self.labels:
-                self.labels_fixed += l
-            self.corpus.writeLabels(self.trial_id, self.labels_fixed)
+            self.corpus.writeLabels(self.trial_id, self.labels)
             self.corpus.updateMetaData(self.trial_id)
         self.parent.destroy()
     
@@ -742,12 +584,7 @@ class Application:
         
         # Redraw button
         self.start_end.configure(text='End of action', command=self.endAction)
-        
-        # enable queue event button
-        self.queue_button.configure(state=tk.NORMAL)
-        
-        #enable event queue
-        self.event_queue = []
+    
     
     def endAction(self):
         """
@@ -756,45 +593,9 @@ class Application:
         world state. If not, display a warning message to the user.
         """
         
-        # Set the action's end to the index of the current frame
-        self.action_end_index = self.cur_frame
-              
-        #add start and end indexes to event queue
-        self.event_queue = [(self.action_start_index, self.action_end_index) + s 
-        for s in self.event_queue]                           
-        
-        #write event queue (which represents one action) to action queue (called 'labels')
-        self.labels.append(self.event_queue)
-        
-        """
-        #write target indices to a variable for parseAction
-        target_indices = (x[4] for x in self.event_queue)
-        object_index = self.event_queue[0][3]
-        action_index = self.event_queue[0][2]
-        action = self.actions[action_index]
-        
-        
-        #parse actions to create state image
-        self.parseAction(action, object_index, target_indices)        
-        """
-        
-        #reset event queue
-        self.event_queue = None
-        
         # Reset start and end indices
         self.action_start_index = -1
-        self.action_end_index = -1
-        
-        """
-        #Redraw world state image and start/end button
-        self.updateWorldState()
-        self.start_end.configure(text='Start of action',
-                                 command=self.startAction)
-        """
-                         
-        #disable queue event button
-        self.queue_button.configure(state=tk.DISABLED)
-        
+    
     
     def updateWorldState(self):
         """
@@ -808,15 +609,18 @@ class Application:
         self.state_display.image = state_image
     
     
-    def parseAction(self, action, object_index, target_indices):
+    def parseAction(self, action, object_index, target_index):
         """
         Update the world state by interpreting an action annotation.
         
         Args:
         -----
-        [str] action: Action label (one of self.actions)
-        [int] object_block: Block that was placed (index in self.blocks)
-        [list(int)] target_blocks: Blocks near the one that was placed
+        action: str
+          Action label (one of self.actions)
+        object_index: int
+          Block that was placed (index in self.blocks)
+        target_index: int
+          Blocks near the one that was placed (index in self.blocks)
         """
         
         # TODO: validate the provided action by making sure it is a possible
@@ -831,12 +635,10 @@ class Application:
         
         # Add a directed edge for each target block
         if action == 'place above':
-            for target_index in target_indices:
-                cur_state.edge(str(object_index), str(target_index))
+            cur_state.edge(str(object_index), str(target_index))
         # Add an undirected edge for each target block
         elif action == 'place adjacent':
-            for target_index in target_indices:
-                cur_state.edge(str(object_index), str(target_index), dir='none')
+            cur_state.edge(str(object_index), str(target_index), dir='none')
         # Remove all edges associated with this node
         elif action == 'remove':
             new_body = []
@@ -864,7 +666,8 @@ class Application:
         
         Args:
         -----
-        [str] error_string: Message that will be displayed in popup window
+        error_string: str
+          Message that will be displayed in popup window
         """
         
         # Destroy the popup window if it exists
@@ -890,13 +693,13 @@ class Application:
         
         self.popup.destroy()
         self.popup = None
+        
 
 if __name__ == '__main__':
     root = tk.Tk()
     screen_width = root.winfo_screenwidth()
     screen_height = root.winfo_screenheight()
     root.geometry('{0}x{1}+0+0'.format(screen_width, screen_height))
-    #root.geometry('800x600')
     
     app = Application(root)
     
