@@ -29,8 +29,8 @@ class Application:
         
         # Constants
         self.actions = ('place above', 'place adjacent', 'disconnect',
-                        'remove block', 'rotate clockwise',
-                        'rotate counterclockwise', 'flip')
+                        'remove block', 'rotate 90 clockwise',
+                        'rotate 90 counterclockwise', 'rotate 180')
         self.blocks = ('red square', 'yellow square', 'green square',
                        'blue square', 'red rect', 'yellow rect', 'green rect',
                        'blue rect')
@@ -49,6 +49,7 @@ class Application:
         self.states = []
         self.labels = []
         self.notes = []
+        self.global_rotation = 0    # in degrees
         
         # User input (to be read from interface later)
         self.action_field = None
@@ -191,6 +192,8 @@ class Application:
         master = self.content_frame
         
         # Navigate forwards and backwards in RGB frames by using j and k keys
+        self.parent.bind('u', self.skipBack)
+        self.parent.bind('i', self.skipForward)
         self.parent.bind('k', self.forward)
         self.parent.bind('j', self.back)
         
@@ -346,15 +349,19 @@ class Application:
         
         # Make sure the user has selected an action and an object
         # (Value of -1 means original value was zero, ie empty)
-        if action_index == -1 or object_index == -1:
-            err_str = 'Please select and action and an object block.'
+        if action_index == -1:
+            err_str = 'Please choose an action.'
             return err_str
                 
         # Make sure the user has selected targets for actions that require them
         action = self.actions[action_index]
-        if target_index == -1 and not action in ('remove block', 'rotate'):
-            err_str = 'Please select a target block.'
-            return err_str
+        if not action.startswith('rotate'):
+            if object_index == -1:
+                err_str = 'Please choose an object block.'
+                return err_str
+            if target_index == -1 and not action == 'remove block':
+                err_str = 'Please choose a target block.'
+                return err_str
     
     
     def drawBlockStuds(self, is_object, block_index):
@@ -513,6 +520,9 @@ class Application:
         
         # Store the action annotation
         connection = None
+        if action.startswith('rotate'):
+            connection = (self.cur_frame, self.cur_frame,
+                          action_index, -1, -1, '', '')
         if not action in ('place above', 'place adjacent'):
             connection = (self.action_start_index, self.cur_frame,
                           action_index, object_index, -1, '', '')
@@ -580,11 +590,11 @@ class Application:
     
     def back(self, event=None):
         """
-        Move backward 10 frames in the video unless the beginning of the video
-        is fewer than 10 frames away. Then, display the new rgb frame.
+        Move backward num_frames in the video unless the beginning of the video
+        is fewer than num_frames away. Then, display the new rgb frame.
         """
         
-        self.cur_frame = max(self.cur_frame - 10, 0)
+        self.cur_frame = max(self.cur_frame - 1, 0)
         
         # Redraw rgb frame
         cur_fn = self.rgb_frame_fns[self.cur_frame]
@@ -593,13 +603,46 @@ class Application:
         self.rgb_display.image = rgb_image
     
     
-    def forward(self, event=None):
+    def forward(self, num_frames, event=None):
         """
-        Move forward 10 frames in the video unless the end of the video is
-        fewer than 10 frames away. Then, display the new rgb frame.
+        Move forward num_frames in the video unless the end of the video is
+        fewer than num_frames away. Then, display the new rgb frame.
         """
         
-        self.cur_frame = min(self.cur_frame + 10, len(self.rgb_frame_fns) - 1)
+        last_frame = len(self.rgb_frame_fns) - 1
+        self.cur_frame = min(self.cur_frame + 1, last_frame)
+        
+        # Redraw rgb frame
+        cur_fn = self.rgb_frame_fns[self.cur_frame]
+        rgb_image = Image.open(cur_fn)
+        rgb_image = ImageTk.PhotoImage(Image.open(cur_fn))
+        self.rgb_display.configure(image=rgb_image)
+        self.rgb_display.image = rgb_image
+    
+    
+    def skipBack(self, event=None):
+        """
+        """
+        
+        # FIXME
+        
+        self.cur_frame = max(self.cur_frame - 10, 0)
+        
+        # Redraw rgb frame
+        cur_fn = self.rgb_frame_fns[self.cur_frame]
+        rgb_image = ImageTk.PhotoImage(Image.open(cur_fn))
+        self.rgb_display.configure(image=rgb_image)
+        self.rgb_display.image = rgb_image
+        
+    
+    def skipForward(self, event=None):
+        """
+        """
+        
+        # FIXME
+        
+        last_frame = len(self.rgb_frame_fns) - 1
+        self.cur_frame = min(self.cur_frame + 10, last_frame)
         
         # Redraw rgb frame
         cur_fn = self.rgb_frame_fns[self.cur_frame]
