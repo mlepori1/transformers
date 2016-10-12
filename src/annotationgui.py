@@ -342,6 +342,7 @@ class Application:
         
         if self.action_start_index < 0:
             err_str = 'Please click "start of action" before adding a connection.'
+            return err_str
         
         # Make sure the user has selected an action and an object
         # (Value of -1 means original value was zero, ie empty)
