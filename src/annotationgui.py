@@ -9,6 +9,7 @@ AUTHOR
 
 from __future__ import print_function
 import Tkinter as tk
+import tkFont
 from PIL import Image, ImageTk
 import graphviz as gv
 import os
@@ -20,11 +21,16 @@ class Application:
     
     def __init__(self, parent):
         
+        # Some text should be bold
+        self.bold_font = tkFont.Font(size=10, weight=tkFont.BOLD)
+        
         self.parent = parent
         self.popup = None
         
         # Constants
-        self.actions = ('place above', 'place adjacent', 'remove', 'rotate')
+        self.actions = ('place above', 'place adjacent', 'disconnect',
+                        'remove block', 'rotate clockwise',
+                        'rotate counterclockwise', 'flip')
         self.blocks = ('red square', 'yellow square', 'green square',
                        'blue square', 'red rect', 'yellow rect', 'green rect',
                        'blue rect')
@@ -42,21 +48,13 @@ class Application:
         self.cur_frame = 0
         self.states = []
         self.labels = []
+        self.notes = []
         
         # User input (to be read from interface later)
         self.action_field = None
         self.object_field = None
         self.target_field = None
         self.trial_field = None
-        
-        """
-        #create object arrays for square blocks
-        self.arrays_square_object = {}
-        names = ('red square','green square','yellow square','blue square')
-        for n in names:
-            a = np.zeros((2,2), dtype=bool)
-            self.arrays_square_object[n] = a
-        """
         
         # These are placeholders for boolean arrays representing if studs are
         # selected or not
@@ -132,13 +130,13 @@ class Application:
         
         master = self.content_frame
         
-        user_text = 'Select a trial to annotate:'
-        instructions = tk.Label(master, text=user_text)
+        user_text = 'Select a video to annotate:\n'
+        instructions = tk.Label(master, text=user_text, font=self.bold_font)
         instructions.pack()
         
         # Draw a listbox with a vertical scrollbar
         scrollbar = tk.Scrollbar(master, orient=tk.VERTICAL)
-        self.trial_field = tk.Listbox(master, yscrollcommand=scrollbar.set)
+        self.trial_field = tk.Listbox(master, height=20, yscrollcommand=scrollbar.set)
         scrollbar.config(command=self.trial_field.yview)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.trial_field.pack(side=tk.LEFT, fill=tk.BOTH, expand=1)
@@ -197,20 +195,20 @@ class Application:
         self.parent.bind('j', self.back)
         
         # Draw RGB frame
-        frame1 = tk.Frame(master)
+        interaction_frame = tk.Frame(master)
         
         # RGB video
         rgb_frame_fn = self.rgb_frame_fns[self.cur_frame]
         rgb_image = ImageTk.PhotoImage(Image.open(rgb_frame_fn))
-        self.rgb_display = tk.Label(frame1, image=rgb_image)
+        self.rgb_display = tk.Label(interaction_frame, image=rgb_image)
         self.rgb_display.image = rgb_image
-        self.rgb_display.pack(side=tk.LEFT)
+        self.rgb_display.grid(row=0)
         
         # Draw annotation frame
-        ann_frame = tk.Frame(frame1)
+        ann_frame = tk.Frame(interaction_frame)
         
         # Action label (radio buttons)
-        action_label = tk.Label(ann_frame, text='Action')
+        action_label = tk.Label(ann_frame, text='\nAction', font=self.bold_font)
         action_label.grid(row=0, column=0)
         self.action_field = tk.IntVar()
         for i, label in enumerate(self.actions):
@@ -219,7 +217,7 @@ class Application:
             button.grid(sticky=tk.W, row=i+1, column=0)
         
         # Object label (radio buttons)
-        obj_label = tk.Label(ann_frame, text='Object')
+        obj_label = tk.Label(ann_frame, text='\nObject', font=self.bold_font)
         obj_label.grid(row=0, column=1)
         self.object_field = tk.IntVar()
         for i, block in enumerate(self.blocks):
@@ -228,26 +226,38 @@ class Application:
             button.grid(sticky=tk.W, row=i+1, column=1)
         
         # Target label (radio buttons)
-        target_label = tk.Label(ann_frame, text='Target')
+        target_label = tk.Label(ann_frame, text='\nTarget', font=self.bold_font)
         target_label.grid(row=0, column=2)
         self.target_field = tk.IntVar()
         for i, block in enumerate(self.blocks):
             button = tk.Radiobutton(ann_frame, text=block,
                                     variable=self.target_field, value=i+1)
             button.grid(sticky=tk.W, row=i+1, column=2)
+            
+        row = max(len(self.actions), len(self.blocks)) + 1
         
-        ann_frame.pack(side=tk.RIGHT)
-        frame1.pack(side=tk.TOP)
+        # Spacer (this is hacky)
+        spacer_label = tk.Label(ann_frame, text='  ')
+        spacer_label.grid(row=row, column=0, columnspan=3)
+        
+        # Notes box
+        self.notes_field = tk.Entry(ann_frame, width=50)
+        self.notes_field.grid(sticky=tk.W, row=row+1, column=0, columnspan=3)
+        note_button = tk.Button(ann_frame, text='Save note', command=self.saveNote)
+        note_button.grid(sticky=tk.W, row=row+1, column=3)
+        
+        ann_frame.grid(row=1)
+        interaction_frame.grid(row=0, column=0)
         
         # Draw visualization of annotation
-        frame2 = tk.Frame(master)
+        visualization_frame = tk.Frame(master)
         state_fn = '{}.png'.format(len(self.states) - 1)
         state_path = os.path.join(self.state_fig_path, state_fn)
         state_image = ImageTk.PhotoImage(Image.open(state_path))
-        self.state_display = tk.Label(frame2, image=state_image)
+        self.state_display = tk.Label(visualization_frame, image=state_image)
         self.state_display.image = state_image
-        self.state_display.pack()
-        frame2.pack(side=tk.BOTTOM)
+        self.state_display.grid(row=0)
+        visualization_frame.grid(row=0, column=1)
         
         # Draw start/end, undo, restart, and quit buttons
         master = self.navigation_frame
@@ -264,83 +274,135 @@ class Application:
         
         # Draw restart and quit buttons
         end_frame = tk.Frame(master)
-        restart = tk.Button(end_frame, text='Start new trial', command=self.restart)
+        restart = tk.Button(end_frame, text='Annotate a new video', command=self.restart)
         restart.grid(sticky=tk.W, row=0, column=0)
         close = tk.Button(end_frame, text='Quit', command=self.close)
         close.grid(sticky=tk.W, row=0, column=1)
         end_frame.pack(side=tk.TOP)
+    
+    
+    def saveNote(self):
+        """
+        Save text annotation and current frame, then clear text box.
+        """
+        
+        # TODO
+        note = self.notes_field.get()
+        self.notes_field.delete(0, tk.END)
+        self.notes.append((self.cur_frame, note))
+        
+        print('{}  |  {}'.format(self.cur_frame, note))
         
         
     def studSelectionDialog(self):
         """
         Create a popup window to code block relations.
         """
+        
+        # Get coarse-level annotation info
+        action_index = self.action_field.get() - 1
+        object_index = self.object_field.get() - 1
+        target_index = self.target_field.get() - 1
+        
+        # Make sure annotation is physically possible
+        err_str = self.validateAction(action_index, object_index, target_index)
+        if err_str:
+            self.badInputDialog(err_str)
+            return
+        
+        # Don't draw a window if a connection isn't being annotated -- go
+        # straight to addConnection
+        action = self.actions[action_index]
+        if not action in ('place above', 'place adjacent'):
+            self.addConnection()
+            return
+        
         # Destroy the popup window if it exists
         if self.popup:
             self.cancel()
         
+        # Begin drawing popup
         self.popup = tk.Toplevel(self.parent)
         self.popup.geometry('{0}x{1}'.format(screen_width/4, screen_height/4))    
         
-        # Create object block
-        object_index = self.object_field.get() - 1
-        object_name = self.blocks[object_index]
-        object_color, object_shape = object_name.split(' ')
-        object_color_str = object_color + '2'
-        self.object_frame = tk.Frame(self.popup, bg=object_color_str)
-        if object_shape == 'square':    # Draw a square
-            rows, cols = 2, 2
-        elif object_shape == 'rect':    # Draw a rectangle
-            rows, cols = 2, 4
-        self.object_studs = np.zeros((rows, cols), dtype=bool)
-        
-        self.object_stud_buttons = [] 
-        for r in range(rows):
-            self.object_stud_buttons.append([])
-            for c in range(cols):
-                func = lambda b='object', n=object_name, r=r, c=c: self.toggleStud(b,n,r,c)
-                b = tk.Button(self.object_frame, command=func, bg=object_color_str, 
-                              activebackground=object_color_str, relief='ridge')
-                b.grid(row=r, column=c)
-                self.object_stud_buttons[-1].append(b)
-        
-        self.object_frame.place(relx=0.25, rely=0.33, anchor='center')
-        rotate_object = lambda x='object', n=object_name, o='vertical': self.rotate(x, n, o)
-        self.object_button = tk.Button(self.popup, command=rotate_object, text='rotate')
-        self.object_button.place(relx=0.25, rely=0.75, anchor='center')
-        
-        # Create target block
-        target_index = self.target_field.get() - 1
-        target_name = self.blocks[target_index]
-        target_color, target_shape = target_name.split(' ')
-        target_color_str = target_color + '2'
-        self.target_frame = tk.Frame(self.popup, bg=target_color_str)
-        if target_shape == 'square':    # Draw a square
-            rows, cols = 2, 2
-        elif target_shape == 'rect':    # Draw a rectangle
-            rows, cols = 2, 4
-        self.target_studs = np.zeros((rows, cols), dtype=bool)
-        
-        self.target_stud_buttons = []
-        for r in range(rows):
-            self.target_stud_buttons.append([])
-            for c in range(cols):
-                func = lambda b='target', n=target_name, r=r, c=c: self.toggleStud(b,n,r,c)
-                b = tk.Button(self.target_frame, command=func, bg=target_color_str, 
-                              activebackground=target_color_str, relief='ridge')
-                b.grid(row=r, column=c)
-                self.target_stud_buttons[-1].append(b)
-       
-        self.target_frame.place(relx=0.75, rely=0.33, anchor='center')
-        rotate_target = lambda x='target', n=target_name, o='vertical': self.rotate(x, n, o)
-        self.target_button = tk.Button(self.popup, command=rotate_target, text='rotate')
-        self.target_button.place(relx=0.75, rely=0.75, anchor='center')
+        # Draw target and object blocks
+        self.drawBlockStuds(True , object_index)
+        self.drawBlockStuds(False, target_index)
         
         swap_button = tk.Button(self.popup, command=self.swap, text='swap')
         swap_button.place(relx=0.5, rely=0.75, anchor='center')
         
         select_ok = tk.Button(self.popup, text='OK', command=self.addConnection)
         select_ok.place(relx=0.5, rely=0.9, anchor='center')
+    
+    
+    def validateAction(self, action_index, object_index, target_index):
+        """
+        """
+        
+        if self.action_start_index < 0:
+            err_str = 'Please click "start of action" before adding a connection.'
+        
+        # Make sure the user has selected an action and an object
+        # (Value of -1 means original value was zero, ie empty)
+        if action_index == -1 or object_index == -1:
+            err_str = 'Please select and action and an object block.'
+            return err_str
+                
+        # Make sure the user has selected targets for actions that require them
+        action = self.actions[action_index]
+        if target_index == -1 and not action in ('remove block', 'rotate'):
+            err_str = 'Please select a target block.'
+            return err_str
+    
+    
+    def drawBlockStuds(self, is_object, block_index):
+        """
+        """
+        
+        # Parse block name into shape and color
+        name = self.blocks[block_index]
+        color, shape = name.split(' ')
+        color_str = color + '2'
+        frame = tk.Frame(self.popup, bg=color_str)
+        
+        # Define layout depending on shape
+        if shape == 'square':    # Draw a square
+            rows, cols = 2, 2
+        elif shape == 'rect':    # Draw a rectangle
+            rows, cols = 2, 4
+        block_studs = np.zeros((rows, cols), dtype=bool)
+        
+        # Create buttons
+        stud_buttons = [] 
+        for r in range(rows):
+            stud_buttons.append([])
+            for c in range(cols):
+                func = lambda o=is_object, n=name, r=r, c=c: self.toggleStud(o,n,r,c)
+                b = tk.Button(frame, command=func, bg=color_str, 
+                              activebackground=color_str, relief='ridge')
+                b.grid(row=r, column=c)
+                stud_buttons[-1].append(b)
+        
+        # Draw frame and update member variables
+        rotate = lambda o=is_object, h=False, n=name: self.rotate(o, h, n)
+        if is_object:
+            frame.place(relx=0.25, rely=0.33, anchor='center')
+            self.object_button = tk.Button(self.popup, command=rotate, text='rotate')
+            self.object_button.place(relx=0.25, rely=0.75, anchor='center')
+            
+            self.object_frame = frame
+            self.object_studs = block_studs
+            self.object_stud_buttons = stud_buttons
+        else:
+            frame.place(relx=0.75, rely=0.33, anchor='center')
+            self.target_button = tk.Button(self.popup, command=rotate, text='rotate')
+            self.target_button.place(relx=0.75, rely=0.75, anchor='center')
+            
+            self.target_frame = frame
+            self.target_studs = block_studs
+            self.target_stud_buttons = stud_buttons
+        
     
     def swap(self):
         """
@@ -349,30 +411,25 @@ class Application:
         # TODO
     
     
-    def rotate(self, block, name, orientation):
+    def rotate(self, is_object, to_horizontal, name):
         """
         Rotate a rectangular block by 90 degrees.
         
         Args:
         -----
-        block: str
-          'object' or 'target'
         """
         
         # Toggle between horizontal and vertical orientations
         rows, cols = None, None
-        next_orientation = None
-        if orientation == 'horizontal':
+        if to_horizontal:
             rows, cols = 2, 4
-            next_orientation = 'vertical'
-        elif orientation == 'vertical':
+        else:   # to vertical orientation
             rows, cols = 4, 2
-            next_orientation = 'horizontal'
         
         color, shape = name.split(' ')
         color_str = color + '2'
         
-        if block == 'object':
+        if is_object:
             if shape == 'rect':
                 # Update block buttons
                 self.object_frame.destroy()
@@ -382,7 +439,7 @@ class Application:
                 for r in range(rows):
                     self.object_stud_buttons.append([])
                     for c in range(cols):
-                        func = lambda b=block, n=name, r=r, c=c: self.toggleStud(b,n,r,c)
+                        func = lambda o=is_object, n=name, r=r, c=c: self.toggleStud(o,n,r,c)
                         b = tk.Button(self.object_frame, command=func, bg=color_str, 
                                       activebackground=color_str, relief='ridge')
                         b.grid(row=r, column=c)
@@ -390,10 +447,10 @@ class Application:
                 self.object_frame.place(relx=0.25, rely=0.33, anchor='center')
                 
                 # Update rotate button
-                rotate_object = lambda x='object', n=name, o=next_orientation: self.rotate(x, n, o)
-                self.object_button.configure(command=rotate_object)
+                rotate = lambda o=is_object, h=not to_horizontal, n=name: self.rotate(o, h, n)
+                self.object_button.configure(command=rotate)
                 
-        elif block == 'target':
+        else:
             if shape == 'rect':
                 # Update block buttons
                 self.target_frame.destroy()
@@ -403,7 +460,7 @@ class Application:
                 for r in range(rows):
                     self.target_stud_buttons.append([])
                     for c in range(cols):
-                        func = lambda b=block, n=name, r=r, c=c: self.toggleStud(b,n,r,c)
+                        func = lambda o=is_object, n=name, r=r, c=c: self.toggleStud(o,n,r,c)
                         b = tk.Button(self.target_frame, command=func, bg=color_str, 
                                       activebackground=color_str, relief='ridge')
                         b.grid(row=r, column=c)
@@ -411,11 +468,11 @@ class Application:
                 self.target_frame.place(relx=0.75, rely=0.33, anchor='center')
                 
                 # Update rotate button
-                rotate_target = lambda x='target', n=name, o=next_orientation: self.rotate(x, n, o)
-                self.target_button.configure(command=rotate_target)
+                rotate = lambda o=is_object, h=not to_horizontal, n=name: self.rotate(o, h, n)
+                self.target_button.configure(command=rotate)
     
     
-    def toggleStud(self, block, name, row, col):
+    def toggleStud(self, is_object, name, row, col):
         """
         """
         
@@ -425,11 +482,11 @@ class Application:
         color_str = color + '2'
         dark_color_str = color + '4'
         
-        if block == 'object':
+        if is_object:
             self.object_studs[row, col] = not self.object_studs[row, col]
             bg_color = dark_color_str if self.object_studs[row, col] else color_str
             self.object_stud_buttons[row][col].config(bg=bg_color, activebackground=bg_color)
-        elif block == 'target':
+        else:
             self.target_studs[row, col] = not self.target_studs[row, col]
             bg_color = dark_color_str if self.target_studs[row, col] else color_str
             self.target_stud_buttons[row][col].config(bg=bg_color, activebackground=bg_color)
@@ -445,30 +502,6 @@ class Application:
         object_index = self.object_field.get() - 1
         target_index = self.target_field.get() - 1
 
-        rows, cols = self.object_studs.nonzero()
-        object_stud_str = ':'.join([''.join([str(r), str(c)]) for r, c in zip(rows, cols)])
-        rows, cols = self.target_studs.nonzero()
-        target_stud_str = ':'.join([''.join([str(r), str(c)]) for r, c in zip(rows, cols)])
-        
-        """
-        # Make sure the user has selected an action and an object
-        # (Value of -1 means original value was zero, ie empty)
-        if action_index == -1 or object_index == -1:
-            err_str = 'Please select and action and an object block.'
-            self.badInputDialog(err_str)
-            return
-        
-        action = self.actions[action_index]
-        object_block = self.blocks[object_index]
-        target_block = self.blocks[target_index]
-        
-        # Make sure the user has selected targets for actions that require them
-        if not target_block and not action in ('remove', 'rotate'):
-            err_str = 'Please select one or more target blocks.'
-            self.badInputDialog(err_str)
-            return
-        """
-        
         action = self.actions[action_index]
         
         # Parse and validate annotation
@@ -479,10 +512,14 @@ class Application:
         
         # Store the action annotation
         connection = None
-        if action in ('remove', 'rotate'):  # No targets
+        if not action in ('place above', 'place adjacent'):
             connection = (self.action_start_index, self.cur_frame,
                           action_index, object_index, -1, '', '')
         else:
+            rows, cols = self.object_studs.nonzero()
+            object_stud_str = ':'.join([''.join([str(r), str(c)]) for r, c in zip(rows, cols)])
+            rows, cols = self.target_studs.nonzero()
+            target_stud_str = ':'.join([''.join([str(r), str(c)]) for r, c in zip(rows, cols)])
             connection = (self.action_start_index, self.cur_frame,
                           action_index, object_index, target_index,
                           object_stud_str, target_stud_str)
@@ -503,16 +540,13 @@ class Application:
         Delete the previous action annotation and re-draw block configuration.
         """
         
-        if not self.states:
-            error_string = 'No annotation to undo'
+        if not self.states or not self.labels:
+            error_string = 'No connection to undo!'
             self.badInputDialog(error_string)
         
         # Delete all labels associated with the last annotation
-        last_label = self.labels[-1]
-        while self.labels[-1][:3] == last_label[:3]:
-            self.labels.pop()
-        
-        self.states = self.states[:-1]
+        self.labels.pop()
+        self.states.pop()
         self.updateWorldState()
         
         return
@@ -595,6 +629,9 @@ class Application:
         
         # Reset start and end indices
         self.action_start_index = -1
+        
+        # Redraw button
+        self.start_end.configure(text='Start of action', command=self.startAction)
     
     
     def updateWorldState(self):
@@ -640,7 +677,7 @@ class Application:
         elif action == 'place adjacent':
             cur_state.edge(str(object_index), str(target_index), dir='none')
         # Remove all edges associated with this node
-        elif action == 'remove':
+        elif action == 'remove block':
             new_body = []
             for entry in cur_state.body:
                 # Matches all edges originating from the removed block
@@ -649,6 +686,15 @@ class Application:
                 end_pattern = '-> {} [dir=none]'.format(object_index)
                 if not (entry.startswith(start_pattern) or
                    entry.endswith(end_pattern)):
+                    new_body.append(entry)
+            cur_state.body = new_body
+        # Remove the edge between object and target
+        elif action == 'disconnect':
+            new_body = []
+            pattern_str = '\t\t{} -> {}'
+            for entry in cur_state.body:
+                if not (entry.startswith(pattern_str.format(object_index, target_index)) or
+                    entry.startswith(pattern_str.format(target_index, object_index))):
                     new_body.append(entry)
             cur_state.body = new_body
         
@@ -688,10 +734,8 @@ class Application:
         Close the current popup window.
         """
         
-        # It shouldn't be possible to close a window that doesn't exist
-        assert(not self.popup is None)
-        
-        self.popup.destroy()
+        if self.popup:
+            self.popup.destroy()
         self.popup = None
         
 
