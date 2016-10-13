@@ -268,11 +268,14 @@ class Application:
         self.start_end = tk.Button(actions_frame, text='Start of action',
                                    command=self.startAction, default=tk.ACTIVE)
         self.start_end.grid(sticky=tk.E, row=0, column=0)
+        undo_action = tk.Button(actions_frame, text='Undo action',
+                                command=self.undoAction)
+        undo_action.grid(sticky=tk.W, row=0, column=1)
         select = tk.Button(actions_frame, text='Add connection', command=self.studSelectionDialog)
-        select.grid(sticky=tk.W, row=0, column=1)
-        undo = tk.Button(actions_frame, text='Undo connection',
-                         command=self.undoAction)
-        undo.grid(sticky=tk.W, row=0, column=2)
+        select.grid(sticky=tk.W, row=0, column=2)
+        undo_connection = tk.Button(actions_frame, text='Undo connection',
+                                    command=self.undoConnection)
+        undo_connection.grid(sticky=tk.W, row=0, column=3)
         actions_frame.pack(side=tk.TOP)
         
         # Draw restart and quit buttons
@@ -512,28 +515,46 @@ class Application:
 
         action = self.actions[action_index]
         
+        if not action in ('place above', 'place adjacent'):
+            err_str = 'Only add connections for "place above" and "place adjacent."'
+            self.badInputDialog(err_str)
+            return
+        
         # Parse and validate annotation
         err_str = self.parseAction(action, object_index, target_index)
         if err_str:
             self.badInputDialog(err_str)
             return
         
-        # Store the action annotation
-        connection = None
-        if action.startswith('rotate'):
-            connection = (self.cur_frame, self.cur_frame,
-                          action_index, -1, -1, '', '')
-        if not action in ('place above', 'place adjacent'):
-            connection = (self.action_start_index, self.cur_frame,
-                          action_index, object_index, -1, '', '')
-        else:
-            rows, cols = self.object_studs.nonzero()
-            object_stud_str = ':'.join([''.join([str(r), str(c)]) for r, c in zip(rows, cols)])
-            rows, cols = self.target_studs.nonzero()
-            target_stud_str = ':'.join([''.join([str(r), str(c)]) for r, c in zip(rows, cols)])
-            connection = (self.action_start_index, self.cur_frame,
-                          action_index, object_index, target_index,
-                          object_stud_str, target_stud_str)
+        # Build a string representing the connected studs on the object block
+        rows, cols = self.object_studs.nonzero()
+        prefix = ''
+        num_rows, num_cols = self.object_studs.shape
+        if num_rows > num_cols:
+            prefix = 'V'
+        elif num_rows < num_cols:
+            prefix = 'H'
+        else:   # num_rows == num_cols
+            prefix = 'S'
+        coord_strings = [''.join([str(r), str(c)]) for r, c in zip(rows, cols)]
+        object_stud_str = prefix + ':'.join(coord_strings)
+        
+        # Build a string representing the connected studs on the target block
+        rows, cols = self.target_studs.nonzero()
+        prefix = ''
+        num_rows, num_cols = self.target_studs.shape
+        if num_rows > num_cols:
+            prefix = 'V'
+        elif num_rows < num_cols:
+            prefix = 'H'
+        else:   # num_rows == num_cols
+            prefix = 'S'
+        coord_strings = [''.join([str(r), str(c)]) for r, c in zip(rows, cols)]
+        target_stud_str = prefix + ':'.join(coord_strings)
+        
+        connection = (self.action_start_index, self.cur_frame, action_index,
+                      object_index, target_index, object_stud_str,
+                      target_stud_str)
         self.labels.append(connection)
         print(connection)
         
@@ -541,26 +562,59 @@ class Application:
         self.object_studs = None
         self.target_studs = None
         
-        # Redraw world state image and stard/end button
+        # Redraw world state image
         self.updateWorldState()
         self.cancel()
     
     
-    def undoAction(self):
+    def undoConnection(self):
         """
-        Delete the previous action annotation and re-draw block configuration.
+        Delete the previous connection annotation and re-draw block
+        configuration.
         """
         
-        if not self.states or not self.labels:
+        if not self.labels:
             error_string = 'No connection to undo!'
             self.badInputDialog(error_string)
+            return
         
-        # Delete all labels associated with the last annotation
-        self.labels.pop()
-        self.states.pop()
-        self.updateWorldState()
+        # Delete the last label if it represents a graph edge
+        last_label = self.labels[-1]
+        if self.actions[last_label[2]] in ('place above', 'place adjacent'):
+            self.labels.pop()
+            self.states.pop()
+            self.updateWorldState()
+    
+    
+    def undoAction(self):
+        """
+        Delete the previous action annotation and re-draw the block
+        configuration.
+        """
         
-        return
+        if not self.labels:
+            error_string = 'No action to undo!'
+            self.badInputDialog(error_string)
+            return
+        
+        last_label = self.labels[-1]
+        last_action = self.actions[last_label[2]]
+        # Delete all edges annotated during the last action
+        if last_action in ('place above', 'place adjacent'):
+            start_index = last_label[0]
+            while self.labels and self.labels[-1][0] == start_index:
+                self.labels.pop()
+                self.states.pop()
+            self.updateWorldState()
+        # Delete disconnect-type annotations
+        elif last_action in ('disconnect', 'remove block'):
+            self.labels.pop()
+            self.states.pop()
+            self.updateWorldState()
+        else:   # rotate 90, rotate -90, rotate 180 don't alter state graph
+            self.labels.pop()
+            message_str = 'Removed action: {}'.format(last_action)
+            self.badInputDialog(message_str)
     
     
     def restart(self):
@@ -671,6 +725,35 @@ class Application:
         world state. If not, display a warning message to the user.
         """
         
+        # Get action annotation (action and object fields are one-indexed, so
+        # convert to zero-indexing)
+        action_index = self.action_field.get() - 1
+        object_index = self.object_field.get() - 1
+        target_index = self.target_field.get() - 1
+
+        action = self.actions[action_index]
+        
+        # Store the action annotation
+        # Place above and place adjacent actions were already processed when
+        # connections were added.
+        if not action in ('place above', 'place adjacent'):
+            connection = None
+            if action.startswith('rotate'):
+                # World state is unchanged
+                connection = (self.cur_frame, self.cur_frame,
+                              action_index, -1, -1, '', '')
+            elif action in ('disconnect', 'remove block'):
+                # Parse action and draw new world state
+                err_str = self.parseAction(action, object_index, target_index)
+                if err_str:
+                    self.badInputDialog(err_str)
+                    return
+                self.updateWorldState()
+                connection = (self.action_start_index, self.cur_frame,
+                              action_index, object_index, -1, '', '')                
+            self.labels.append(connection)
+            print(connection)
+        
         # Reset start and end indices
         self.action_start_index = -1
         
@@ -727,9 +810,11 @@ class Application:
                 # Matches all edges originating from the removed block
                 start_pattern = '\t\t{}'.format(object_index)
                 # Matches all undirected edges leading to the removed block
-                end_pattern = '-> {} [dir=none]'.format(object_index)
+                end_pattern_undirected = '-> {} [dir=none]'.format(object_index)
+                end_pattern_directed = '-> {}'.format(object_index)
                 if not (entry.startswith(start_pattern) or
-                   entry.endswith(end_pattern)):
+                   entry.endswith(end_pattern_undirected) or
+                   entry.endswith(end_pattern_directed)):
                     new_body.append(entry)
             cur_state.body = new_body
         # Remove the edge between object and target

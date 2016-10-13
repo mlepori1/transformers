@@ -53,7 +53,7 @@ class DuploCorpus:
         # description length for this attribute: max 8 studs + 8 spaces + 2 parens
         self.label_types = [('start', 'i'), ('end', 'i'), ('action', 'i'),
                             ('object', 'i'), ('target', 'i'),
-                            ('obj_studs', 'S18'), ('tgt_studs', 'S18')]
+                            ('obj_studs', 'S25'), ('tgt_studs', 'S25')]
     
     
     def initLogger(self):
