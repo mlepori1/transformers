@@ -53,7 +53,7 @@ class DuploCorpus:
         # description length for this attribute: max 8 studs + 8 spaces + 2 parens
         self.label_types = [('start', 'i'), ('end', 'i'), ('action', 'i'),
                             ('object', 'i'), ('target', 'i'),
-                            ('obj_studs', 'S18'), ('tgt_studs', 'S18')]
+                            ('obj_studs', 'S25'), ('tgt_studs', 'S25')]
     
     
     def initLogger(self):
@@ -420,7 +420,7 @@ class DuploCorpus:
         return labels
     
     
-    def writeLabels(self, trial_id, labels):
+    def writeLabels(self, trial_id, annotator_id, labels):
         """
         Write labels to file for the given trial.
         
@@ -429,6 +429,8 @@ class DuploCorpus:
         trial_id:  int
           Trial identifier. This is the trial's index in the corpus metadata
           array.
+        annotator_id: str
+          String identifying the person who annotated this set of labels.
         labels:  list of tuple
           Labels to be written. Each entry (tuple) in the
           list represents a single action. Entries are as follows
@@ -448,12 +450,49 @@ class DuploCorpus:
         # Convert labels to numpy structured array
         labels = np.array(labels, dtype=self.label_types)
         
-        fn = os.path.join(self.paths['labels'], '{}.csv'.format(trial_id))
-        with open(fn, 'w') as labels_file:
+        fn = '{}-{}.csv'.format(trial_id, annotator_id)
+        path = os.path.join(self.paths['labels'], fn)
+        with open(path, 'w') as labels_file:
             labels_writer = csv.writer(labels_file)
             labels_writer.writerow(labels.dtype.names)
             for row in labels:
                 labels_writer.writerow(row)
+    
+    
+    def labelFileExists(self, trial_id, annotator_id):
+        """
+        Return True if a label file matching the given trial and annotator
+        exists. This is important for making sure labels don't get overwritten.
+        """
+        
+        fn = '{}-{}.csv'.format(trial_id, annotator_id)
+        path = os.path.join(self.paths['labels'], fn)
+        return os.path.isfile(path)
+    
+    
+    def writeNotes(self, trial_id, annotator_id, notes):
+        """
+        Write notes to file for the given trial.
+        
+        Args:
+        -----
+        trial_id:  int
+          Trial identifier. This is the trial's index in the corpus metadata
+          array.
+        annotator_id: str
+          String identifying the person who annotated this set of notes.
+        notes:  list of tuple
+          Notes to be written. Entries are as follows:
+          0 -- video frame when note was made
+          1 -- string representing the note
+        """
+        
+        fn = '{}-{}-notes.csv'.format(trial_id, annotator_id)
+        path = os.path.join(self.paths['labels'], fn)
+        with open(path, 'w') as notes_file:
+            notes_writer = csv.writer(notes_file)
+            for row in notes:
+                notes_writer.writerow(row)
     
     
     def parseRawData(self, trial_id):
@@ -462,26 +501,35 @@ class DuploCorpus:
     
         Args:
         -----
-        path:  string
-          Path (full or relative) to raw data file
-        imu_dev_names:  list of strings
-          List of IMU ID strings; define p as the number of items in this list
-        img_dev_names:  list of strings
-          List of image capture device ID strings; define q as the number of
-          items in this list
-    
+        trial_id:  int
+          Trial identifier. This is the trial's index in the corpus metadata
+          array.
+          
         Returns:
         --------
-        imu_data:  dict of str -> numpy array
-          Size n-by-p*d, where n is the number of IMU
-          samples, p is the number of IMU devices, and d is the length of one IMU
-          sample. Each holds p length-d IMU samples, concatenated in the order
-          seen in imu_dev_names
-        img_data:  numpy array
-          Size m-by-p. Contains the global timestamp for every video
-          frame recorded
-        sample_len:  int
-          Length of one IMU sample (d)
+        [TODO]
+        """
+        
+        imu_data = self.parseImuData(trial_id)
+        
+        frame_timestamps = self.parseVideoData(trial_id)
+        
+        return (imu_data, frame_timestamps)
+    
+    
+    def parseImuData(self, trial_id):
+        """
+        Read raw data from file and convert to numpy arrays
+    
+        Args:
+        -----
+        trial_id:  int
+          Trial identifier. This is the trial's index in the corpus metadata
+          array.
+          
+        Returns:
+        --------
+        [TODO]
         """
         
         imu_data = {}
@@ -518,6 +566,24 @@ class DuploCorpus:
         for key, entry in imu_data.items():
             imu_data[key] = np.array(entry)
         
+        return imu_data
+    
+    
+    def parseVideoData(self, trial_id):
+        """
+        Read raw data from file and convert to numpy arrays
+    
+        Args:
+        -----
+        trial_id:  int
+          Trial identifier. This is the trial's index in the corpus metadata
+          array.
+          
+        Returns:
+        --------
+        [TODO]
+        """
+        
         path = os.path.join(self.paths['raw'], '{}-timestamps.csv'.format(trial_id))
         frame_timestamps = {}
         with open(path, 'r') as csvfile:
@@ -545,7 +611,7 @@ class DuploCorpus:
         for key, entry in frame_timestamps.items():
             frame_timestamps[key] = np.array(entry)
         
-        return (imu_data, frame_timestamps)
+        return frame_timestamps
     
     
     def postprocess(self, trial_id, trial_metadata, imu2block, imu_settings):

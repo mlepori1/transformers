@@ -8,10 +8,13 @@ AUTHOR
 """
 
 from __future__ import print_function
-import tkinter as tk
+import Tkinter as tk
+import tkMessageBox
+import tkFont
 from PIL import Image, ImageTk
 import graphviz as gv
 import os
+import numpy as np
 
 from duplocorpus import DuploCorpus
 
@@ -19,11 +22,16 @@ class Application:
     
     def __init__(self, parent):
         
+        # Some text should be bold
+        self.bold_font = tkFont.Font(size=10, weight=tkFont.BOLD)
+        
         self.parent = parent
         self.popup = None
         
         # Constants
-        self.actions = ('place above', 'place adjacent', 'remove', 'rotate')
+        self.actions = ('place above', 'place adjacent', 'disconnect',
+                        'remove block', 'rotate 90 clockwise',
+                        'rotate 90 counterclockwise', 'rotate 180')
         self.blocks = ('red square', 'yellow square', 'green square',
                        'blue square', 'red rect', 'yellow rect', 'green rect',
                        'blue rect')
@@ -32,29 +40,36 @@ class Application:
         # Corpus object manages file I/O -- filenames and paths are filled in
         # after reading input from trial selection interface
         self.corpus = DuploCorpus()
+        self.annotator_id = None
         self.trial_id = None
         self.rgb_frame_fns = None
         self.state_fig_path = None
         
         # Initial values
         self.action_start_index = -1
-        self.action_end_index = -1
         self.cur_frame = 0
         self.states = []
         self.labels = []
+        self.notes = []
+        self.global_rotation = 0    # in degrees
         
         # User input (to be read from interface later)
         self.action_field = None
         self.object_field = None
-        self.target_fields = {}
+        self.target_field = None
         self.trial_field = None
+        
+        # These are placeholders for boolean arrays representing if studs are
+        # selected or not
+        self.object_studs = None
+        self.target_studs = None
         
         # Start drawing annotation interface
         self.content_frame = tk.Frame(self.parent)
         self.navigation_frame = tk.Frame(self.parent)
         self.defineTrialSelectionInterface()
         self.drawInterface()
-    
+        
     
     def initState(self):
         """
@@ -118,22 +133,32 @@ class Application:
         
         master = self.content_frame
         
-        user_text = 'Select a trial to annotate:'
-        instructions = tk.Label(master, text=user_text)
+        user_text = 'Select a video to annotate:\n'
+        instructions = tk.Label(master, text=user_text, font=self.bold_font)
         instructions.pack()
         
         # Draw a listbox with a vertical scrollbar
-        scrollbar = tk.Scrollbar(master, orient=tk.VERTICAL)
-        self.trial_field = tk.Listbox(master, yscrollcommand=scrollbar.set)
+        listbox_frame = tk.Frame(master)
+        scrollbar = tk.Scrollbar(listbox_frame, orient=tk.VERTICAL)
+        self.trial_field = tk.Listbox(listbox_frame, height=20, yscrollcommand=scrollbar.set)
         scrollbar.config(command=self.trial_field.yview)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.trial_field.pack(side=tk.LEFT, fill=tk.BOTH, expand=1)
+        listbox_frame.pack()
         
         # Fill the listbox with trial data
         for entry in self.corpus.meta_data:
             fmtstr = '{}, task {}'
             trial_info = fmtstr.format(entry['participant id'], entry['task id'])
             self.trial_field.insert(tk.END, trial_info)
+        
+        # Draw an entrybox for the annotator's name
+        entrybox_frame = tk.Frame(master)
+        name_label = tk.Label(entrybox_frame, text='Your name: ')
+        name_label.pack(side=tk.LEFT)
+        self.ann_id_field = tk.Entry(entrybox_frame)
+        self.ann_id_field.pack(side=tk.LEFT)
+        entrybox_frame.pack()
         
         # Draw a select button
         master = self.navigation_frame
@@ -154,6 +179,18 @@ class Application:
         
         # Read trial ID
         self.trial_id = self.trial_field.curselection()[0]
+        
+        # Get user ID and check if the user has already annotated this video
+        self.annotator_id = self.ann_id_field.get()
+        if not self.annotator_id:
+            err_str = "Please enter your name."
+            self.badInputDialog(err_str)
+            return
+        
+        if self.corpus.labelFileExists(self.trial_id, self.annotator_id):
+            msg_str = "Labels file exists! Overwrite?"
+            if not tkMessageBox.askyesno("", msg_str):
+                return
         
         # Define I/O paths
         self.rgb_frame_fns = self.corpus.getRgbFrameFns(self.trial_id)
@@ -179,24 +216,32 @@ class Application:
         master = self.content_frame
         
         # Navigate forwards and backwards in RGB frames by using j and k keys
+        self.parent.bind('u', self.skipBack)
+        self.parent.bind('i', self.skipForward)
         self.parent.bind('k', self.forward)
         self.parent.bind('j', self.back)
         
+        # Also navigate using arrow keys
+        self.parent.bind('<Down>', self.skipBack)
+        self.parent.bind('<Up>', self.skipForward)
+        self.parent.bind('<Right>', self.forward)
+        self.parent.bind('<Left>', self.back)
+        
         # Draw RGB frame
-        frame1 = tk.Frame(master)
+        interaction_frame = tk.Frame(master)
         
         # RGB video
         rgb_frame_fn = self.rgb_frame_fns[self.cur_frame]
         rgb_image = ImageTk.PhotoImage(Image.open(rgb_frame_fn))
-        self.rgb_display = tk.Label(frame1, image=rgb_image)
+        self.rgb_display = tk.Label(interaction_frame, image=rgb_image)
         self.rgb_display.image = rgb_image
-        self.rgb_display.pack(side=tk.LEFT)
+        self.rgb_display.grid(row=0)
         
         # Draw annotation frame
-        ann_frame = tk.Frame(frame1)
+        ann_frame = tk.Frame(interaction_frame)
         
         # Action label (radio buttons)
-        action_label = tk.Label(ann_frame, text='Action')
+        action_label = tk.Label(ann_frame, text='\nAction', font=self.bold_font)
         action_label.grid(row=0, column=0)
         self.action_field = tk.IntVar()
         for i, label in enumerate(self.actions):
@@ -205,7 +250,7 @@ class Application:
             button.grid(sticky=tk.W, row=i+1, column=0)
         
         # Object label (radio buttons)
-        obj_label = tk.Label(ann_frame, text='Object')
+        obj_label = tk.Label(ann_frame, text='\nObject', font=self.bold_font)
         obj_label.grid(row=0, column=1)
         self.object_field = tk.IntVar()
         for i, block in enumerate(self.blocks):
@@ -213,60 +258,393 @@ class Application:
                                     variable=self.object_field, value=i+1)
             button.grid(sticky=tk.W, row=i+1, column=1)
         
-        # Target label(s) (check boxes)
-        target_label = tk.Label(ann_frame, text='Target(s)')
+        # Target label (radio buttons)
+        target_label = tk.Label(ann_frame, text='\nTarget', font=self.bold_font)
         target_label.grid(row=0, column=2)
+        self.target_field = tk.IntVar()
         for i, block in enumerate(self.blocks):
-            self.target_fields[block] = tk.IntVar()
-            target_box = tk.Checkbutton(ann_frame, text=block,
-                                        variable=self.target_fields[block])
-            target_box.grid(sticky=tk.W, row=i+1, column=2)
+            button = tk.Radiobutton(ann_frame, text=block,
+                                    variable=self.target_field, value=i+1)
+            button.grid(sticky=tk.W, row=i+1, column=2)
+            
+        row = max(len(self.actions), len(self.blocks)) + 1
         
-        ann_frame.pack(side=tk.RIGHT)
-        frame1.pack(side=tk.TOP)
+        # Spacer (this is hacky)
+        spacer_label = tk.Label(ann_frame, text='  ')
+        spacer_label.grid(row=row, column=0, columnspan=3)
+        
+        # Notes box
+        self.notes_field = tk.Entry(ann_frame, width=50)
+        self.notes_field.grid(sticky=tk.W, row=row+1, column=0, columnspan=3)
+        note_button = tk.Button(ann_frame, text='Save note', command=self.saveNote)
+        note_button.grid(sticky=tk.W, row=row+1, column=3)
+        
+        ann_frame.grid(row=1)
+        interaction_frame.grid(row=0, column=0)
         
         # Draw visualization of annotation
-        frame2 = tk.Frame(master)
+        visualization_frame = tk.Frame(master)
         state_fn = '{}.png'.format(len(self.states) - 1)
         state_path = os.path.join(self.state_fig_path, state_fn)
         state_image = ImageTk.PhotoImage(Image.open(state_path))
-        self.state_display = tk.Label(frame2, image=state_image)
+        self.state_display = tk.Label(visualization_frame, image=state_image)
         self.state_display.image = state_image
-        self.state_display.pack()
-        frame2.pack(side=tk.BOTTOM)
+        self.state_display.grid(row=0)
+        visualization_frame.grid(row=0, column=1)
         
         # Draw start/end, undo, restart, and quit buttons
         master = self.navigation_frame
-        self.start_end = tk.Button(master, text='Start of action',
+        actions_frame = tk.Frame(master)
+        self.start_end = tk.Button(actions_frame, text='Start of action',
                                    command=self.startAction, default=tk.ACTIVE)
-        self.start_end.grid(sticky=tk.E, row=0, column=1)
-        undo = tk.Button(master, text='Undo annotation',
-                         command=self.undoAction)
-        undo.grid(sticky=tk.W, row=0, column=0)
-        restart = tk.Button(master, text='Start new trial', command=self.restart)
-        restart.grid(sticky=tk.W, row=0, column=2)
-        restart = tk.Button(master, text='Quit', command=self.close)
-        restart.grid(sticky=tk.W, row=0, column=3)
+        self.start_end.grid(sticky=tk.E, row=0, column=0)
+        undo_action = tk.Button(actions_frame, text='Undo action',
+                                command=self.undoAction)
+        undo_action.grid(sticky=tk.W, row=0, column=1)
+        select = tk.Button(actions_frame, text='Add connection', command=self.studSelectionDialog)
+        select.grid(sticky=tk.W, row=0, column=2)
+        undo_connection = tk.Button(actions_frame, text='Undo connection',
+                                    command=self.undoConnection)
+        undo_connection.grid(sticky=tk.W, row=0, column=3)
+        actions_frame.pack(side=tk.TOP)
+        
+        # Draw restart and quit buttons
+        end_frame = tk.Frame(master)
+        restart = tk.Button(end_frame, text='Annotate a new video', command=self.restart)
+        restart.grid(sticky=tk.W, row=0, column=0)
+        close = tk.Button(end_frame, text='Quit', command=self.close)
+        close.grid(sticky=tk.W, row=0, column=1)
+        end_frame.pack(side=tk.TOP)
+    
+    
+    def saveNote(self):
+        """
+        Save text annotation and current frame, then clear text box.
+        """
+        
+        # TODO
+        note = self.notes_field.get()
+        self.notes_field.delete(0, tk.END)
+        self.notes.append((self.cur_frame, note))
+        
+        print('{}  |  {}'.format(self.cur_frame, note))
+        
+        
+    def studSelectionDialog(self):
+        """
+        Create a popup window to code block relations.
+        """
+        
+        # Get coarse-level annotation info
+        action_index = self.action_field.get() - 1
+        object_index = self.object_field.get() - 1
+        target_index = self.target_field.get() - 1
+        
+        # Make sure annotation is physically possible
+        err_str = self.validateAction(action_index, object_index, target_index)
+        if err_str:
+            self.badInputDialog(err_str)
+            return
+        
+        # Don't draw a window if a connection isn't being annotated -- go
+        # straight to addConnection
+        action = self.actions[action_index]
+        if not action in ('place above', 'place adjacent'):
+            self.addConnection()
+            return
+        
+        # Destroy the popup window if it exists
+        if self.popup:
+            self.cancel()
+        
+        # Begin drawing popup
+        self.popup = tk.Toplevel(self.parent)
+        self.popup.geometry('{0}x{1}'.format(screen_width/4, screen_height/4))    
+        
+        # Draw target and object blocks
+        self.drawBlockStuds(True , object_index)
+        self.drawBlockStuds(False, target_index)
+        
+        swap_button = tk.Button(self.popup, command=self.swap, text='swap')
+        swap_button.place(relx=0.5, rely=0.75, anchor='center')
+        
+        select_ok = tk.Button(self.popup, text='OK', command=self.addConnection)
+        select_ok.place(relx=0.5, rely=0.9, anchor='center')
+    
+    
+    def validateAction(self, action_index, object_index, target_index):
+        """
+        """
+        
+        if self.action_start_index < 0:
+            err_str = 'Please click "start of action" before adding a connection.'
+            return err_str
+        
+        # Make sure the user has selected an action and an object
+        # (Value of -1 means original value was zero, ie empty)
+        if action_index == -1:
+            err_str = 'Please choose an action.'
+            return err_str
+                
+        # Make sure the user has selected targets for actions that require them
+        action = self.actions[action_index]
+        if not action.startswith('rotate'):
+            if object_index == -1:
+                err_str = 'Please choose an object block.'
+                return err_str
+            if target_index == -1 and not action == 'remove block':
+                err_str = 'Please choose a target block.'
+                return err_str
+    
+    
+    def drawBlockStuds(self, is_object, block_index):
+        """
+        """
+        
+        # Parse block name into shape and color
+        name = self.blocks[block_index]
+        color, shape = name.split(' ')
+        color_str = color + '2'
+        frame = tk.Frame(self.popup, bg=color_str)
+        
+        # Define layout depending on shape
+        if shape == 'square':    # Draw a square
+            rows, cols = 2, 2
+        elif shape == 'rect':    # Draw a rectangle
+            rows, cols = 2, 4
+        block_studs = np.zeros((rows, cols), dtype=bool)
+        
+        # Create buttons
+        stud_buttons = [] 
+        for r in range(rows):
+            stud_buttons.append([])
+            for c in range(cols):
+                func = lambda o=is_object, n=name, r=r, c=c: self.toggleStud(o,n,r,c)
+                b = tk.Button(frame, command=func, bg=color_str, 
+                              activebackground=color_str, relief='ridge')
+                b.grid(row=r, column=c)
+                stud_buttons[-1].append(b)
+        
+        # Draw frame and update member variables
+        rotate = lambda o=is_object, h=False, n=name: self.rotate(o, h, n)
+        if is_object:
+            frame.place(relx=0.25, rely=0.33, anchor='center')
+            self.object_button = tk.Button(self.popup, command=rotate, text='rotate')
+            self.object_button.place(relx=0.25, rely=0.75, anchor='center')
+            
+            self.object_frame = frame
+            self.object_studs = block_studs
+            self.object_stud_buttons = stud_buttons
+        else:
+            frame.place(relx=0.75, rely=0.33, anchor='center')
+            self.target_button = tk.Button(self.popup, command=rotate, text='rotate')
+            self.target_button.place(relx=0.75, rely=0.75, anchor='center')
+            
+            self.target_frame = frame
+            self.target_studs = block_studs
+            self.target_stud_buttons = stud_buttons
+        
+    
+    def swap(self):
+        """
+        """
+        
+        # TODO
+    
+    
+    def rotate(self, is_object, to_horizontal, name):
+        """
+        Rotate a rectangular block by 90 degrees.
+        
+        Args:
+        -----
+        """
+        
+        # Toggle between horizontal and vertical orientations
+        rows, cols = None, None
+        if to_horizontal:
+            rows, cols = 2, 4
+        else:   # to vertical orientation
+            rows, cols = 4, 2
+        
+        color, shape = name.split(' ')
+        color_str = color + '2'
+        
+        if is_object:
+            if shape == 'rect':
+                # Update block buttons
+                self.object_frame.destroy()
+                self.object_frame = tk.Frame(self.popup, bg=color_str)
+                self.object_studs = np.zeros((rows, cols), dtype=bool)
+                self.object_stud_buttons = []
+                for r in range(rows):
+                    self.object_stud_buttons.append([])
+                    for c in range(cols):
+                        func = lambda o=is_object, n=name, r=r, c=c: self.toggleStud(o,n,r,c)
+                        b = tk.Button(self.object_frame, command=func, bg=color_str, 
+                                      activebackground=color_str, relief='ridge')
+                        b.grid(row=r, column=c)
+                        self.object_stud_buttons[-1].append(b)
+                self.object_frame.place(relx=0.25, rely=0.33, anchor='center')
+                
+                # Update rotate button
+                rotate = lambda o=is_object, h=not to_horizontal, n=name: self.rotate(o, h, n)
+                self.object_button.configure(command=rotate)
+                
+        else:
+            if shape == 'rect':
+                # Update block buttons
+                self.target_frame.destroy()
+                self.target_frame = tk.Frame(self.popup, bg=color_str)
+                self.target_studs = np.zeros((rows, cols), dtype=bool)
+                self.target_stud_buttons = []
+                for r in range(rows):
+                    self.target_stud_buttons.append([])
+                    for c in range(cols):
+                        func = lambda o=is_object, n=name, r=r, c=c: self.toggleStud(o,n,r,c)
+                        b = tk.Button(self.target_frame, command=func, bg=color_str, 
+                                      activebackground=color_str, relief='ridge')
+                        b.grid(row=r, column=c)
+                        self.target_stud_buttons[-1].append(b)
+                self.target_frame.place(relx=0.75, rely=0.33, anchor='center')
+                
+                # Update rotate button
+                rotate = lambda o=is_object, h=not to_horizontal, n=name: self.rotate(o, h, n)
+                self.target_button.configure(command=rotate)
+    
+    
+    def toggleStud(self, is_object, name, row, col):
+        """
+        """
+        
+        color, shape = name.split(' ')
+        
+        # These are standard Tkinter color shades. Greater values are darker.
+        color_str = color + '2'
+        dark_color_str = color + '4'
+        
+        if is_object:
+            self.object_studs[row, col] = not self.object_studs[row, col]
+            bg_color = dark_color_str if self.object_studs[row, col] else color_str
+            self.object_stud_buttons[row][col].config(bg=bg_color, activebackground=bg_color)
+        else:
+            self.target_studs[row, col] = not self.target_studs[row, col]
+            bg_color = dark_color_str if self.target_studs[row, col] else color_str
+            self.target_stud_buttons[row][col].config(bg=bg_color, activebackground=bg_color)
+            
+    
+    def addConnection(self):
+        """
+        """
+        
+        # Get action annotation (action and object fields are one-indexed, so
+        # convert to zero-indexing)
+        action_index = self.action_field.get() - 1
+        object_index = self.object_field.get() - 1
+        target_index = self.target_field.get() - 1
+
+        action = self.actions[action_index]
+        
+        if not action in ('place above', 'place adjacent'):
+            err_str = 'Only add connections for "place above" and "place adjacent."'
+            self.badInputDialog(err_str)
+            return
+        
+        # Parse and validate annotation
+        err_str = self.parseAction(action, object_index, target_index)
+        if err_str:
+            self.badInputDialog(err_str)
+            return
+        
+        # Build a string representing the connected studs on the object block
+        rows, cols = self.object_studs.nonzero()
+        prefix = ''
+        num_rows, num_cols = self.object_studs.shape
+        if num_rows > num_cols:
+            prefix = 'V'
+        elif num_rows < num_cols:
+            prefix = 'H'
+        else:   # num_rows == num_cols
+            prefix = 'S'
+        coord_strings = [''.join([str(r), str(c)]) for r, c in zip(rows, cols)]
+        object_stud_str = prefix + ':'.join(coord_strings)
+        
+        # Build a string representing the connected studs on the target block
+        rows, cols = self.target_studs.nonzero()
+        prefix = ''
+        num_rows, num_cols = self.target_studs.shape
+        if num_rows > num_cols:
+            prefix = 'V'
+        elif num_rows < num_cols:
+            prefix = 'H'
+        else:   # num_rows == num_cols
+            prefix = 'S'
+        coord_strings = [''.join([str(r), str(c)]) for r, c in zip(rows, cols)]
+        target_stud_str = prefix + ':'.join(coord_strings)
+        
+        connection = (self.action_start_index, self.cur_frame, action_index,
+                      object_index, target_index, object_stud_str,
+                      target_stud_str)
+        self.labels.append(connection)
+        print(connection)
+        
+        # Reset object stud and target stud arrays
+        self.object_studs = None
+        self.target_studs = None
+        
+        # Redraw world state image
+        self.updateWorldState()
+        self.cancel()
+    
+    
+    def undoConnection(self):
+        """
+        Delete the previous connection annotation and re-draw block
+        configuration.
+        """
+        
+        if not self.labels:
+            error_string = 'No connection to undo!'
+            self.badInputDialog(error_string)
+            return
+        
+        # Delete the last label if it represents a graph edge
+        last_label = self.labels[-1]
+        if self.actions[last_label[2]] in ('place above', 'place adjacent'):
+            self.labels.pop()
+            self.states.pop()
+            self.updateWorldState()
     
     
     def undoAction(self):
         """
-        Delete the previous action annotation and re-draw block configuration.
+        Delete the previous action annotation and re-draw the block
+        configuration.
         """
         
-        if not self.states:
-            error_string = 'No annotation to undo'
+        if not self.labels:
+            error_string = 'No action to undo!'
             self.badInputDialog(error_string)
+            return
         
-        # Delete all labels associated with the last annotation
         last_label = self.labels[-1]
-        while self.labels[-1][:3] == last_label[:3]:
+        last_action = self.actions[last_label[2]]
+        # Delete all edges annotated during the last action
+        if last_action in ('place above', 'place adjacent'):
+            start_index = last_label[0]
+            while self.labels and self.labels[-1][0] == start_index:
+                self.labels.pop()
+                self.states.pop()
+            self.updateWorldState()
+        # Delete disconnect-type annotations
+        elif last_action in ('disconnect', 'remove block'):
             self.labels.pop()
-        
-        self.states = self.states[:-1]
-        self.updateWorldState()
-        
-        return
+            self.states.pop()
+            self.updateWorldState()
+        else:   # rotate 90, rotate -90, rotate 180 don't alter state graph
+            self.labels.pop()
+            message_str = 'Removed action: {}'.format(last_action)
+            self.badInputDialog(message_str)
     
     
     def restart(self):
@@ -289,18 +667,20 @@ class Application:
         
         # Save labels if they exist and update metadata file to reflect changes
         if self.labels:
-            self.corpus.writeLabels(self.trial_id, self.labels)
+            self.corpus.writeLabels(self.trial_id, self.annotator_id, self.labels)
             self.corpus.updateMetaData(self.trial_id)
+        if self.notes:
+            self.corpus.writeNotes(self.trial_id, self.annotator_id, self.notes)
         self.parent.destroy()
     
     
     def back(self, event=None):
         """
-        Move backward 10 frames in the video unless the beginning of the video
-        is fewer than 10 frames away. Then, display the new rgb frame.
+        Move backward num_frames in the video unless the beginning of the video
+        is fewer than num_frames away. Then, display the new rgb frame.
         """
         
-        self.cur_frame = max(self.cur_frame - 10, 0)
+        self.cur_frame = max(self.cur_frame - 1, 0)
         
         # Redraw rgb frame
         cur_fn = self.rgb_frame_fns[self.cur_frame]
@@ -309,13 +689,46 @@ class Application:
         self.rgb_display.image = rgb_image
     
     
-    def forward(self, event=None):
+    def forward(self, num_frames, event=None):
         """
-        Move forward 10 frames in the video unless the end of the video is
-        fewer than 10 frames away. Then, display the new rgb frame.
+        Move forward num_frames in the video unless the end of the video is
+        fewer than num_frames away. Then, display the new rgb frame.
         """
         
-        self.cur_frame = min(self.cur_frame + 10, len(self.rgb_frame_fns) - 1)
+        last_frame = len(self.rgb_frame_fns) - 1
+        self.cur_frame = min(self.cur_frame + 1, last_frame)
+        
+        # Redraw rgb frame
+        cur_fn = self.rgb_frame_fns[self.cur_frame]
+        rgb_image = Image.open(cur_fn)
+        rgb_image = ImageTk.PhotoImage(Image.open(cur_fn))
+        self.rgb_display.configure(image=rgb_image)
+        self.rgb_display.image = rgb_image
+    
+    
+    def skipBack(self, event=None):
+        """
+        """
+        
+        # FIXME
+        
+        self.cur_frame = max(self.cur_frame - 10, 0)
+        
+        # Redraw rgb frame
+        cur_fn = self.rgb_frame_fns[self.cur_frame]
+        rgb_image = ImageTk.PhotoImage(Image.open(cur_fn))
+        self.rgb_display.configure(image=rgb_image)
+        self.rgb_display.image = rgb_image
+        
+    
+    def skipForward(self, event=None):
+        """
+        """
+        
+        # FIXME
+        
+        last_frame = len(self.rgb_frame_fns) - 1
+        self.cur_frame = min(self.cur_frame + 10, last_frame)
         
         # Redraw rgb frame
         cur_fn = self.rgb_frame_fns[self.cur_frame]
@@ -344,60 +757,40 @@ class Application:
         world state. If not, display a warning message to the user.
         """
         
-        # Set the action's end to the index of the current frame
-        self.action_end_index = self.cur_frame
-        
         # Get action annotation (action and object fields are one-indexed, so
         # convert to zero-indexing)
         action_index = self.action_field.get() - 1
         object_index = self.object_field.get() - 1
-        target_indices = tuple(self.block2index[block] for block, field in
-                               self.target_fields.items() if field.get())
-        
-        # Make sure the user has selected an action and an object
-        # (Value of -1 means original value was zero, ie empty)
-        if action_index == -1 or object_index == -1:
-            err_str = 'Please select and action and an object block.'
-            self.badInputDialog(err_str)
-            return
-        
+        target_index = self.target_field.get() - 1
+
         action = self.actions[action_index]
-        object_block = self.blocks[object_index]
-        target_blocks = tuple(block for block, field in
-                              self.target_fields.items() if field.get())
-        
-        # Make sure the user has selected targets for actions that require them
-        if not target_blocks and not action in ('remove', 'rotate'):
-            err_str = 'Please select one or more target blocks.'
-            self.badInputDialog(err_str)
-            return
-        
-        # Parse and validate annotation
-        err_str = self.parseAction(action, object_index, target_indices)
-        if err_str:
-            self.badInputDialog(err_str)
-            return
         
         # Store the action annotation
-        if action in ('remove', 'rotate'):  # No targets
-            self.labels.append((self.action_start_index, self.action_end_index,
-                                action_index, object_index, -1,
-                                '()', '()'))
-        else:   # Write a label for each target
-            for target_index in target_indices:
-                self.labels.append((self.action_start_index,
-                                    self.action_end_index,
-                                    action_index, object_index, target_index,
-                                    '()', '()'))
+        # Place above and place adjacent actions were already processed when
+        # connections were added.
+        if not action in ('place above', 'place adjacent'):
+            connection = None
+            if action.startswith('rotate'):
+                # World state is unchanged
+                connection = (self.cur_frame, self.cur_frame,
+                              action_index, -1, -1, '', '')
+            elif action in ('disconnect', 'remove block'):
+                # Parse action and draw new world state
+                err_str = self.parseAction(action, object_index, target_index)
+                if err_str:
+                    self.badInputDialog(err_str)
+                    return
+                self.updateWorldState()
+                connection = (self.action_start_index, self.cur_frame,
+                              action_index, object_index, -1, '', '')                
+            self.labels.append(connection)
+            print(connection)
         
         # Reset start and end indices
         self.action_start_index = -1
-        self.action_end_index = -1
         
-        # Redraw world state image and stard/end button
-        self.updateWorldState()
-        self.start_end.configure(text='Start of action',
-                                 command=self.startAction)
+        # Redraw button
+        self.start_end.configure(text='Start of action', command=self.startAction)
     
     
     def updateWorldState(self):
@@ -412,7 +805,7 @@ class Application:
         self.state_display.image = state_image
     
     
-    def parseAction(self, action, object_index, target_indices):
+    def parseAction(self, action, object_index, target_index):
         """
         Update the world state by interpreting an action annotation.
         
@@ -420,10 +813,10 @@ class Application:
         -----
         action: str
           Action label (one of self.actions)
-        object_block: str
+        object_index: int
           Block that was placed (index in self.blocks)
-        target_blocks: list or str
-          Blocks near the one that was placed
+        target_index: int
+          Blocks near the one that was placed (index in self.blocks)
         """
         
         # TODO: validate the provided action by making sure it is a possible
@@ -438,22 +831,31 @@ class Application:
         
         # Add a directed edge for each target block
         if action == 'place above':
-            for target_index in target_indices:
-                cur_state.edge(str(object_index), str(target_index))
+            cur_state.edge(str(object_index), str(target_index))
         # Add an undirected edge for each target block
         elif action == 'place adjacent':
-            for target_index in target_indices:
-                cur_state.edge(str(object_index), str(target_index), dir='none')
+            cur_state.edge(str(object_index), str(target_index), dir='none')
         # Remove all edges associated with this node
-        elif action == 'remove':
+        elif action == 'remove block':
             new_body = []
             for entry in cur_state.body:
                 # Matches all edges originating from the removed block
                 start_pattern = '\t\t{}'.format(object_index)
                 # Matches all undirected edges leading to the removed block
-                end_pattern = '-> {} [dir=none]'.format(object_index)
+                end_pattern_undirected = '-> {} [dir=none]'.format(object_index)
+                end_pattern_directed = '-> {}'.format(object_index)
                 if not (entry.startswith(start_pattern) or
-                   entry.endswith(end_pattern)):
+                   entry.endswith(end_pattern_undirected) or
+                   entry.endswith(end_pattern_directed)):
+                    new_body.append(entry)
+            cur_state.body = new_body
+        # Remove the edge between object and target
+        elif action == 'disconnect':
+            new_body = []
+            pattern_str = '\t\t{} -> {}'
+            for entry in cur_state.body:
+                if not (entry.startswith(pattern_str.format(object_index, target_index)) or
+                    entry.startswith(pattern_str.format(target_index, object_index))):
                     new_body.append(entry)
             cur_state.body = new_body
         
@@ -493,19 +895,23 @@ class Application:
         Close the current popup window.
         """
         
-        # It shouldn't be possible to close a window that doesn't exist
-        assert(not self.popup is None)
-        
-        self.popup.destroy()
+        if self.popup:
+            self.popup.destroy()
         self.popup = None
         
 
 if __name__ == '__main__':
     root = tk.Tk()
+    
+    def on_closing():
+        msg_str = "Do you want to quit? (Progress will NOT be saved)"
+        if tkMessageBox.askyesno("Quit", msg_str):
+            root.destroy()
+
+    root.protocol("WM_DELETE_WINDOW", on_closing)
     screen_width = root.winfo_screenwidth()
     screen_height = root.winfo_screenheight()
     root.geometry('{0}x{1}+0+0'.format(screen_width, screen_height))
-    #root.geometry('800x600')
     
     app = Application(root)
     

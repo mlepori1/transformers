@@ -190,7 +190,7 @@ def sample(socket):
     sample = recvAll(socket, 1)
 
     return sample
-
+    
 
 def stream(connected_devices, path, die, q):
     """
@@ -390,14 +390,14 @@ def setDataMode(socket, datamode):
 
 def setRate(socket, rate):
     """
-    Set WAX9 device's output rate. This is mostly for debug use.
+    Set WAX9 device's output rate.
 
     Args:
     -----
     socket: bluetooth socket
       Connection to WAX9 device
     rate: int
-      New output rate (default is 50Hz)
+      New output rate in samples per second (Hz) (default is 50Hz)
 
     Returns:
     --------
@@ -410,3 +410,212 @@ def setRate(socket, rate):
 
     return settings
 
+
+def setThreshold(socket, threshold):
+    """
+    Set the number of samples to log before transmitting a packet.
+    
+    Args:
+    -----
+    socket: bluetooth socket
+      Connection to WAX9 device
+    threshold: int
+      Number of samples to log before transmitting a packet
+    
+    Returns:
+    --------
+    settings: str
+      Device's settings after threshold has been changed
+    """
+    
+    socket.sendall("threshold {}\r\n".format(threshold))
+    settings = recvAll(socket, 1)
+    
+    return settings
+
+
+def burstStream(devices, path, die, q):
+    """
+    Stream data from WAX9 devices transmitting in burst mode until die is set.
+    This function is intended to be used in a multithreading / multiprocessing
+    setting.
+
+    Args:
+    -----
+    devices: dict of str -> bluetooth socket
+      Dictionary mapping each WAX9 device's socket connections to its ID string 
+    path: str
+      Path to raw output file
+    die: multiprocessing event
+      The streaming loop monitors this event and quits when it is set
+    q: multiprocessing queue
+      Queue used to communicate with the main process.
+    """
+
+    dev2name = {device: name for name, device in devices.items()}
+    remainders = {name: '' for name in devices.keys()}
+    monitor_samples = {name: [] for name in devices.keys()}
+    
+    import time
+    
+    with open(path, 'wb') as f:
+        f_writer = csv.writer(f)
+    
+        for device in devices.values():
+            device.sendall('stream\r\n')
+        
+        ready, _, _ = select.select(devices.values(), [], [])
+        while ready:
+            # Read and parse data from every device that was ready at time of
+            # poll
+            for device in ready:
+                name = dev2name[device]
+                
+                # Read and parse data
+                cur_time = time.time()
+                message_bytes, addr = device.recvfrom(4096)
+                samples, remainder = parseBytes(message_bytes, remainders[name])
+                remainders[name] = remainder
+                
+                # Write samples along with some metadata
+                for sample in samples:
+                    row = [cur_time] + sample + [name]
+                    f_writer.writerow(row)
+                # Update the monitor sample for this device with the last
+                # sample seen
+                monitor_samples[name] = row
+            
+            # Poll devices again
+            ready, _, _ = select.select(devices.values(), [], [], 3)
+            
+            # Put a new sample set on the queue if the previous one has been
+            # consumed
+            if q.empty():
+                q.put(monitor_samples.values())
+            
+            # Signal devices to stop streaming if the die event is set
+            if die.is_set():
+                for device in devices.values():
+                    device.sendall('\r\n')
+
+
+def parseBytes(message_bytes, prev_remainder):
+    """
+    Parse a byte string representing one or more WAX9 samples into a collection
+    of complete samples.
+    
+    Args:
+    -----
+    message_bytes: byte string
+      Message received from WAX9 device, as bytes
+    prev_remainder:
+      Remainder of the last parsed message from THIS DEVICE
+      
+    Returns:
+    --------
+    samples: list( list( int ) )
+      Message received from WAX9 device, parsed into a list of samples (for a
+      description of the WAX9 sample format, see p. 7, 'WAX9 application
+      developer's guide')
+    remainder: byte string
+      Remaining bytes of message (too few to be parsed into a complete sample)
+    """
+        
+    # Special SLIP bytes
+    SLIP_END = '\xc0'   # Beginning/end of sequence
+    SLIP_ESC = '\xdb'   # Escape byte allows us to parse data values of \xC0
+    SLIP_ESC_END = '\xdc'
+    SLIP_ESC_ESC = '\xdd'
+    
+    samples = []
+    
+    # Read bytes from the current sensor until we have a complete
+    # packet or hang on a timeout
+    prev_escaped = False
+    sample_bytes = prev_remainder
+    for byte in message_bytes:                
+        # Handle escaped byte sequences
+        if prev_escaped:
+            prev_escaped = False
+            if byte == SLIP_ESC_END:
+                sample_bytes += SLIP_END
+            elif byte == SLIP_ESC_ESC:
+                sample_bytes += SLIP_ESC
+            else:
+                # Anything else means we received an unexpected
+                # escaped byte
+                msg = 'ERR | {} | unexpected byte'
+                print(msg.format(byte.encode('hex')))
+        elif byte == SLIP_END and len(sample_bytes) > 0:
+            sample_bytes += byte
+            # Standard sample
+            if sample_bytes[2] == '\x01' and len(sample_bytes) == 28:
+                # Convert data from hex representation (see p. 7, 'WAX9
+                # application developer's guide')
+                # TODO: Zero-pad this packet at the end so it's the same length
+                # and format as the long packet
+                fmtstr = '<' + 3 * 'B' + 'H' + 'I' + 9 * 'h' + 'B'
+                sample = list(struct.unpack(fmtstr, sample_bytes))
+                samples.append([0] + sample[3:-1] + 3 * [0])
+            # Long sample
+            elif sample_bytes[2] == '\x02' and len(sample_bytes) == 36:
+                # Convert data from hex representation (see p. 7, 'WAX9
+                # application developer's guide')
+                fmtstr = '<' + 3 * 'B' + 'H' + 'I' + 9 * 'h' + 'H' + 'h' + 'I' + 'B'
+                sample = list(struct.unpack(fmtstr, sample_bytes))
+                samples.append([0] + sample[3:-1])
+            # Bad sample
+            else:
+                # Record an error
+                fmtstr = 'ERR | Bad packet | {}'
+                print(fmtstr.format(sample_bytes.encode('hex')))
+                sample.append([1] + 14 * [0])
+            sample_bytes = ''
+        elif byte == SLIP_ESC:
+            prev_escaped = True
+        else:
+            sample_bytes += byte
+        
+    return samples, sample_bytes
+
+
+def decodeStream(filename):
+    
+    with open(filename, 'rb') as f:
+        for line in f:
+            print(line.encode('hex'))
+
+
+if __name__ == '__main__':
+    
+    filename = 'test.csv'
+    target_addresses = ('00:17:E9:D7:09:49', '00:17:E9:D7:09:0F',
+                        '00:17:E9:D7:09:5D', '00:17:E9:D7:08:F1')
+    rate = 30
+    threshold = 512
+    
+    # Connect to devices
+    devices = {}
+    for address in target_addresses:
+        socket, name = connect(address)
+        devices[name] = socket
+        print(name)
+    
+    # Read settings
+    for socket in devices.values():
+        settings = getSettings(socket)
+        print(settings)
+    
+    # Set sampling rate
+    for socket in devices.values():
+        settings = setRate(socket, rate)
+        print(settings)
+    
+    # Set transmission threshold
+    for socket in devices.values():
+        settings = setThreshold(socket, threshold)
+        print(settings)
+    
+    #burstStream(devices.values(), devices.keys(), filename)
+    
+    #decodeStream(filename)
