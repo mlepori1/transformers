@@ -9,6 +9,7 @@ AUTHOR
 
 from __future__ import print_function
 import Tkinter as tk
+import tkMessageBox
 import tkFont
 from PIL import Image, ImageTk
 import graphviz as gv
@@ -39,6 +40,7 @@ class Application:
         # Corpus object manages file I/O -- filenames and paths are filled in
         # after reading input from trial selection interface
         self.corpus = DuploCorpus()
+        self.annotator_id = None
         self.trial_id = None
         self.rgb_frame_fns = None
         self.state_fig_path = None
@@ -136,17 +138,27 @@ class Application:
         instructions.pack()
         
         # Draw a listbox with a vertical scrollbar
-        scrollbar = tk.Scrollbar(master, orient=tk.VERTICAL)
-        self.trial_field = tk.Listbox(master, height=20, yscrollcommand=scrollbar.set)
+        listbox_frame = tk.Frame(master)
+        scrollbar = tk.Scrollbar(listbox_frame, orient=tk.VERTICAL)
+        self.trial_field = tk.Listbox(listbox_frame, height=20, yscrollcommand=scrollbar.set)
         scrollbar.config(command=self.trial_field.yview)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.trial_field.pack(side=tk.LEFT, fill=tk.BOTH, expand=1)
+        listbox_frame.pack()
         
         # Fill the listbox with trial data
         for entry in self.corpus.meta_data:
             fmtstr = '{}, task {}'
             trial_info = fmtstr.format(entry['participant id'], entry['task id'])
             self.trial_field.insert(tk.END, trial_info)
+        
+        # Draw an entrybox for the annotator's name
+        entrybox_frame = tk.Frame(master)
+        name_label = tk.Label(entrybox_frame, text='Your name: ')
+        name_label.pack(side=tk.LEFT)
+        self.ann_id_field = tk.Entry(entrybox_frame)
+        self.ann_id_field.pack(side=tk.LEFT)
+        entrybox_frame.pack()
         
         # Draw a select button
         master = self.navigation_frame
@@ -167,6 +179,18 @@ class Application:
         
         # Read trial ID
         self.trial_id = self.trial_field.curselection()[0]
+        
+        # Get user ID and check if the user has already annotated this video
+        self.annotator_id = self.ann_id_field.get()
+        if not self.annotator_id:
+            err_str = "Please enter your name."
+            self.badInputDialog(err_str)
+            return
+        
+        if self.corpus.labelFileExists(self.trial_id, self.annotator_id):
+            msg_str = "Labels file exists! Overwrite?"
+            if not tkMessageBox.askyesno("", msg_str):
+                return
         
         # Define I/O paths
         self.rgb_frame_fns = self.corpus.getRgbFrameFns(self.trial_id)
@@ -196,6 +220,12 @@ class Application:
         self.parent.bind('i', self.skipForward)
         self.parent.bind('k', self.forward)
         self.parent.bind('j', self.back)
+        
+        # Also navigate using arrow keys
+        self.parent.bind('<Down>', self.skipBack)
+        self.parent.bind('<Up>', self.skipForward)
+        self.parent.bind('<Right>', self.forward)
+        self.parent.bind('<Left>', self.back)
         
         # Draw RGB frame
         interaction_frame = tk.Frame(master)
@@ -637,8 +667,10 @@ class Application:
         
         # Save labels if they exist and update metadata file to reflect changes
         if self.labels:
-            self.corpus.writeLabels(self.trial_id, self.labels)
+            self.corpus.writeLabels(self.trial_id, self.annotator_id, self.labels)
             self.corpus.updateMetaData(self.trial_id)
+        if self.notes:
+            self.corpus.writeNotes(self.trial_id, self.annotator_id, self.notes)
         self.parent.destroy()
     
     
@@ -870,6 +902,13 @@ class Application:
 
 if __name__ == '__main__':
     root = tk.Tk()
+    
+    def on_closing():
+        msg_str = "Do you want to quit? (Progress will NOT be saved)"
+        if tkMessageBox.askyesno("Quit", msg_str):
+            root.destroy()
+
+    root.protocol("WM_DELETE_WINDOW", on_closing)
     screen_width = root.winfo_screenwidth()
     screen_height = root.winfo_screenheight()
     root.geometry('{0}x{1}+0+0'.format(screen_width, screen_height))

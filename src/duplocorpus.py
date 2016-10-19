@@ -420,7 +420,7 @@ class DuploCorpus:
         return labels
     
     
-    def writeLabels(self, trial_id, labels):
+    def writeLabels(self, trial_id, annotator_id, labels):
         """
         Write labels to file for the given trial.
         
@@ -429,6 +429,8 @@ class DuploCorpus:
         trial_id:  int
           Trial identifier. This is the trial's index in the corpus metadata
           array.
+        annotator_id: str
+          String identifying the person who annotated this set of labels.
         labels:  list of tuple
           Labels to be written. Each entry (tuple) in the
           list represents a single action. Entries are as follows
@@ -448,12 +450,49 @@ class DuploCorpus:
         # Convert labels to numpy structured array
         labels = np.array(labels, dtype=self.label_types)
         
-        fn = os.path.join(self.paths['labels'], '{}.csv'.format(trial_id))
-        with open(fn, 'w') as labels_file:
+        fn = '{}-{}.csv'.format(trial_id, annotator_id)
+        path = os.path.join(self.paths['labels'], fn)
+        with open(path, 'w') as labels_file:
             labels_writer = csv.writer(labels_file)
             labels_writer.writerow(labels.dtype.names)
             for row in labels:
                 labels_writer.writerow(row)
+    
+    
+    def labelFileExists(self, trial_id, annotator_id):
+        """
+        Return True if a label file matching the given trial and annotator
+        exists. This is important for making sure labels don't get overwritten.
+        """
+        
+        fn = '{}-{}.csv'.format(trial_id, annotator_id)
+        path = os.path.join(self.paths['labels'], fn)
+        return os.path.isfile(path)
+    
+    
+    def writeNotes(self, trial_id, annotator_id, notes):
+        """
+        Write notes to file for the given trial.
+        
+        Args:
+        -----
+        trial_id:  int
+          Trial identifier. This is the trial's index in the corpus metadata
+          array.
+        annotator_id: str
+          String identifying the person who annotated this set of notes.
+        notes:  list of tuple
+          Notes to be written. Entries are as follows:
+          0 -- video frame when note was made
+          1 -- string representing the note
+        """
+        
+        fn = '{}-{}-notes.csv'.format(trial_id, annotator_id)
+        path = os.path.join(self.paths['labels'], fn)
+        with open(path, 'w') as notes_file:
+            notes_writer = csv.writer(notes_file)
+            for row in notes:
+                notes_writer.writerow(row)
     
     
     def parseRawData(self, trial_id):
