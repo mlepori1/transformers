@@ -8,6 +8,7 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <iomanip>
 #include <string>
 
 #include <GL/glew.h>
@@ -327,10 +328,16 @@ void setTransformationMatrices(GLint shaderProgram)
     glUniformMatrix4fv(uniProj, 1, GL_FALSE, glm::value_ptr(proj));
 }
 
+struct dataSeries
+{
+    vector<VectorXf> state;
+    vector<VectorXf> input;
+    vector<VectorXf> output;
+    vector<string> image_fns;
+};
+
 void simulate(int num_samples,  UnscentedKalmanFilter ukf,
-        configParams params, GLFWwindow* window, vector<VectorXf>& state,
-        vector<VectorXf>& input, vector<VectorXf>& output,
-        vector<string>& image_fns)
+        configParams params, GLFWwindow* window, dataSeries& data)
 {
     // No sequence should need more than 10 digits (famous last words)
     int field_width = 10;
@@ -355,20 +362,24 @@ void simulate(int num_samples,  UnscentedKalmanFilter ukf,
         string fn;
         if (params.save_rgb)
         {
-            fn = "../working/gl-render/rgb-" + frame_str.insert(0, field_width - frame_str.size(), '0') + ".png";
+            stringstream ss;
+            ss << params.data_path << "rgb-frames/" << frame_str << ".png";
+            fn = ss.str();
             ukf.generateObservation(window, GL_RGB, fn.c_str());
         }
-        else if (params.save_depth)
+        if (params.save_depth)
         {
-            fn = "../working/gl-render/depth-" + frame_str.insert(0, field_width - frame_str.size(), '0') + ".png";
+            stringstream ss;
+            ss << params.data_path << "depth-frames/" << frame_str << ".png";
+            fn = ss.str();
             ukf.generateObservation(window, GL_DEPTH_COMPONENT, fn.c_str());
         }
 
         // Store data
-        state.push_back(x_t);
-        input.push_back(u_t);
-        output.push_back(y_t);
-        image_fns.push_back(fn);
+        data.state.push_back(x_t);
+        data.input.push_back(u_t);
+        data.output.push_back(y_t);
+        data.image_fns.push_back(fn);
 
         // Take a step in state space
         ukf.updateState(u_t, dt);
@@ -428,7 +439,7 @@ int main(int argc, char* argv[])
 
     // Read config file
     configParams params;
-    parseConfigFile("ukf.config", params);
+    readParams("ukf.config", params);
 
     // Initialize GLFW window and GLEW
     GLFWwindow* window = initializeGlfwWindow();
@@ -475,7 +486,6 @@ int main(int argc, char* argv[])
         ukf.setDebugStatus(cl_args.debug);
 
     // Generate vectors to hold simulation data
-    vector<VectorXf> state;
     vector<string> state_colnames;
     state_colnames.push_back("position_x");
     state_colnames.push_back("position_y");
@@ -487,7 +497,6 @@ int main(int argc, char* argv[])
     state_colnames.push_back("orientation_y");
     state_colnames.push_back("orientation_z");
     
-    vector<VectorXf> input;
     vector<string> input_colnames;
     input_colnames.push_back("acceleration_x");
     input_colnames.push_back("acceleration_y");
@@ -496,16 +505,33 @@ int main(int argc, char* argv[])
     input_colnames.push_back("angular-velocity_y");
     input_colnames.push_back("angular-velocity_z");
 
+    dataSeries data;
 
     // Simulate data
-    vector<string> image_fns;
-    vector<VectorXf> output;
-    simulate(cl_args.num_samples, ukf, params, window, state, input, output,
-             image_fns);
-    writeCsv(params.u_path.c_str(), input_colnames, input);
-    writeCsv(params.x_path.c_str(), state_colnames, state);
-    writeCsv(params.y_path.c_str(), state_colnames, output);
-    writeImagePaths(params.images_path.c_str(), image_fns);
+    simulate(cl_args.num_samples, ukf, params, window, data);
+
+    stringstream ss;
+    string fn;
+
+    ss << params.data_path << "input.csv";
+    fn = ss.str();
+    ss.str("");
+    writeCsv(fn.c_str(), input_colnames, data.input);
+
+    ss << params.data_path << "state.csv";
+    fn = ss.str();
+    ss.str("");
+    writeCsv(fn.c_str(), state_colnames, data.state);
+
+    ss << params.data_path << "output.csv";
+    fn = ss.str();
+    ss.str("");
+    writeCsv(fn.c_str(), state_colnames, data.output);
+
+    ss << params.data_path << "image_fns.csv";
+    fn = ss.str();
+    ss.str("");
+    writeImagePaths(fn.c_str(), data.image_fns);
 
 
     glDeleteProgram(shaderProgram);

@@ -34,7 +34,7 @@ class Application:
         # Define parent window and resize
         self.parent = parent
         
-        # Window content master = self.navigation_frame
+        # Window content
         self.content_frame = tk.Frame(self.parent)
         self.navigation_frame = tk.Frame(self.parent)
         self.popup = None

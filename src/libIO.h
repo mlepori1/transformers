@@ -35,10 +35,8 @@ struct configParams
     bool observe_velocity;
     bool observe_orientation;
 
-    string u_path;
-    string x_path;
-    string y_path;
-    string images_path;
+    string data_path;
+    string experiment_path;
 
     bool save_rgb;
     bool save_depth;
@@ -70,4 +68,6 @@ const vector<string> readImagePaths(const char* filename);
 void writeImagePaths(const char* filename, vector<string> image_paths);
 
 
-void parseConfigFile(const char* config_fn, configParams & params);
+void readParams(const char* config_fn, configParams & params);
+
+void writeParams(const char* config_fn, const configParams & params);

@@ -32,6 +32,3 @@ simulate : $(SIM_OBJS)
 
 estimate : $(EST_OBJS)
 	$(CC) $(EST_OBJS) $(INCLUDE_PATHS) $(LIBRARY_PATHS) $(COMPILER_FLAGS) $(LINKER_FLAGS) -o estimate
-
-clean :
-	\rm *.o *~ simulate estimate

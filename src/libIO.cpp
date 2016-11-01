@@ -229,7 +229,34 @@ void writeImagePaths(const char* filename, vector<string> image_paths)
 }
 
 
-void parseConfigFile(const char* config_fn, configParams& params)
+void writeParams(const char* config_fn, const configParams& params)
+{
+    ofstream ofs(config_fn, ofstream::out);
+
+    ofs << "w0=" << params.w0 << endl;
+    ofs << "dt=" << params.dt << endl;
+    ofs << "q=" << params.q << endl;
+    ofs << "r=" << params.r << endl;
+
+    ofs << "sigma_position=" << params.sigma_position << endl;
+    ofs << "sigma_velocity=" << params.sigma_velocity << endl;
+    ofs << "sigma_orientation=" << params.sigma_orientation << endl;
+
+    ofs << "observe_image=" << params.observe_image << endl;
+    ofs << "observe_position=" << params.observe_position << endl;
+    ofs << "observe_velocity=" << params.observe_velocity << endl;
+    ofs << "observe_orientation=" << params.observe_orientation << endl;
+
+    ofs << "data_path=" << params.data_path << endl;
+    ofs << "experiment_path=" << params.experiment_path << endl;
+
+    ofs << "save_rgb=" << params.save_rgb << endl;
+    ofs << "save_depth=" << params.save_depth << endl;
+
+    ofs.close();
+}
+
+void readParams(const char* config_fn, configParams& params)
 {
     ifstream ifs(config_fn, ifstream::in);
     stringstream lineStream;
@@ -334,39 +361,21 @@ void parseConfigFile(const char* config_fn, configParams& params)
     lineStream.clear();
     cout << parameter << ": " << value << endl;
 
-    // path to input file
+    // path to data directory
     getline(ifs, line);
     lineStream.str(line);
     getline(lineStream, parameter, '=');
     getline(lineStream, value);
-    params.u_path = value;
+    params.data_path = value;
     lineStream.clear();
     cout << parameter << ": " << value << endl;
 
-    // path to state file
+    // path to experiment directory
     getline(ifs, line);
     lineStream.str(line);
     getline(lineStream, parameter, '=');
     getline(lineStream, value);
-    params.x_path = value;
-    lineStream.clear();
-    cout << parameter << ": " << value << endl;
-
-    // path to output file
-    getline(ifs, line);
-    lineStream.str(line);
-    getline(lineStream, parameter, '=');
-    getline(lineStream, value);
-    params.y_path = value;
-    lineStream.clear();
-    cout << parameter << ": " << value << endl;
-
-    // path to image filenames
-    getline(ifs, line);
-    lineStream.str(line);
-    getline(lineStream, parameter, '=');
-    getline(lineStream, value);
-    params.images_path = value;
+    params.experiment_path = value;
     lineStream.clear();
     cout << parameter << ": " << value << endl;
 

@@ -327,61 +327,23 @@ void setTransformationMatrices(GLint shaderProgram)
     glUniformMatrix4fv(uniProj, 1, GL_FALSE, glm::value_ptr(proj));
 }
 
-void simulate(int num_samples,  UnscentedKalmanFilter ukf,
-        configParams params, GLFWwindow* window, vector<VectorXf>& state,
-        vector<VectorXf>& input, vector<VectorXf>& output,
-        vector<string>& image_fns)
-{
-    // No sequence should need more than 10 digits (famous last words)
-    int field_width = 10;
-    for (int frame_index = 0; frame_index < num_samples; ++frame_index)
-    {
-        // Observed (noise-corrupted) state at current time
-        VectorXf y_t = ukf.observeState();
-        
-        // True state at current time
-        VectorXf x_t = ukf.getState();
-
-        // Input at current time
-        Vector3f a_t(-r * rate * rate * cos(rate * frame_index * dt),
-                     -r * rate * rate * sin(rate * frame_index * dt),
-                     0.0f);
-        Vector3f omega_t(0.0f, 0.0f, 0.0f);
-        VectorXf u_t(a_t.size() + omega_t.size());
-        u_t << a_t + a_g, omega_t;
-
-        // Render scene and save resulting image
-        string frame_str = to_string(frame_index);
-        string fn;
-        if (params.save_rgb)
-        {
-            fn = "../working/gl-render/rgb-" + frame_str.insert(0, field_width - frame_str.size(), '0') + ".png";
-            ukf.generateObservation(window, GL_RGB, fn.c_str());
-        }
-        else if (params.save_depth)
-        {
-            fn = "../working/gl-render/depth-" + frame_str.insert(0, field_width - frame_str.size(), '0') + ".png";
-            ukf.generateObservation(window, GL_DEPTH_COMPONENT, fn.c_str());
-        }
-
-        // Store data
-        state.push_back(x_t);
-        input.push_back(u_t);
-        output.push_back(y_t);
-        image_fns.push_back(fn);
-
-        // Take a step in state space
-        ukf.updateState(u_t, dt);
-    }
-}
-
 void estimate(int num_samples, UnscentedKalmanFilter ukf,
         const configParams params, vector<VectorXf>& state,
         vector<VectorXf>& err_cov)
 {
+    stringstream ss;
+    string fn;
+
+    ss << params.data_path << "input.csv";
+    fn = ss.str();
+    ss.str("");
+    vector<VectorXf> input = readCsv(fn.c_str());
+
     // In this case the state vector is partially observed, so the input is x
-    vector<VectorXf> input = readCsv(params.u_path.c_str());
-    vector<VectorXf> output = readCsv(params.x_path.c_str());
+    ss << params.data_path << "state.csv";
+    fn = ss.str();
+    ss.str("");
+    vector<VectorXf> output = readCsv(fn.c_str());
 
     // Every state should have a corresponding input and output
     assert(input.size() == output.size());
@@ -399,13 +361,6 @@ void estimate(int num_samples, UnscentedKalmanFilter ukf,
         VectorXf x = output[frame_index];
         VectorXf y = ukf.observeState(x);
 
-        /*
-        if (params.observation == "position")
-            y = output[frame_index].segment<3>(0);
-        else if (params.observation == "orientation")   // orientation
-            y = output[frame_index].segment<3>(6);
-        */
-
         // Estimate and store the latent state
         ukf.inferState(u, y, params);
         VectorXf x_t = ukf.getStateEstimate();
@@ -420,8 +375,18 @@ void estimate(int num_samples, UnscentedKalmanFilter ukf,
 void estimate(int num_samples, UnscentedKalmanFilter ukf,
         const configParams params, GLFWwindow* window, vector<VectorXf> state)
 {
-    vector<VectorXf> input = readCsv(params.u_path.c_str());
-    vector<string> output = readImagePaths(params.y_path.c_str());
+    stringstream ss;
+    string fn;
+
+    ss << params.data_path << "input.csv";
+    fn = ss.str();
+    ss.str("");
+    vector<VectorXf> input = readCsv(fn.c_str());
+
+    ss << params.data_path << "image-fns.csv";
+    fn = ss.str();
+    ss.str("");
+    vector<string> output = readImagePaths(fn.c_str());
 
     // Every state should have a corresponding input and output
     //assert(input.size() == output.size());
@@ -433,11 +398,10 @@ void estimate(int num_samples, UnscentedKalmanFilter ukf,
     if (num_samples < 0)
         num_samples = output.size();
 
-    stringstream ss;
     string fn_prefix;
     for (int frame_index = 0; frame_index < num_samples; ++frame_index)
     {
-        ss << "../working/gl-render/sigma/frame" << frame_index << "-point";
+        ss << params.experiment_path << "sigma/frame" << frame_index << "-point";
         fn_prefix = ss.str();
         ss.str("");
 
@@ -469,8 +433,7 @@ vector<VectorXf> calculateResidual(vector<VectorXf> x_estimated, vector<VectorXf
 
 void printUsage(char* argv[])
 {
-    cerr << "Usage: " << argv[0] << " simulate <num samples>" << endl;
-    cerr << "   OR: " << argv[0] << " [--debug] [--observe i|s|t]  estimate <num samples>" << endl;
+    cerr << "Usage: " << argv[0] << " [--debug] <num samples>" << endl;
 }
 
 struct args
@@ -490,7 +453,7 @@ int parseArgs(int argc, char* argv[], args& cl_args)
     cl_args.debug = false;
 
     string mode;
-    if (argc == 4)
+    if (argc == 3)
     {
         if (string(argv[1]) != "--debug")
         {
@@ -499,29 +462,15 @@ int parseArgs(int argc, char* argv[], args& cl_args)
         }
 
         cl_args.debug = true;
-        mode = string(argv[2]);
-        cl_args.num_samples = atoi(argv[3]);
-    }
-    else if (argc == 3)
-    {
-        mode = string(argv[1]);
         cl_args.num_samples = atoi(argv[2]);
+    }
+    else if (argc == 2)
+    {
+        cl_args.num_samples = atoi(argv[1]);
     }
     else
     {
         cout << argc << endl;
-        printUsage(argv);
-        return 1;
-    }
-
-    // Set operation mode
-    if (mode == "simulate")
-        cl_args.simulate = true;
-    else if (mode == "estimate")
-        cl_args.simulate = false;
-    else
-    {
-        cout << mode << endl;
         printUsage(argv);
         return 1;
     }
@@ -538,7 +487,7 @@ int main(int argc, char* argv[])
 
     // Read config file
     configParams params;
-    parseConfigFile("ukf.config", params);
+    readParams("ukf.config", params);
 
     // Initialize GLFW window and GLEW
     GLFWwindow* window = initializeGlfwWindow();
@@ -567,7 +516,8 @@ int main(int argc, char* argv[])
 
     GLint normAttrib = glGetAttribLocation(shaderProgram, "normal");
     glEnableVertexAttribArray(normAttrib);
-    glVertexAttribPointer(normAttrib, 3, GL_FLOAT, GL_FALSE, 6 * sizeof(GLfloat), (void*)(3 * sizeof(GLfloat)));
+    glVertexAttribPointer(normAttrib, 3, GL_FLOAT, GL_FALSE,
+            6 * sizeof(GLfloat), (void*)(3 * sizeof(GLfloat)));
 
     // Set up lighting uniforms
     GLint uniLightColor = glGetUniformLocation(shaderProgram, "lightColor");
@@ -606,37 +556,41 @@ int main(int argc, char* argv[])
     input_colnames.push_back("angular-velocity_z");
 
 
-    if (cl_args.simulate)
-    {
-        vector<string> image_fns;
-        vector<VectorXf> output;
-        simulate(cl_args.num_samples, ukf, params, window, state, input, output,
-                 image_fns);
-        writeCsv(params.u_path.c_str(), input_colnames, input);
-        writeCsv(params.x_path.c_str(), state_colnames, state);
-        writeCsv(params.y_path.c_str(), state_colnames, output);
-        writeImagePaths(params.images_path.c_str(), image_fns);
-    }
-    else    // estimate
-    {
-        vector<VectorXf> err_cov;
-        vector<string> cov_colnames;
-        if (params.observe_image)
-            estimate(cl_args.num_samples, ukf, params, window, state);
-        else // state is partially observed
-            estimate(cl_args.num_samples, ukf, params, state, err_cov);
+    vector<VectorXf> err_cov;
+    vector<string> cov_colnames;
+    if (params.observe_image)
+        estimate(cl_args.num_samples, ukf, params, window, state);
+    else // state is partially observed
+        estimate(cl_args.num_samples, ukf, params, state, err_cov);
 
-        string out_fn_state = "../working/gl-data/state-estimation.csv";
-        writeCsv(out_fn_state.c_str(), state_colnames, state);
+    string out_fn_state = "../working/gl-data/state-estimation.csv";
+    stringstream ss;
+    string fn;
 
-        string out_fn_err_cov = "../working/gl-data/state-error-covariance.csv";
-        writeCsv(out_fn_err_cov.c_str(), cov_colnames, err_cov);
+    ss << params.experiment_path << "estimated-state.csv";
+    fn = ss.str();
+    ss.str("");
+    writeCsv(fn.c_str(), state_colnames, state);
 
-        //vector<VectorXf> true_state = readCsv(params.x_path.c_str());
-        //vector<VectorXf> residual = calculateResidual(state, true_state);
-        //string out_fn_resid = "../working/gl-data/state-residual.csv";
-        //writeCsv(out_fn_resid.c_str(), state_colnames, residual);
-    }
+    ss << params.experiment_path << "error-covariance.csv";
+    fn = ss.str();
+    ss.str("");
+    writeCsv(fn.c_str(), cov_colnames, err_cov);
+
+    ss << params.data_path << "state.csv";
+    fn = ss.str();
+    ss.str("");
+    vector<VectorXf> true_state = readCsv(fn.c_str());
+
+    ss << params.experiment_path << "true-state.csv";
+    fn = ss.str();
+    ss.str("");
+    writeCsv(fn.c_str(), state_colnames, true_state);
+
+    ss << params.experiment_path << "experiment.config";
+    fn = ss.str();
+    ss.str("");
+    writeParams(fn.c_str(), params);
 
 
     glDeleteProgram(shaderProgram);

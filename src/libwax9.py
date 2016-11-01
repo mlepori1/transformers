@@ -591,7 +591,7 @@ if __name__ == '__main__':
     filename = 'test.csv'
     target_addresses = ('00:17:E9:D7:09:49', '00:17:E9:D7:09:0F',
                         '00:17:E9:D7:09:5D', '00:17:E9:D7:08:F1')
-    rate = 50
+    rate = 30
     threshold = 512
     
     # Connect to devices
@@ -616,6 +616,6 @@ if __name__ == '__main__':
         settings = setThreshold(socket, threshold)
         print(settings)
     
-    burstStream(devices.values(), devices.keys(), filename)
+    #burstStream(devices.values(), devices.keys(), filename)
     
     #decodeStream(filename)
