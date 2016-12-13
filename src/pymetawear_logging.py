@@ -14,7 +14,7 @@ from pymetawear import libmetawear
 from pymetawear.client import *
 from pymetawear.mbientlab.metawear.core import *
 from pymetawear.mbientlab.metawear.processor import *
-from pymetawear.mbientlab.metawear.sensor import AccelerometerBosch, AccelerometerBmi160, GyroBmi160
+from pymetawear.mbientlab.metawear.sensor import Accelerometer, AccelerometerBosch, AccelerometerBmi160, GyroBmi160
 # (The CPRO devices use the Bosch BMI160 IMU, BMM150 magnetometer, BMP280 pressure + temp)
 
 import numpy as np
@@ -23,7 +23,7 @@ from matplotlib import pyplot as plt
 class MetawearDevice:
     
     
-    def __init__(self, addres, sample_accel=True, sample_gyro=True):
+    def __init__(self, address, sample_accel=True, sample_gyro=True, sample_switch=False):
         
         self.download_finished = False
         self.unknown_entries = {}
@@ -41,11 +41,17 @@ class MetawearDevice:
         self.gyro_data = []
         self.gyro_times = []
         
+        self.switch_data = []
+        self.switch_times = []
+        
+        self.switch_logger_id = None
         self.accel_logger_id = None
         self.gyro_logger_id = None
+        self.float_logger_id = None
                 
         self.sample_accel = sample_accel
         self.sample_gyro = sample_gyro
+        self.sample_switch = sample_switch
         
         # Set up download handler
         progress_update = Fn_Uint_Uint(self.progress_update_handler)
@@ -64,7 +70,7 @@ class MetawearDevice:
         Disconnect this client from the MetaWear board.
         """
         
-        print('Disconnecting...')
+        print('Disconnecting from {}...'.format(self.address))
         
         libmetawear.mbl_mw_metawearboard_tear_down(self.client.board)
         time.sleep(1)
@@ -94,9 +100,7 @@ class MetawearDevice:
         time.sleep(1)
     
     
-    def init_loggers(self):
-        
-        # Set up logger; block until a logger has been established
+    def init_logger(self):
         
         if self.sample_accel:
             accel_signal = libmetawear.mbl_mw_acc_get_acceleration_data_signal(self.client.board)
@@ -113,6 +117,28 @@ class MetawearDevice:
             while self.gyro_logger_id is None:
                 time.sleep(0.001)
             print('Gyroscope logger id: {}'.format(self.gyro_logger_id))
+        
+        if self.sample_switch:  
+            switch_signal = libmetawear.mbl_mw_switch_get_state_data_signal(self.board)
+            self.switch_logger_ready = Fn_VoidPtr(self.switch_logger_ready_handler)
+            libmetawear.mbl_mw_datasignal_log(switch_signal, self.switch_logger_ready)
+            while self.switch_logger_id is None:
+                time.sleep(0.001)
+        
+        # This clears any data left over from previous sessions
+        libmetawear.mbl_mw_logging_clear_entries(self.client.board)
+    
+    
+    def init_logger_rss(self):
+        
+        self.float_logger_ready = Fn_VoidPtr(self.float_logger_ready_handler)
+        
+        self.accel_signal = libmetawear.mbl_mw_acc_get_acceleration_data_signal(self.client.board)
+        self.proc_created = Fn_VoidPtr(self.float_proc_created)
+        libmetawear.mbl_mw_dataprocessor_rss_create(self.accel_signal, self.proc_created)
+        while self.float_logger_id is None:
+            time.sleep(0.001)
+        print('Float logger id: {}'.format(self.float_logger_id))
     
     
     def start_logging(self):
@@ -153,8 +179,8 @@ class MetawearDevice:
     
     def download_data(self, num_updates):
         
-        print('\nDOWNLOAD')
-        print('----------')
+        print('DOWNLOADING FROM {}'.format(self.address))
+        print('-----------------------------------')
         
         # Download logged data; block until the logger has finished downloading
         self.download_finished = False
@@ -163,7 +189,7 @@ class MetawearDevice:
         while not self.download_finished:
             time.sleep(0.001)
         time_waited = time.time() - time_waited
-        print('Time spent waiting on download: {:.3} seconds'.format(time_waited))
+        print('Time spent waiting on download: {:.1f} seconds'.format(time_waited))
         
         # Print some info about the downloaded data
         num_samples = len(self.temp_accel_data)
@@ -172,8 +198,10 @@ class MetawearDevice:
         recv_time_interval = 0.0
         if self.temp_accel_times:
             recv_time_interval = self.temp_accel_times[-1] - self.temp_accel_times[0]
-        fmt_str = '{:.3} seconds of data ({} samples at {} Hz) downloaded in {:.3} seconds'
+        fmt_str = 'A | {:.1f} seconds of data ({} samples at {} Hz) downloaded in {:.1f} seconds'
         print(fmt_str.format(data_time, num_samples, sample_rate, recv_time_interval))
+        print('A | {} samples previously collected'.format(len(self.accel_data)))
+        print('A | {} samples downloaded'.format(len(self.temp_accel_data)))
         
         self.accel_times += self.temp_accel_times
         self.accel_data += self.temp_accel_data
@@ -187,14 +215,33 @@ class MetawearDevice:
         recv_time_interval = 0.0
         if self.temp_gyro_times:
             recv_time_interval = self.temp_gyro_times[-1] - self.temp_gyro_times[0]
-        fmt_str = '{:.3} seconds of data ({} samples at {} Hz) downloaded in {:.3} seconds'
+        fmt_str = 'G | {:.1f} seconds of data ({} samples at {} Hz) downloaded in {:.1f} seconds'
         print(fmt_str.format(data_time, num_samples, sample_rate, recv_time_interval))
+        print('G | {} samples previously collected'.format(len(self.gyro_data)))
+        print('G | {} samples downloaded'.format(len(self.temp_gyro_data)))
         
         self.gyro_times += self.temp_gyro_times
         self.gyro_data += self.temp_gyro_data
         self.temp_gyro_times = []
         self.temp_gyro_data = []
     
+    
+    def print_stats(self):
+        
+        print('\nDEVICE {}'.format(self.address))
+        
+        num_accel_samples = len(self.accel_data)
+        accel_duration = float(num_accel_samples) / self.accel_sample_rate
+        accel_time_delta = float(self.accel_data[-1][0] - self.accel_data[0][0]) / 1000.0
+        fmt_str = 'A | Downloaded {} samples ({:.2f} seconds @ {:.1f} Hz) spanning {:.2f} seconds'
+        print(fmt_str.format(num_accel_samples, accel_duration, self.accel_sample_rate, accel_time_delta))
+        
+        num_gyro_samples = len(self.gyro_data)
+        gyro_duration = float(num_gyro_samples) / self.gyro_sample_rate
+        gyro_time_delta = float(self.gyro_data[-1][0] - self.gyro_data[0][0]) / 1000.0
+        fmt_str = 'G | Downloaded {} samples ({:.2f} seconds @ {:.1f} Hz) spanning {:.2f} seconds'
+        print(fmt_str.format(num_gyro_samples, gyro_duration, self.gyro_sample_rate, gyro_time_delta))
+        
     
     def plot_data(self):
         
@@ -204,16 +251,18 @@ class MetawearDevice:
             times -= times[0]
             times /= 1000.0
             samples = np.array([x[1:4] for x in self.accel_data])
-            sample_norms = (samples ** 2).sum(axis=1) ** 0.5
+            #sample_norms = (samples ** 2).sum(axis=1) ** 0.5
             
-            f, axes = plt.subplots(2, sharex=True)
-            axes[0].plot(times, sample_norms)
-            axes[0].scatter(times, sample_norms, c='r')
-            axes[0].set_ylabel('Acceleration magnitude')
-            axes[0].set_title('Downloaded data')
-            axes[1].plot(times[1:], np.diff(times))
-            axes[1].set_xlabel('Time (seconds)')
-            axes[1].set_ylabel('dt (seconds)')
+            f, axes = plt.subplots(4) #, sharex=True)
+            axes[0].plot(times, samples[:,0])
+            axes[0].set_ylabel('a_x')
+            axes[0].set_title('Downloaded acceleration data [{}]'.format(self.address))
+            axes[1].plot(times, samples[:,1])
+            axes[1].set_ylabel('a_y')
+            axes[2].plot(times, samples[:,2])
+            axes[2].set_ylabel('a_z')
+            axes[3].plot(times)
+            axes[3].set_xlabel('Time (seconds)')
         else:
             print('No acceleration data recorded!')
             
@@ -223,39 +272,22 @@ class MetawearDevice:
             times -= times[0]
             times /= 1000.0
             samples = np.array([x[1:4] for x in self.gyro_data])
-            sample_norms = (samples ** 2).sum(axis=1) ** 0.5
+            #sample_norms = (samples ** 2).sum(axis=1) ** 0.5
             
-            f, axes = plt.subplots(2, sharex=True)
-            axes[0].plot(times, sample_norms)
-            axes[0].scatter(times, sample_norms, c='r')
-            axes[0].set_ylabel('Angular velocity magnitude')
-            axes[0].set_title('Downloaded data')
-            axes[1].plot(times[1:], np.diff(times))
-            axes[1].set_xlabel('Time (seconds)')
-            axes[1].set_ylabel('dt (seconds)')
+            f, axes = plt.subplots(4) #, sharex=True)
+            axes[0].plot(times, samples[:,0])
+            axes[0].set_ylabel('w_x')
+            axes[0].set_title('Downloaded angular velocity data [{}]'.format(self.address))
+            axes[1].plot(times, samples[:,1])
+            axes[1].set_ylabel('w_y')
+            axes[2].plot(times, samples[:,2])
+            axes[2].set_ylabel('w_z')
+            axes[3].plot(times)
+            axes[3].set_xlabel('Time (seconds)')
         else:
             print('No angular velocity data recorded!')
         
         plt.show()
-    
-    
-    def test_logger(self, wait_time, num_downloads, num_updates):
-        """
-        Test accelerometer logging capabilities.
-        """
-        
-        # Set up loggers and download data
-        self.init_loggers()        
-        self.start_logging()
-        print('Waiting {} second(s) while data logs...'.format(wait_time))
-        time.sleep(wait_time)
-        for i in range(num_downloads):
-            self.download_data(num_updates)
-        
-        # Stop logging data, download any data remaining, plot results
-        self.stop_logging()
-        self.download_data(num_updates)        
-        self.plot_data()
     
     
     def set_ble_params(self, min_conn_interval, max_conn_interval, latency, timeout):
@@ -273,7 +305,11 @@ class MetawearDevice:
         finished.
         """
         
-        print('{} / {} packets remaining'.format(entries_left, total_entries))
+        entries_downloaded = total_entries - entries_left
+        samples_downloaded = float(entries_downloaded) / 2.0
+        total_samples = float(total_entries) / 2.0
+        fmt_str = '{} / {} packets ({:.1f} / {:.1f} samples) downloaded'
+        print(fmt_str.format(entries_downloaded, total_entries, samples_downloaded, total_samples))
         if entries_left == 0:        
             self.download_finished = True
     
@@ -294,6 +330,34 @@ class MetawearDevice:
         self.unknown_entries[ID].append(data_array)
     
     
+    def float_proc_created(self, processor):
+        """
+        """
+        
+        print('Processor: {}'.format(processor))
+        
+        if processor:
+            print('Float processor created')
+            libmetawear.mbl_mw_datasignal_log(processor, self.float_logger_ready)
+        else:
+            print('Failed to create float processor')
+        
+    
+    def switch_logger_ready_handler(self, logger):
+        """
+        Check if logger was created successfully and, if so, subscribe to it
+        with the switch data handler.
+        """
+        
+        if logger:
+            print('Switch logger ready')
+            self.switch_logger_id = libmetawear.mbl_mw_logger_get_id(logger)
+            self.switch_data_fn = Fn_DataPtr(self.switch_data_handler)
+            libmetawear.mbl_mw_logger_subscribe(logger, self.switch_data_fn)
+        else:
+            print('Failed to create switch logger')
+    
+    
     def accel_logger_ready_handler(self, logger):
         """
         Check if logger was created successfully and, if so, subscribe to it
@@ -301,12 +365,12 @@ class MetawearDevice:
         """
         
         if logger:
-            print('acceleration logger ready')
+            print('Acceleration logger ready')
             self.accel_logger_id = libmetawear.mbl_mw_logger_get_id(logger)
             self.accel_data_fn = Fn_DataPtr(self.accel_data_handler)
             libmetawear.mbl_mw_logger_subscribe(logger, self.accel_data_fn)
         else:
-            print('failed to create acceleration logger')
+            print('Failed to create acceleration logger')
     
     
     def gyro_logger_ready_handler(self, logger):
@@ -316,12 +380,45 @@ class MetawearDevice:
         """
         
         if logger:
-            print('gyroscope logger ready')
+            print('Gyroscope logger ready')
             self.gyro_logger_id = libmetawear.mbl_mw_logger_get_id(logger)
             self.gyro_data_fn = Fn_DataPtr(self.gyro_data_handler)
             libmetawear.mbl_mw_logger_subscribe(logger, self.gyro_data_fn)
         else:
-            print('failed to create gyroscope logger')
+            print('Failed to create gyroscope logger')
+    
+    
+    def float_logger_ready_handler(self, logger):
+        
+        if logger:
+            print('Float logger ready')
+            self.float_logger_id = libmetawear.mbl_mw_logger_get_id(logger)
+            self.float_data_fn = Fn_DataPtr(self.float_data_handler)
+            libmetawear.mbl_mw_logger_subscribe(logger, self.gyro_data_fn)
+        else:
+            print('Failed to create float logger')
+    
+    
+    def switch_data_handler(self, data):
+        """
+        Record boolean data from switch.
+        """
+    
+        # Cast to pointer to uint32, then dereference pointer, then get the int
+        # representation by calling ctypes.c_uint32's 'value' attribute
+        contents = copy.deepcopy(cast(data.contents.value, POINTER(c_uint32)).contents)
+        switch_pressed = contents.value
+        epoch = data.contents.epoch
+        
+        sample = (epoch, switch_pressed)
+        self.switch_data.append(sample)
+        self.switch_times.append(time.time())
+        
+        switch_pressed = contents.value
+        if switch_pressed:
+            print('{} | STATUS {} | Switch pressed'.format(epoch, switch_pressed))
+        else:
+            print('{} | STATUS {} | Switch released'.format(epoch, switch_pressed))
     
     
     def accel_data_handler(self, data):
@@ -332,7 +429,7 @@ class MetawearDevice:
         contents = copy.deepcopy(cast(data.contents.value, POINTER(CartesianFloat)).contents)
         sample = (data.contents.epoch, contents.x, contents.y, contents.z)
         
-        #print('A: {} | {:.3f} {:.3f} {:.3f}'.format(*sample))
+        #print('A | {} | {:.3f} {:.3f} {:.3f}'.format(*sample))
         
         self.temp_accel_data.append(sample)
         self.temp_accel_times.append(time.time())
@@ -346,56 +443,97 @@ class MetawearDevice:
         contents = copy.deepcopy(cast(data.contents.value, POINTER(CartesianFloat)).contents)
         sample = (data.contents.epoch, contents.x, contents.y, contents.z)
         
-        #print('G: {} | {:.3f} {:.3f} {:.3f}'.format(*sample))
+        #print('G | {} | {:.3f} {:.3f} {:.3f}'.format(*sample))
         
         self.temp_gyro_data.append(sample)
         self.temp_gyro_times.append(time.time())
     
+    
+    def float_data_handler(self, data):
+        """
+        """
         
+        contents = copy.deepcopy(cast(data.contents.value, POINTER(c_float)).contents)
+        sample = (data.contents.epoch, contents.value)
+        
+        print('{} | {:.3f}'.format(*sample))
+    
+    
+def battery_callback(data):
+    """
+    Print battery status.
+    """
+
+    epoch = data[0]
+    battery = data[1]
+    print("Battery status: {}%".format(battery[1]))
+
+
 if __name__ == '__main__':
     
-    wait_time = 0.5
-    num_reads = 1
-    num_notifications = 1
+    run_time_mins = 0
+    run_time_secs = run_time_mins * 60
+    num_notifications = 10
     
-    addresses = ('D6:B3:DA:FD:2E:DE',
-                 'FC:63:6C:B3:4C:F6',
+    addresses = ('D3:4A:2F:8C:57:5E',
                  'F7:A1:FC:73:DD:23',
+                 'FC:63:6C:B3:4C:F6',
                  'C8:B8:4F:23:CD:E5',
-                 'D3:4A:2F:8C:57:5E',
+                 'E6:AB:B4:74:08:9A',
+                 'C2:1E:B1:29:BA:4F',
+                 'C5:DD:E9:99:A5:56',
+                 'DF:D4:5D:D9:68:4F',
+                 'F3:3A:AD:8A:B7:14',
+                 'C8:CB:F1:55:DC:BD',
+                 'D6:B3:DA:FD:2E:DE',
                  'C7:7D:36:B1:5E:7D')
-    addresses = addresses[1:5]
+    addresses = addresses[0:1]
     
-    # connect to each device
+    # Connect to each device, congifure settings, initialize loggers
     devices = []
     for address in addresses:
-        print('Connecting to device at {}'.format(address))
-        mw = MetawearDevice(address, sample_accel=True, sample_gyro=True)
-        mw.set_ble_params(7.5, 30.0, 0, 100)
-        mw.init_loggers()
+        print('\nConnecting to device at {}'.format(address))
+        mw = MetawearDevice(address)
+        mw.client.battery.notifications(battery_callback)
+        mw.client.battery.read_battery_state()
+        mw.set_ble_params(7.5, 30.0, 0, 10)
+        #mw.set_accel_params(sample_rate=50.0)
+        #mw.set_gyro_params(sample_rate=50.0)
+        mw.init_logger_rss()
         devices.append(mw)
     
-    # start logging from all devices
+    # Start logging from all devices
     for device in devices:
         device.start_logging()
+    init_time = time.time()
     
-    # perform a specified number of downloads
-    for i in range(num_reads):
+    # Download data continuously, one device at a time, until the time limit
+    # has been reached
+    time_delta = time.time() - init_time
+    while time_delta < run_time_secs:
         for device in devices:
+            print('\nELAPSED TIME: {:.2f} seconds'.format(time_delta))
             device.download_data(num_notifications)
+            time_delta = time.time() - init_time
+            if time_delta >= run_time_secs:
+                break
     
-    # stop logging from all devices
+    # Stop logging from all devices
     for device in devices:
         device.stop_logging()
     
-    # perform one final download to catch anything remaining
+    # Perform one final download to catch any remaining samples
     for device in devices:
+        print('\nFINAL DOWNLOAD')
         device.download_data(num_notifications)
     
-    # disconnect from all devices
+    # Disconnect from all devices
+    print('')
     for device in devices:
         device.disconnect()
     
+    # Print download stats and plot data
     for device in devices:
+        device.print_stats()
         device.plot_data()
     
