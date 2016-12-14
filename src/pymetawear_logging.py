@@ -131,14 +131,42 @@ class MetawearDevice:
     
     def init_logger_rss(self):
         
-        self.float_logger_ready = Fn_VoidPtr(self.float_logger_ready_handler)
-        
+        # Set up data processor chain
         self.accel_signal = libmetawear.mbl_mw_acc_get_acceleration_data_signal(self.client.board)
+        time.sleep(0.5)
+        
         self.proc_created = Fn_VoidPtr(self.float_proc_created)
-        libmetawear.mbl_mw_dataprocessor_rss_create(self.accel_signal, self.proc_created)
+        libmetawear.mbl_mw_dataprocessor_rss_create(self.accel_signal, self.proc_created)      
         while self.float_logger_id is None:
             time.sleep(0.001)
         print('Float logger id: {}'.format(self.float_logger_id))
+    
+    
+    def init_logger_time(self):
+        
+        if self.sample_accel:
+            self.accel_signal = libmetawear.mbl_mw_acc_get_acceleration_data_signal(self.client.board)
+            time.sleep(0.5)
+            
+            self.accel_proc_callback = Fn_VoidPtr(self.accel_proc_created)
+            libmetawear.mbl_mw_dataprocessor_time_create(self.accel_signal,
+                                                         Time.MODE_ABSOLUTE, 125,
+                                                         self.accel_proc_callback)      
+            while self.accel_logger_id is None:
+                time.sleep(0.001)
+            print('Accel logger id: {}'.format(self.accel_logger_id))
+        
+        if self.sample_gyro:
+            self.gyro_signal = libmetawear.mbl_mw_gyro_bmi160_get_rotation_data_signal(self.client.board)
+            time.sleep(0.5)
+            
+            self.gyro_proc_callback = Fn_VoidPtr(self.gyro_proc_created)
+            libmetawear.mbl_mw_dataprocessor_time_create(self.gyro_signal,
+                                                         Time.MODE_ABSOLUTE, 125,
+                                                         self.gyro_proc_callback)      
+            while self.gyro_logger_id is None:
+                time.sleep(0.001)
+            print('Gyro logger id: {}'.format(self.gyro_logger_id))
     
     
     def start_logging(self):
@@ -230,17 +258,23 @@ class MetawearDevice:
         
         print('\nDEVICE {}'.format(self.address))
         
-        num_accel_samples = len(self.accel_data)
-        accel_duration = float(num_accel_samples) / self.accel_sample_rate
-        accel_time_delta = float(self.accel_data[-1][0] - self.accel_data[0][0]) / 1000.0
-        fmt_str = 'A | Downloaded {} samples ({:.2f} seconds @ {:.1f} Hz) spanning {:.2f} seconds'
-        print(fmt_str.format(num_accel_samples, accel_duration, self.accel_sample_rate, accel_time_delta))
+        if self.accel_data:
+            num_accel_samples = len(self.accel_data)
+            accel_duration = float(num_accel_samples) / self.accel_sample_rate
+            accel_time_delta = float(self.accel_data[-1][0] - self.accel_data[0][0]) / 1000.0
+            fmt_str = 'A | Downloaded {} samples ({:.2f} seconds @ {:.1f} Hz) spanning {:.2f} seconds'
+            print(fmt_str.format(num_accel_samples, accel_duration, self.accel_sample_rate, accel_time_delta))
+        else:
+            print('No acceleration data downloaded')
         
-        num_gyro_samples = len(self.gyro_data)
-        gyro_duration = float(num_gyro_samples) / self.gyro_sample_rate
-        gyro_time_delta = float(self.gyro_data[-1][0] - self.gyro_data[0][0]) / 1000.0
-        fmt_str = 'G | Downloaded {} samples ({:.2f} seconds @ {:.1f} Hz) spanning {:.2f} seconds'
-        print(fmt_str.format(num_gyro_samples, gyro_duration, self.gyro_sample_rate, gyro_time_delta))
+        if self.gyro_data:
+            num_gyro_samples = len(self.gyro_data)
+            gyro_duration = float(num_gyro_samples) / self.gyro_sample_rate
+            gyro_time_delta = float(self.gyro_data[-1][0] - self.gyro_data[0][0]) / 1000.0
+            fmt_str = 'G | Downloaded {} samples ({:.2f} seconds @ {:.1f} Hz) spanning {:.2f} seconds'
+            print(fmt_str.format(num_gyro_samples, gyro_duration, self.gyro_sample_rate, gyro_time_delta))
+        else:
+            print('No angular velocity data downloaded')
         
     
     def plot_data(self):
@@ -333,14 +367,36 @@ class MetawearDevice:
     def float_proc_created(self, processor):
         """
         """
-        
-        print('Processor: {}'.format(processor))
-        
+              
+        # Log processor output if one was successfully created
         if processor:
             print('Float processor created')
+            self.float_logger_ready = Fn_VoidPtr(self.float_logger_ready_handler)
             libmetawear.mbl_mw_datasignal_log(processor, self.float_logger_ready)
         else:
             print('Failed to create float processor')
+    
+    
+    def accel_proc_created(self, processor):
+        
+        # Log processor output if one was successfully created
+        if processor:
+            print('Acceleration processor created')
+            self.accel_logger_ready = Fn_VoidPtr(self.accel_logger_ready_handler)
+            libmetawear.mbl_mw_datasignal_log(processor, self.accel_logger_ready)
+        else:
+            print('Failed to create acceleration processor')
+    
+    
+    def gyro_proc_created(self, processor):
+        
+        # Log processor output if one was successfully created
+        if processor:
+            print('Gyro processor created')
+            self.gyro_logger_ready = Fn_VoidPtr(self.gyro_logger_ready_handler)
+            libmetawear.mbl_mw_datasignal_log(processor, self.gyro_logger_ready)
+        else:
+            print('Failed to create gyro processor')
         
     
     def switch_logger_ready_handler(self, logger):
@@ -390,11 +446,13 @@ class MetawearDevice:
     
     def float_logger_ready_handler(self, logger):
         
+        print('entered callback function')
+        
         if logger:
             print('Float logger ready')
             self.float_logger_id = libmetawear.mbl_mw_logger_get_id(logger)
             self.float_data_fn = Fn_DataPtr(self.float_data_handler)
-            libmetawear.mbl_mw_logger_subscribe(logger, self.gyro_data_fn)
+            libmetawear.mbl_mw_logger_subscribe(logger, self.float_data_fn)
         else:
             print('Failed to create float logger')
     
@@ -471,7 +529,7 @@ def battery_callback(data):
 
 if __name__ == '__main__':
     
-    run_time_mins = 0
+    run_time_mins = 5.0
     run_time_secs = run_time_mins * 60
     num_notifications = 10
     
@@ -487,7 +545,7 @@ if __name__ == '__main__':
                  'C8:CB:F1:55:DC:BD',
                  'D6:B3:DA:FD:2E:DE',
                  'C7:7D:36:B1:5E:7D')
-    addresses = addresses[0:1]
+    addresses = addresses[4:12]
     
     # Connect to each device, congifure settings, initialize loggers
     devices = []
@@ -499,7 +557,7 @@ if __name__ == '__main__':
         mw.set_ble_params(7.5, 30.0, 0, 10)
         #mw.set_accel_params(sample_rate=50.0)
         #mw.set_gyro_params(sample_rate=50.0)
-        mw.init_logger_rss()
+        mw.init_logger_time()
         devices.append(mw)
     
     # Start logging from all devices
@@ -535,5 +593,5 @@ if __name__ == '__main__':
     # Print download stats and plot data
     for device in devices:
         device.print_stats()
-        device.plot_data()
+        #device.plot_data()
     
