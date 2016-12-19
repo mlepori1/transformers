@@ -10,6 +10,7 @@ CHANGELOG
 import time
 import copy
 
+from pymetawear.exceptions import PyMetaWearConnectionTimeout
 from pymetawear import libmetawear
 from pymetawear.client import *
 from pymetawear.mbientlab.metawear.core import *
@@ -29,7 +30,7 @@ class MetawearDevice:
         self.unknown_entries = {}
         
         self.address = address
-        self.client = MetaWearClient(address, backend='pybluez')
+        self.client = MetaWearClient(address, backend='pybluez', debug=True, timeout=20.0)
         
         self.temp_accel_data = []
         self.temp_accel_times = []
@@ -40,6 +41,11 @@ class MetawearDevice:
         self.temp_gyro_times = []
         self.gyro_data = []
         self.gyro_times = []
+        
+        self.temp_float_data = []
+        self.temp_float_times = []
+        self.float_data = []
+        self.float_times = []
         
         self.switch_data = []
         self.switch_times = []
@@ -63,6 +69,10 @@ class MetawearDevice:
         # Set default accelerometer and gyroscope parameters
         self.set_accel_params()
         self.set_gyro_params()
+        
+        # set up battery callback and read state
+        self.client.battery.notifications(self.battery_callback)
+        self.client.battery.read_battery_state()
         
         
     def disconnect(self):
@@ -127,6 +137,7 @@ class MetawearDevice:
         
         # This clears any data left over from previous sessions
         libmetawear.mbl_mw_logging_clear_entries(self.client.board)
+        time.sleep(0.5)
     
     
     def init_logger_rss(self):
@@ -140,9 +151,13 @@ class MetawearDevice:
         while self.float_logger_id is None:
             time.sleep(0.001)
         print('Float logger id: {}'.format(self.float_logger_id))
+        
+        # This clears any data left over from previous sessions
+        libmetawear.mbl_mw_logging_clear_entries(self.client.board)
+        time.sleep(0.5)
     
     
-    def init_logger_time(self):
+    def init_logger_time(self, sample_period):
         
         if self.sample_accel:
             self.accel_signal = libmetawear.mbl_mw_acc_get_acceleration_data_signal(self.client.board)
@@ -150,7 +165,8 @@ class MetawearDevice:
             
             self.accel_proc_callback = Fn_VoidPtr(self.accel_proc_created)
             libmetawear.mbl_mw_dataprocessor_time_create(self.accel_signal,
-                                                         Time.MODE_ABSOLUTE, 125,
+                                                         Time.MODE_ABSOLUTE,
+                                                         sample_period,
                                                          self.accel_proc_callback)      
             while self.accel_logger_id is None:
                 time.sleep(0.001)
@@ -162,11 +178,34 @@ class MetawearDevice:
             
             self.gyro_proc_callback = Fn_VoidPtr(self.gyro_proc_created)
             libmetawear.mbl_mw_dataprocessor_time_create(self.gyro_signal,
-                                                         Time.MODE_ABSOLUTE, 125,
+                                                         Time.MODE_ABSOLUTE,
+                                                         sample_period,
                                                          self.gyro_proc_callback)      
             while self.gyro_logger_id is None:
                 time.sleep(0.001)
             print('Gyro logger id: {}'.format(self.gyro_logger_id))
+        
+        # This clears any data left over from previous sessions
+        libmetawear.mbl_mw_logging_clear_entries(self.client.board)
+        time.sleep(0.5)
+    
+    
+    def init_logger_threshold(self, magnitude):
+        
+        self.accel_signal = libmetawear.mbl_mw_acc_get_acceleration_data_signal(self.client.board)
+        time.sleep(0.5)
+        self.accel_x = libmetawear.mbl_mw_datasignal_get_component(self.accel_signal,
+                                                                   Accelerometer.ACCEL_X_AXIS_INDEX)
+        time.sleep(0.5)
+        
+        self.float_proc_callback = Fn_VoidPtr(self.float_proc_created)
+        libmetawear.mbl_mw_dataprocessor_delta_create(self.accel_x,
+                                                     Delta.MODE_ABSOLUTE,
+                                                     magnitude,
+                                                     self.float_proc_callback)      
+        while self.float_logger_id is None:
+            time.sleep(0.001)
+        print('Float logger id: {}'.format(self.float_logger_id))
     
     
     def start_logging(self):
@@ -207,51 +246,108 @@ class MetawearDevice:
     
     def download_data(self, num_updates):
         
+        first_sample_thresh = 30.0    # (in seconds)
+        next_sample_thresh = 10.0
+        
+        # Read battery state (give the device some time to reconnect)
+        try:
+            self.client.battery.read_battery_state()
+            time.sleep(0.1)
+        except PyMetaWearConnectionTimeout:
+            print('Failed to reconnect to {}'.format(self.address))
+            return
+        
         print('DOWNLOADING FROM {}'.format(self.address))
         print('-----------------------------------')
         
         # Download logged data; block until the logger has finished downloading
         self.download_finished = False
         libmetawear.mbl_mw_logging_download(self.client.board, num_updates, byref(self.download_handler))
-        time_waited = time.time()
+        init_time = time.time()
+        # FIXME: script sometimes hangs in this loop (after reconnecting to device)
         while not self.download_finished:
-            time.sleep(0.001)
-        time_waited = time.time() - time_waited
+            #time.sleep(0.001)
+            cur_time = time.time()
+            time_waited = cur_time - init_time
+            if self.temp_accel_times:
+                if cur_time - self.temp_accel_times[-1] > next_sample_thresh:
+                    msg_str = 'Last accel sample more than {:.2f}s old -- breaking...'
+                    print(msg_str.format(next_sample_thresh))
+                    break
+            elif self.temp_gyro_times:
+                if cur_time - self.temp_gyro_times[-1] > next_sample_thresh:
+                    msg_str = 'Last gyro sample more than {:.2f}s old -- breaking...'
+                    print(msg_str.format(next_sample_thresh))
+                    break
+            elif self.temp_float_times:
+                if cur_time - self.temp_float_times[-1] > next_sample_thresh:
+                    msg_str = 'Last float sample more than {:.2f}s old -- breaking...'
+                    print(msg_str.format(next_sample_thresh))
+                    break
+            elif time_waited > first_sample_thresh:
+                msg_str = 'No samples received in {:.2f}s -- breaking...'
+                print(msg_str.format(first_sample_thresh))
+                #self.client.soft_reset()
+                break
         print('Time spent waiting on download: {:.1f} seconds'.format(time_waited))
         
         # Print some info about the downloaded data
-        num_samples = len(self.temp_accel_data)
-        sample_rate = self.accel_sample_rate
-        data_time = num_samples / float(sample_rate)
-        recv_time_interval = 0.0
-        if self.temp_accel_times:
-            recv_time_interval = self.temp_accel_times[-1] - self.temp_accel_times[0]
-        fmt_str = 'A | {:.1f} seconds of data ({} samples at {} Hz) downloaded in {:.1f} seconds'
-        print(fmt_str.format(data_time, num_samples, sample_rate, recv_time_interval))
-        print('A | {} samples previously collected'.format(len(self.accel_data)))
-        print('A | {} samples downloaded'.format(len(self.temp_accel_data)))
-        
-        self.accel_times += self.temp_accel_times
-        self.accel_data += self.temp_accel_data
-        self.temp_accel_times = []
-        self.temp_accel_data = []
+        if self.temp_accel_data:
+            num_samples = len(self.temp_accel_data)
+            sample_rate = self.accel_sample_rate
+            data_time = num_samples / float(sample_rate)
+            recv_time_interval = 0.0
+            if self.temp_accel_times:
+                recv_time_interval = self.temp_accel_times[-1] - self.temp_accel_times[0]
+            fmt_str = 'A | {:.1f} seconds of data ({} samples at {} Hz) downloaded in {:.1f} seconds'
+            print(fmt_str.format(data_time, num_samples, sample_rate, recv_time_interval))
+            print('A | {} samples previously collected'.format(len(self.accel_data)))
+            print('A | {} samples downloaded'.format(len(self.temp_accel_data)))
+            
+            self.accel_times += self.temp_accel_times
+            self.accel_data += self.temp_accel_data
+            self.temp_accel_times = []
+            self.temp_accel_data = []
+        else:
+            print('No acceleration data downloaded!')
         
         # Print some info about the downloaded data
-        num_samples = len(self.temp_gyro_data)
-        sample_rate = self.gyro_sample_rate
-        data_time = num_samples / float(sample_rate)
-        recv_time_interval = 0.0
-        if self.temp_gyro_times:
-            recv_time_interval = self.temp_gyro_times[-1] - self.temp_gyro_times[0]
-        fmt_str = 'G | {:.1f} seconds of data ({} samples at {} Hz) downloaded in {:.1f} seconds'
-        print(fmt_str.format(data_time, num_samples, sample_rate, recv_time_interval))
-        print('G | {} samples previously collected'.format(len(self.gyro_data)))
-        print('G | {} samples downloaded'.format(len(self.temp_gyro_data)))
+        if self.temp_gyro_data:
+            num_samples = len(self.temp_gyro_data)
+            sample_rate = self.gyro_sample_rate
+            data_time = num_samples / float(sample_rate)
+            recv_time_interval = 0.0
+            if self.temp_gyro_times:
+                recv_time_interval = self.temp_gyro_times[-1] - self.temp_gyro_times[0]
+            fmt_str = 'G | {:.1f} seconds of data ({} samples at {} Hz) downloaded in {:.1f} seconds'
+            print(fmt_str.format(data_time, num_samples, sample_rate, recv_time_interval))
+            print('G | {} samples previously collected'.format(len(self.gyro_data)))
+            print('G | {} samples downloaded'.format(len(self.temp_gyro_data)))
+            
+            self.gyro_times += self.temp_gyro_times
+            self.gyro_data += self.temp_gyro_data
+            self.temp_gyro_times = []
+            self.temp_gyro_data = []
+        else:
+            print('No angular velocity data downloaded!')
         
-        self.gyro_times += self.temp_gyro_times
-        self.gyro_data += self.temp_gyro_data
-        self.temp_gyro_times = []
-        self.temp_gyro_data = []
+        # Print some info about the downloaded data
+        if self.temp_float_data:
+            num_samples = len(self.temp_float_data)
+            sample_rate = self.accel_sample_rate
+            data_time = num_samples / float(sample_rate)
+            recv_time_interval = 0.0
+            if self.temp_float_times:
+                recv_time_interval = self.temp_float_times[-1] - self.temp_float_times[0]
+            fmt_str = 'F | {:.1f} seconds of data ({} samples at {} Hz) downloaded in {:.1f} seconds'
+            print(fmt_str.format(data_time, num_samples, sample_rate, recv_time_interval))
+            print('F | {} samples previously collected'.format(len(self.float_data)))
+            print('F | {} samples downloaded'.format(len(self.temp_float_data)))
+            
+            self.float_times += self.temp_float_times
+            self.float_data += self.temp_float_data
+            self.temp_float_times = []
+            self.temp_float_data = []
     
     
     def print_stats(self):
@@ -273,6 +369,15 @@ class MetawearDevice:
             gyro_time_delta = float(self.gyro_data[-1][0] - self.gyro_data[0][0]) / 1000.0
             fmt_str = 'G | Downloaded {} samples ({:.2f} seconds @ {:.1f} Hz) spanning {:.2f} seconds'
             print(fmt_str.format(num_gyro_samples, gyro_duration, self.gyro_sample_rate, gyro_time_delta))
+        else:
+            print('No angular velocity data downloaded')
+        
+        if self.float_data:
+            num_float_samples = len(self.float_data)
+            float_duration = float(num_float_samples) / self.accel_sample_rate
+            float_time_delta = float(self.float_data[-1][0] - self.float_data[0][0]) / 1000.0
+            fmt_str = 'G | Downloaded {} samples ({:.2f} seconds @ {:.1f} Hz) spanning {:.2f} seconds'
+            print(fmt_str.format(num_float_samples, float_duration, self.accel_sample_rate, float_time_delta))
         else:
             print('No angular velocity data downloaded')
         
@@ -365,8 +470,6 @@ class MetawearDevice:
     
     
     def float_proc_created(self, processor):
-        """
-        """
               
         # Log processor output if one was successfully created
         if processor:
@@ -509,29 +612,35 @@ class MetawearDevice:
     
     def float_data_handler(self, data):
         """
+        Record float data from anywhere.
         """
         
         contents = copy.deepcopy(cast(data.contents.value, POINTER(c_float)).contents)
         sample = (data.contents.epoch, contents.value)
         
-        print('{} | {:.3f}'.format(*sample))
+        #print('{} | {:.3f}'.format(*sample))
+        
+        self.temp_float_data.append(sample)
+        self.temp_float_times.append(time.time())
     
     
-def battery_callback(data):
-    """
-    Print battery status.
-    """
-
-    epoch = data[0]
-    battery = data[1]
-    print("Battery status: {}%".format(battery[1]))
+    def battery_callback(self, data):
+        """
+        Print battery status.
+        """
+    
+        epoch = data[0]
+        battery = data[1]
+        print("Battery status: {}%".format(battery[1]))
 
 
 if __name__ == '__main__':
     
-    run_time_mins = 5.0
+    run_time_mins = 0.5
     run_time_secs = run_time_mins * 60
     num_notifications = 10
+    sample_period = 1000    # (ms between samples)
+    delta_threshold = 1.0   # difference between samples greater than this value
     
     addresses = ('D3:4A:2F:8C:57:5E',
                  'F7:A1:FC:73:DD:23',
@@ -547,51 +656,69 @@ if __name__ == '__main__':
                  'C7:7D:36:B1:5E:7D')
     addresses = addresses[4:12]
     
-    # Connect to each device, congifure settings, initialize loggers
+    # Connect to each device, configure settings, initialize loggers
     devices = []
-    for address in addresses:
-        print('\nConnecting to device at {}'.format(address))
-        mw = MetawearDevice(address)
-        mw.client.battery.notifications(battery_callback)
-        mw.client.battery.read_battery_state()
-        mw.set_ble_params(7.5, 30.0, 0, 10)
-        #mw.set_accel_params(sample_rate=50.0)
-        #mw.set_gyro_params(sample_rate=50.0)
-        mw.init_logger_time()
-        devices.append(mw)
-    
-    # Start logging from all devices
-    for device in devices:
-        device.start_logging()
-    init_time = time.time()
-    
-    # Download data continuously, one device at a time, until the time limit
-    # has been reached
-    time_delta = time.time() - init_time
-    while time_delta < run_time_secs:
+    try:
+        # Connect to devices
+        for address in addresses:
+            print('\nConnecting to device at {}'.format(address))
+            try:
+                mw = MetawearDevice(address)
+            except PyMetaWearConnectionTimeout:
+                msg_str = 'Failed to connect: connection timeout'
+                print(msg_str)
+                continue
+            #mw.init_logger_time(sample_period)
+            mw.init_logger_threshold(delta_threshold)
+            devices.append(mw)
+        
+        # Configure device parameters
         for device in devices:
-            print('\nELAPSED TIME: {:.2f} seconds'.format(time_delta))
+            #device.set_ble_params(7.5, 30.0, 0, 10)
+            device.set_ble_params(7.5, 7.5, 0, 10)
+            #device.set_ble_params(7.5, 1000.0, 0, 10)
+            #mw.set_accel_params(sample_rate=50.0)
+            #mw.set_gyro_params(sample_rate=50.0)
+        
+        # Start logging from all devices
+        prev_times = []
+        for device in devices:
+            device.start_logging()
+            prev_times.append(time.time())
+        init_time = time.time()
+        
+        # Download data continuously, one device at a time, until the time limit
+        # has been reached
+        time_delta = time.time() - init_time
+        while time_delta < run_time_secs:
+            for i, device in enumerate(devices):
+                print('\nTIME SINCE START: {:.2f} seconds'.format(time_delta))
+                print('TIME SINCE LAST TRANSACTION: {:.2f} seconds'.format(time.time() - prev_times[i]))
+                device.download_data(num_notifications)
+                time_delta = time.time() - init_time
+                prev_times[i] = time.time()
+                if time_delta >= run_time_secs:
+                    break
+        
+        # Stop logging from all devices
+        for device in devices:
+            device.stop_logging()
+        
+        # Perform one final download to catch any remaining samples
+        for device in devices:
+            print('\nFINAL DOWNLOAD')
+            print('TIME SINCE LAST TRANSACTION: {:.2f} seconds'.format(time.time() - prev_times[i]))
             device.download_data(num_notifications)
-            time_delta = time.time() - init_time
-            if time_delta >= run_time_secs:
-                break
+        
+        # Print download stats and plot data
+        for device in devices:
+            device.print_stats()
+            #device.plot_data()
     
-    # Stop logging from all devices
-    for device in devices:
-        device.stop_logging()
+    finally:
+        # Disconnect from all devices
+        print('')
+        for device in devices:
+            device.disconnect()
     
-    # Perform one final download to catch any remaining samples
-    for device in devices:
-        print('\nFINAL DOWNLOAD')
-        device.download_data(num_notifications)
-    
-    # Disconnect from all devices
-    print('')
-    for device in devices:
-        device.disconnect()
-    
-    # Print download stats and plot data
-    for device in devices:
-        device.print_stats()
-        #device.plot_data()
     
