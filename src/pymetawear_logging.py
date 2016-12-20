@@ -24,13 +24,17 @@ from matplotlib import pyplot as plt
 class MetawearDevice:
     
     
-    def __init__(self, address, sample_accel=True, sample_gyro=True, sample_switch=False):
+    def __init__(self, address, sample_accel=True, sample_gyro=True,
+                 sample_switch=False, interface='hci0'):
         
         self.download_finished = False
         self.unknown_entries = {}
         
+        self.interface = interface
         self.address = address
-        self.client = MetaWearClient(address, backend='pybluez', debug=True, timeout=20.0)
+        self.client = MetaWearClient(self.address, backend='pybluez',
+                                     interface=self.interface, debug=True,
+                                     timeout=20.0)
         
         self.temp_accel_data = []
         self.temp_accel_times = []
@@ -636,11 +640,12 @@ class MetawearDevice:
 
 if __name__ == '__main__':
     
-    run_time_mins = 0.5
+    run_time_mins = 5
     run_time_secs = run_time_mins * 60
     num_notifications = 10
     sample_period = 1000    # (ms between samples)
     delta_threshold = 1.0   # difference between samples greater than this value
+    interfaces = ['hci0', 'hci1']
     
     addresses = ('D3:4A:2F:8C:57:5E',
                  'F7:A1:FC:73:DD:23',
@@ -660,10 +665,11 @@ if __name__ == '__main__':
     devices = []
     try:
         # Connect to devices
-        for address in addresses:
+        for i, address in enumerate(addresses):
             print('\nConnecting to device at {}'.format(address))
             try:
-                mw = MetawearDevice(address)
+                # alternate between connecting to hci0 and hci1
+                mw = MetawearDevice(address, interface=interfaces[i % 2])
             except PyMetaWearConnectionTimeout:
                 msg_str = 'Failed to connect: connection timeout'
                 print(msg_str)
