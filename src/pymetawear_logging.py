@@ -144,6 +144,19 @@ class MetawearDevice:
         time.sleep(0.5)
     
     
+    def init_streaming(self):
+        
+        if self.sample_accel:
+            accel_signal = libmetawear.mbl_mw_acc_get_acceleration_data_signal(self.client.board)
+            self.accel_data_fn = Fn_DataPtr(self.accel_data_handler)
+            libmetawear.mbl_mw_datasignal_subscribe(accel_signal, self.accel_data_fn)
+        
+        if self.sample_gyro:
+            gyro_signal = libmetawear.mbl_mw_gyro_bmi160_get_rotation_data_signal(self.client.board)
+            self.gyro_data_fn = Fn_DataPtr(self.gyro_data_handler)
+            libmetawear.mbl_mw_datasignal_subscribe(gyro_signal, self.gyro_data_fn)
+    
+    
     def init_logger_rss(self):
         
         # Set up data processor chain
@@ -596,8 +609,10 @@ class MetawearDevice:
         
         #print('A | {} | {:.3f} {:.3f} {:.3f}'.format(*sample))
         
-        self.temp_accel_data.append(sample)
-        self.temp_accel_times.append(time.time())
+        #self.temp_accel_data.append(sample)
+        #self.temp_accel_times.append(time.time())
+        self.accel_data.append(sample)
+        self.accel_times.append(time.time())
     
     
     def gyro_data_handler(self, data):
@@ -610,8 +625,10 @@ class MetawearDevice:
         
         #print('G | {} | {:.3f} {:.3f} {:.3f}'.format(*sample))
         
-        self.temp_gyro_data.append(sample)
-        self.temp_gyro_times.append(time.time())
+        #self.temp_gyro_data.append(sample)
+        #self.temp_gyro_times.append(time.time())
+        self.gyro_data.append(sample)
+        self.gyro_times.append(time.time())
     
     
     def float_data_handler(self, data):
@@ -659,7 +676,7 @@ if __name__ == '__main__':
                  'C8:CB:F1:55:DC:BD',
                  'D6:B3:DA:FD:2E:DE',
                  'C7:7D:36:B1:5E:7D')
-    addresses = addresses[4:12]
+    addresses = addresses[4:8]
     
     # Connect to each device, configure settings, initialize loggers
     devices = []
@@ -675,7 +692,8 @@ if __name__ == '__main__':
                 print(msg_str)
                 continue
             #mw.init_logger_time(sample_period)
-            mw.init_logger_threshold(delta_threshold)
+            #mw.init_logger_threshold(delta_threshold)
+            mw.init_streaming()
             devices.append(mw)
         
         # Configure device parameters
@@ -689,12 +707,14 @@ if __name__ == '__main__':
         # Start logging from all devices
         prev_times = []
         for device in devices:
-            device.start_logging()
+            #device.start_logging()
+            device.start_sampling()
             prev_times.append(time.time())
         init_time = time.time()
         
         # Download data continuously, one device at a time, until the time limit
         # has been reached
+        """
         time_delta = time.time() - init_time
         while time_delta < run_time_secs:
             for i, device in enumerate(devices):
@@ -715,6 +735,7 @@ if __name__ == '__main__':
             print('\nFINAL DOWNLOAD')
             print('TIME SINCE LAST TRANSACTION: {:.2f} seconds'.format(time.time() - prev_times[i]))
             device.download_data(num_notifications)
+        """
         
         # Print download stats and plot data
         for device in devices:
