@@ -75,8 +75,11 @@ class MetawearDevice:
         self.set_gyro_params()
         
         # set up battery callback and read state
+        self.battery = None
         self.client.battery.notifications(self.battery_callback)
         self.client.battery.read_battery_state()
+        while self.battery is None:
+            time.sleep(0.01)
         
         
     def disconnect(self):
@@ -268,8 +271,10 @@ class MetawearDevice:
         
         # Read battery state (give the device some time to reconnect)
         try:
+            self.battery = None
             self.client.battery.read_battery_state()
-            time.sleep(0.1)
+            while self.battery is None:
+                time.sleep(0.01)
         except PyMetaWearConnectionTimeout:
             print('Failed to reconnect to {}'.format(self.address))
             return
@@ -652,6 +657,7 @@ class MetawearDevice:
     
         epoch = data[0]
         battery = data[1]
+        self.battery = battery
         print("Battery status: {}%".format(battery[1]))
 
 
