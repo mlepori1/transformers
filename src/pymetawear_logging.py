@@ -89,12 +89,15 @@ class MetawearDevice:
         
         print('Disconnecting from {}...'.format(self.address))
         
+        self.client.disconnect()
+        """
         libmetawear.mbl_mw_metawearboard_tear_down(self.client.board)
         time.sleep(1)
         libmetawear.mbl_mw_metawearboard_free(self.client.board)
         time.sleep(1)
         self.client.backend.disconnect()
         time.sleep(1)
+        """
     
     
     def set_accel_params(self, sample_rate=25.0, accel_range=2.0):
@@ -394,6 +397,7 @@ class MetawearDevice:
         else:
             print('No angular velocity data downloaded')
         
+        """
         if self.float_data:
             num_float_samples = len(self.float_data)
             float_duration = float(num_float_samples) / self.accel_sample_rate
@@ -401,7 +405,8 @@ class MetawearDevice:
             fmt_str = 'G | Downloaded {} samples ({:.2f} seconds @ {:.1f} Hz) spanning {:.2f} seconds'
             print(fmt_str.format(num_float_samples, float_duration, self.accel_sample_rate, float_time_delta))
         else:
-            print('No angular velocity data downloaded')
+            print('No float data downloaded')
+        """
         
     
     def plot_data(self):
@@ -414,7 +419,7 @@ class MetawearDevice:
             samples = np.array([x[1:4] for x in self.accel_data])
             #sample_norms = (samples ** 2).sum(axis=1) ** 0.5
             
-            f, axes = plt.subplots(4) #, sharex=True)
+            f, axes = plt.subplots(3, sharex=True)
             axes[0].plot(times, samples[:,0])
             axes[0].set_ylabel('a_x')
             axes[0].set_title('Downloaded acceleration data [{}]'.format(self.address))
@@ -422,8 +427,21 @@ class MetawearDevice:
             axes[1].set_ylabel('a_y')
             axes[2].plot(times, samples[:,2])
             axes[2].set_ylabel('a_z')
-            axes[3].plot(times)
-            axes[3].set_xlabel('Time (seconds)')
+            axes[2].set_xlabel('Time (seconds)')
+            
+            recv_times = np.array(self.accel_times)
+            f_time, axes_time = plt.subplots(2, 2, figsize=(3,5))
+            axes_time[0][0].hist(np.diff(times), bins=50)
+            axes_time[0][0].set_title('Time period between samples (sent)')
+            axes_time[1][0].plot(times[1:], np.diff(times))
+            axes_time[1][0].set_xlabel('Time (seconds)')
+            axes_time[1][0].set_ylabel('Difference (seconds)')
+            axes_time[0][1].hist(np.diff(recv_times), bins=50)
+            axes_time[0][1].set_title('Time period between samples (received)')
+            axes_time[1][1].plot(recv_times[1:], np.diff(recv_times))
+            axes_time[1][1].set_xlabel('Time (seconds)')
+            axes_time[1][1].set_ylabel('Difference (seconds)')
+
         else:
             print('No acceleration data recorded!')
             
@@ -435,7 +453,7 @@ class MetawearDevice:
             samples = np.array([x[1:4] for x in self.gyro_data])
             #sample_norms = (samples ** 2).sum(axis=1) ** 0.5
             
-            f, axes = plt.subplots(4) #, sharex=True)
+            f, axes = plt.subplots(3, sharex=True)
             axes[0].plot(times, samples[:,0])
             axes[0].set_ylabel('w_x')
             axes[0].set_title('Downloaded angular velocity data [{}]'.format(self.address))
@@ -443,8 +461,20 @@ class MetawearDevice:
             axes[1].set_ylabel('w_y')
             axes[2].plot(times, samples[:,2])
             axes[2].set_ylabel('w_z')
-            axes[3].plot(times)
-            axes[3].set_xlabel('Time (seconds)')
+            axes[2].set_xlabel('Time (seconds)')
+            
+            recv_times = np.array(self.accel_times)
+            f_time, axes_time = plt.subplots(2, 2, figsize=(3,5))
+            axes_time[0][0].hist(np.diff(times), bins=50)
+            axes_time[0][0].set_title('Time period between samples (sent)')
+            axes_time[1][0].plot(times[1:], np.diff(times))
+            axes_time[1][0].set_xlabel('Time (seconds)')
+            axes_time[1][0].set_ylabel('Difference (seconds)')
+            axes_time[0][1].hist(np.diff(recv_times), bins=50)
+            axes_time[0][1].set_title('Time period between samples (received)')
+            axes_time[1][1].plot(recv_times[1:], np.diff(recv_times))
+            axes_time[1][1].set_xlabel('Time (seconds)')
+            axes_time[1][1].set_ylabel('Difference (seconds)')
         else:
             print('No angular velocity data recorded!')
         
@@ -663,7 +693,7 @@ class MetawearDevice:
 
 if __name__ == '__main__':
     
-    run_time_mins = 5
+    run_time_mins = 0.5
     run_time_secs = run_time_mins * 60
     num_notifications = 10
     sample_period = 1000    # (ms between samples)
@@ -682,7 +712,7 @@ if __name__ == '__main__':
                  'C8:CB:F1:55:DC:BD',
                  'D6:B3:DA:FD:2E:DE',
                  'C7:7D:36:B1:5E:7D')
-    addresses = addresses[4:8]
+    addresses = addresses[0:4]
     
     # Connect to each device, configure settings, initialize loggers
     devices = []
@@ -718,6 +748,8 @@ if __name__ == '__main__':
             prev_times.append(time.time())
         init_time = time.time()
         
+        time.sleep(run_time_secs)
+        
         # Download data continuously, one device at a time, until the time limit
         # has been reached
         """
@@ -746,7 +778,7 @@ if __name__ == '__main__':
         # Print download stats and plot data
         for device in devices:
             device.print_stats()
-            #device.plot_data()
+            device.plot_data()
     
     finally:
         # Disconnect from all devices
