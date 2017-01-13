@@ -8,7 +8,7 @@ AUTHOR
 """
 
 from __future__ import print_function
-import Tkinter as tk
+import tkinter as tk
 import tkMessageBox
 import tkFont
 from PIL import Image, ImageTk
@@ -781,8 +781,9 @@ class Application:
                     self.badInputDialog(err_str)
                     return
                 self.updateWorldState()
+                if action == 'remove block': target_index = -1
                 connection = (self.action_start_index, self.cur_frame,
-                              action_index, object_index, -1, '', '')                
+                              action_index, object_index, target_index, '', '')
             self.labels.append(connection)
             print(connection)
         

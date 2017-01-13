@@ -373,7 +373,7 @@ class DuploCorpus:
                        header=col_names, comments='')
     
     
-    def readLabels(self, trial_id):
+    def readLabels(self, trial_id, annotator_id):
         """
         Try to load annotations from file for the given trial. If
         there are no labels, warn the user and return an empty list.
@@ -383,6 +383,9 @@ class DuploCorpus:
         trial_id:  int
           Trial identifier. This is the trial's index in the corpus metadata
           array.
+        annotator_id:  str
+          Annotator identifier. This is usually the annotator's name or
+          something similar.
         
         Returns:
         --------
@@ -408,7 +411,7 @@ class DuploCorpus:
             to the i-th entry in obj_studs.
         """
         
-        fn = os.path.join(self.paths['labels'], '{}.csv'.format(trial_id))
+        fn = os.path.join(self.paths['labels'], '{}-{}.csv'.format(trial_id, annotator_id))
         
         if not os.path.exists(fn):
             self.logger.warn('Trial {}: no labels found'.format(trial_id))
