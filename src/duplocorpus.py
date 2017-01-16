@@ -28,8 +28,21 @@ class DuploCorpus:
         self.initLogger()
         
         # ID strings for the recording devices
-        self.imu_ids = ('095D', '0949', '090F', '08F1')
-        self.nickname2id = {'A':'095D', 'B':'0949', 'C':'090F', 'D':'08F1'}
+        self.imu_addresses = ('C2:1E:B1:29:BA:4F',
+                              'E6:AB:B4:74:08:9A',
+                              'C5:DD:E9:99:A5:56',
+                              'DF:D4:5D:D9:68:4F',
+                              'C8:B8:4F:23:CD:E5',
+                              'F7:A1:FC:73:DD:23',
+                              'FC:63:6C:B3:4C:F6',
+                              'D3:4A:2F:8C:57:5E',
+                              'C7:7D:36:B1:5E:7D',
+                              'D6:B3:DA:FD:2E:DE',
+                              'C8:CB:F1:55:DC:BD',
+                              'F3:3A:AD:8A:B7:14')
+        self.imu_ids = tuple(''.join(a.split(':')[-2:]) for a in self.imu_addresses)
+        self.nickname2address = {str(i+1):a for i, a in enumerate(self.imu_addresses)}
+        self.nickname2id = {str(i+1):a for i, a in enumerate(self.imu_ids)}
         self.image_types = ('rgb', 'depth')
         
         self.initTypestructs()
@@ -92,7 +105,7 @@ class DuploCorpus:
         self.paths['output'] = os.path.join(self.paths['root'], 'output')   
         self.paths['figures'] = os.path.join(self.paths['root'], 'figures')
         self.paths['working'] = os.path.join(self.paths['root'], 'working')
-        self.paths['data'] = os.path.join(self.paths['root'], 'data')
+        self.paths['data'] = os.path.join(self.paths['root'], 'data-test')
         self.paths['imu-samples'] = os.path.join(self.paths['data'], 'imu-samples')
         self.paths['imu-settings'] = os.path.join(self.paths['data'], 'imu-settings')
         self.paths['video-frames'] = os.path.join(self.paths['data'], 'video-frames')
@@ -195,7 +208,7 @@ class DuploCorpus:
           Dictionary mapping IMU names to the blocks housing them. This dict
           MUST contain an entry for every IMU in self.imu_ids.
         """
-                
+        
         label_path = os.path.join(self.paths['labels'], str(trial_id) + '.csv')
         has_labels = int(os.path.exists(label_path))
 
@@ -617,7 +630,8 @@ class DuploCorpus:
         return frame_timestamps
     
     
-    def postprocess(self, trial_id, trial_metadata, imu2block, imu_settings):
+    #def postprocess(self, trial_id, trial_metadata, imu2block, imu_settings):
+    def postprocess(self, trial_id, trial_metadata, imu2block):
         """
         This is a wrapper script that parses the raw IMU and video frame
         timestamp data into more organized formats and updates the metadata
@@ -641,11 +655,13 @@ class DuploCorpus:
           (See writeImuSettings)
         """
         
-        imu_data, frame_timestamps = self.parseRawData(trial_id)
+        # FIXME
         
-        self.writeImuSettings(trial_id, imu_settings)
-        self.writeImuData(trial_id, imu_data)
-        self.writeFrameTimestamps(trial_id, frame_timestamps)
+        #imu_data, frame_timestamps = self.parseRawData(trial_id)
+        
+        #self.writeImuSettings(trial_id, imu_settings)
+        #self.writeImuData(trial_id, imu_data)
+        #self.writeFrameTimestamps(trial_id, frame_timestamps)
                 
         self.updateMetaData(trial_id, trial_metadata, imu2block)
             

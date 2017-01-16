@@ -13,12 +13,16 @@ from PIL import Image, ImageTk
 import multiprocessing as mp
 import os
 import glob
+import time
 
 import numpy as np
 
-import libwax9 as wax9
+#import libwax9 as wax9
 import libprimesense as ps
 from duplocorpus import DuploCorpus
+
+from pymetawear.exceptions import PyMetaWearConnectionTimeout
+from pymetawear_logging import MetawearDevice
 
 
 class Application:
@@ -45,19 +49,26 @@ class Application:
                            self.defineTaskInterface, self.defineStreamInterface)
         self.getters = (self.getMetaData, self.getImuData, self.getTaskData,
                         self.getStreamData)
+                    
+        self.bt_interfaces = ('hci0', 'hci1')
+        self.bt_interface_index = 0
         
         # Define some constants
         # NOTE: The trial id will increase after a call to corpus.postprocess!!
         #   (which happens in chooseNewTask and closeStream)
         self.corpus = DuploCorpus()
         self.trial_id = self.corpus.meta_data.shape[0]
-        self.blocks = ('red', 'yellow', 'green', 'blue')
+        self.blocks = ('red square', 'yellow square', 'green square', 'blue square',
+                       'red rect', 'yellow rect', 'green rect', 'blue rect')
         # 1: ./img/4-1.png -- 2: ./img/4-2.png
         # 3: ./img/6-1.png -- 4: ./img/6-2.png
         # 5: ./img/8-1.png -- 6: ./img/8-2.png
-        self.task2block = {1: self.blocks[:2], 2: self.blocks[0:1] + self.blocks[2:],
-                           3: self.blocks, 4: self.blocks[0:2] + self.blocks[3:4],
-                           5: self.blocks, 6: self.blocks}
+        self.task2block = {1: self.blocks[2:4] + self.blocks[4:6],
+                           2: self.blocks[1:2] + self.blocks[4:5] + self.blocks[6:],
+                           3: self.blocks[2:4] + self.blocks[4:],
+                           4: self.blocks[1:4] + self.blocks[4:6] + self.blocks[7:],
+                           5: self.blocks,
+                           6: self.blocks}
         self.imu2block = {imu: 'UNUSED' for imu in self.corpus.imu_ids}
         
         #===[DATA FIELDS]======================================================
@@ -81,15 +92,16 @@ class Application:
         
         self.block2button = {}
         self.block2imu_nickname = {}
-        self.imu_id2socket = {}
-        self.imu_settings = []
+        #self.imu_id2socket = {}
+        self.imu_id2dev = {}
+        #self.imu_settings = []
         
         # For streaming in parallel: die tells all streaming processes to quit,
         # q is used to communicate between rgb stream and main process
         self.die = mp.Event()
         self.die_set_by_user = False
         self.video_q = mp.Queue()
-        self.imu_q = mp.Queue()
+        #self.imu_q = mp.Queue()
                  
         # Start drawing interfaces
         interface = self.interfaces[self.interface_index]
@@ -126,7 +138,7 @@ class Application:
         master = self.content_frame
         
         # Draw instructions
-        user_text = 'Please enter the following information for this child.'
+        user_text = 'Please enter the following information for this participant.'
         instructions = tk.Label(master, text=user_text)
         instructions.grid(row=0, columnspan=3)
         
@@ -194,7 +206,10 @@ class Application:
         imu_nicknames = tuple(sorted(self.corpus.nickname2id.keys()))
         for i, block in enumerate(self.blocks):
             
-            id_label = tk.Label(master, text=' \t ', background=block)
+            color, shape = block.split()
+            
+            shape_text = '            ' if shape == 'rect' else '    '
+            id_label = tk.Label(master, text=shape_text, background=color)
             id_label.grid(row=i+1, column=0)
             
             # Draw different buttons depending on whether the block is
@@ -236,7 +251,7 @@ class Application:
         master = self.content_frame
         
         # Draw instructions
-        user_text = "Select the current block construction."
+        user_text = "Select the current block construction task."
         instructions = tk.Label(master, text=user_text)
         instructions.grid(row=0, columnspan=3)
         
@@ -280,15 +295,16 @@ class Application:
         self.video_label = tk.Label(master, text='Video stream')        
         self.video_label.grid(row=0, column=0, sticky='N')  
         
-        self.imu_label = tk.Label(master, text='IMU activity')        
+        # FIXME
+        self.imu_label = tk.Label(master, text='IMU activity [DEACTIVATED]')        
         self.imu_label.grid(row=1, column=2, sticky='N') 
         
         # Draw placeholders for IMU monitors
         self.imu_id2activity_color = {}
         imu_monitor_frame = tk.Frame(master)
-        for i, imu_id in enumerate(self.imu_id2socket.keys()):
+        for i, imu_id in enumerate(self.imu_id2dev.keys()):
             # Label text
-            block_color = self.imu2block[imu_id]
+            block_color = self.imu2block[imu_id].split()[0]
             color_label = tk.Label(imu_monitor_frame, text=' \t ',
                                    background=block_color)
             color_label.grid(row=i, column=0)
@@ -318,8 +334,9 @@ class Application:
         """
         
         # Define paths used for file I/O when streaming data
-        raw_imu_fn = '{}-imu.csv'.format(self.trial_id)
-        raw_imu_path = os.path.join(self.corpus.paths['raw'], raw_imu_fn)
+        #raw_imu_fn = '{}-imu.csv'.format(self.trial_id)
+        #raw_imu_path = os.path.join(self.corpus.paths['raw'], raw_imu_fn)
+        self.raw_imu_path = os.path.join(self.corpus.paths['raw'], str(self.trial_id))
         frame_base_path = os.path.join(self.corpus.paths['video-frames'],
                                        str(self.trial_id))
         timestamp_fn = '{}-timestamps.csv'.format(self.trial_id)
@@ -329,15 +346,21 @@ class Application:
         # I know this is stupid but it's the best I can do for now
         active_nicknames = [self.block2imu_nickname[block] for block in self.active_blocks]
         active_ids = [self.corpus.nickname2id[nn] for nn in active_nicknames]
-        active_devices = {ID: self.imu_id2socket[ID] for ID in active_ids}
+        self.active_devices = {ID: self.imu_id2dev[ID] for ID in active_ids}
         
         # Define processes that stream from IMUs and camera
         videostream_args = (frame_base_path, timestamp_path,
                             self.corpus.image_types, self.die, self.video_q)
-        imustream_args = (active_devices, raw_imu_path, self.die, self.imu_q)
-        self.processes = (mp.Process(target=ps.stream, args=videostream_args),
-                          mp.Process(target=wax9.burstStream, args=imustream_args),)
+        #imustream_args = (active_devices, raw_imu_path, self.die, self.imu_q)
+        #imustream_args = (active_devices, raw_imu_path, self.die)
+        self.processes = (mp.Process(target=ps.stream, args=videostream_args),)
+                          #mp.Process(target=mwStream, args=imustream_args),) # FIXME
         
+        # Turn on imu sampling
+        for dev in self.active_devices.values():
+            dev.start_sampling()
+        
+        # Turn on RGBD sampling
         for p in self.processes:
             p.start()
     
@@ -353,6 +376,7 @@ class Application:
             self.imuFailureDialog()
             return
         
+        """
         if not self.imu_q.empty():
             samples = self.imu_q.get()
             for sample in samples:
@@ -363,6 +387,7 @@ class Application:
                     accel_mag = abs(sample[4]) + abs(sample[5]) + abs(sample[6])
                     bg_color = 'green' if accel_mag > 4950 else 'yellow'
                     self.imu_id2activity_color[imu_id].configure(background=bg_color)
+        """
         
         # Draw a new frame if one has been sent by the video stream
         if not self.video_q.empty():
@@ -391,11 +416,13 @@ class Application:
             block_mapping[imu_id] = block
         
         # Update the metadata array and increment the trial index
+        # FIXME
         metadata = (self.participant_id, self.birth_month, self.birth_year,
                     self.gender, self.task)
-        imu_settings_array = np.hstack(tuple(self.imu_settings))
-        self.corpus.postprocess(self.trial_id, metadata, block_mapping,
-                                imu_settings_array)
+        #imu_settings_array = np.hstack(tuple(self.imu_settings))
+        #self.corpus.postprocess(self.trial_id, metadata, block_mapping,
+        #                        imu_settings_array)
+        self.corpus.postprocess(self.trial_id, metadata, block_mapping)
         self.trial_id = self.corpus.meta_data.shape[0]
         
         # Reset die so we don't immediately quit streaming data in the next
@@ -430,7 +457,7 @@ class Application:
         
         self.popup = tk.Toplevel(self.parent)
         
-        if imu_id in self.imu_id2socket:
+        if imu_id in self.imu_id2dev:
             fmtstr = 'Device {} is already in use! Choose a different device.'
             l = tk.Label(self.popup, text=fmtstr.format(nickname))
             l.pack()
@@ -463,14 +490,15 @@ class Application:
         # block name --> imu nickname --> imu 4-digit hex id --> imu socket
         nickname = self.block2imu_nickname[block]
         imu_id = self.corpus.nickname2id[nickname]
-        socket = self.imu_id2socket[imu_id]
+        dev = self.imu_id2dev[imu_id]
         
         # Disconnect from socket
         print('Disconnecting from {}...'.format(imu_id))
-        socket.close()
+        #socket.close()
+        dev.disconnect()
         
         # Update dictionaries
-        self.imu_id2socket.pop(imu_id, None)
+        self.imu_id2dev.pop(imu_id, None)
         self.block2imu_nickname.pop(block, None)
         self.imu2block.pop(imu_id, None)
         
@@ -491,6 +519,7 @@ class Application:
           Color of the current block
         """
         
+        """
         # Get the 4-digit hex ID of the IMU from its nickname
         imu_id = self.corpus.nickname2id[nickname]
         
@@ -522,6 +551,36 @@ class Application:
             data_str = sample_str.strip().split('\r\n')[1]
             battery = int(data_str.split(',')[-4])  # Battery voltage in mV
             self.connectionSuccessDialog(nickname, battery)
+        """
+        
+        imu_address = self.corpus.nickname2address[nickname]
+        try:
+            bt_interface = self.bt_interfaces[self.bt_interface_index]
+            print('\nConnecting to device {} on {}'.format(imu_address, bt_interface))
+            dev = MetawearDevice(imu_address, interface=bt_interface)
+        except PyMetaWearConnectionTimeout:
+            self.connectionFailureDialog()
+            return
+        
+        # cycle to next bluetooth interface
+        self.bt_interface_index = (self.bt_interface_index + 1) % len(self.bt_interfaces)
+        dev.init_streaming()
+        time.sleep(0.5)
+        dev.set_ble_params(7.5, 7.5, 0, 10)
+        time.sleep(0.5)
+        
+        imu_id = dev.name
+        self.imu_id2dev[imu_id] = dev
+        self.block2imu_nickname[block] = nickname
+        self.imu2block[imu_id] = block
+        print('{}: {}'.format(block, imu_id))
+                    
+        # Update 'connect' button
+        func = lambda b=str(block): self.resetConnection(b)
+        self.block2button[block].configure(text='Disconnect', command=func)
+        
+        battery = dev.battery[1]  # Battery voltage in % charge remaining
+        self.connectionSuccessDialog(nickname, battery)
         
     
     def connectionFailureDialog(self):
@@ -551,7 +610,7 @@ class Application:
         nickname:  str
           Simple label given to IMU (one character, e.g. 'A')
         battery:  int
-          IMU battery voltage in mV
+          IMU battery voltage in mV [FIXME]
         """
         
         self.popup.destroy()
@@ -560,15 +619,15 @@ class Application:
         # Battery discharge curve has a sharp knee around 3300 mV, so take that
         # as zero. Max charge is about 4200 mV.
         # (see WAX9 developer's guide, p. 17)
-        min_charge = 3300
-        max_charge = 4200        
-        charge_percent = float(battery - min_charge) / (max_charge - min_charge)
+        #min_charge = 3300
+        #max_charge = 4200        
+        #charge_percent = float(battery - min_charge) / (max_charge - min_charge)
         # Battery can't be more than 100% charged, but it could look that way
         # because the max capacity is only approximate
-        charge_percent = int(min(charge_percent, 1) * 100)
+        #charge_percent = int(min(charge_percent, 1) * 100)
         
         fmtstr = '\nSuccessfully connected to device {}!\n\nBattery: {}%\n'
-        l = tk.Label(self.popup, text=fmtstr.format(nickname, charge_percent))
+        l = tk.Label(self.popup, text=fmtstr.format(nickname, battery))
         l.pack()
         
         ok = tk.Button(self.popup, text='OK', command=self.cancel)
@@ -679,9 +738,11 @@ class Application:
         if not self.die.is_set():
             self.stopStream()
         
-        for name, socket in self.imu_id2socket.items():
+        #for name, socket in self.imu_id2socket.items():
+        for name, dev in self.imu_id2dev.items():
             print('Disconnecting from {}...'.format(name))
-            socket.close()
+            dev.disconnect()
+            #socket.close()
         
         # Map the blocks used in this trial to the IDs of the IMUs inside them.
         # Map the blocks that weren't used to the string, 'UNUSED'.
@@ -690,11 +751,13 @@ class Application:
             imu_id = self.corpus.nickname2id[self.block2imu_nickname[block]]
             block_mapping[imu_id] = block
         
+        # FIXME
         metadata = (self.participant_id, self.birth_month, self.birth_year,
                     self.gender, self.task)
-        imu_settings_array = np.hstack(tuple(self.imu_settings))
-        self.corpus.postprocess(self.trial_id, metadata, block_mapping,
-                                imu_settings_array)
+        #imu_settings_array = np.hstack(tuple(self.imu_settings))
+        #self.corpus.postprocess(self.trial_id, metadata, block_mapping,
+        #                        imu_settings_array)
+        self.corpus.postprocess(self.trial_id, metadata, block_mapping)
         #self.corpus.makeImuFigs(self.trial_id)
         
         self.parent.destroy()
@@ -707,6 +770,13 @@ class Application:
         
         self.die_set_by_user = True
         self.die.set()
+        
+        for dev in self.active_devices.values():
+            dev.stop_sampling()
+    
+        for dev in self.active_devices.values():
+            dev.write_data(self.raw_imu_path)
+        
         for p in self.processes:
             p.join()
     

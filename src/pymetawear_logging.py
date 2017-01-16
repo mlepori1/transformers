@@ -9,6 +9,8 @@ CHANGELOG
 
 import time
 import copy
+import os
+import csv
 
 from pymetawear.exceptions import PyMetaWearConnectionTimeout
 from pymetawear import libmetawear
@@ -32,6 +34,7 @@ class MetawearDevice:
         
         self.interface = interface
         self.address = address
+        self.name = ''.join(self.address.split(':')[-2:])
         self.client = MetaWearClient(self.address, backend='pybluez',
                                      interface=self.interface, debug=True,
                                      timeout=20.0)
@@ -153,14 +156,14 @@ class MetawearDevice:
     def init_streaming(self):
         
         if self.sample_accel:
-            accel_signal = libmetawear.mbl_mw_acc_get_acceleration_data_signal(self.client.board)
+            self.accel_signal = libmetawear.mbl_mw_acc_get_acceleration_data_signal(self.client.board)
             self.accel_data_fn = Fn_DataPtr(self.accel_data_handler)
-            libmetawear.mbl_mw_datasignal_subscribe(accel_signal, self.accel_data_fn)
+            libmetawear.mbl_mw_datasignal_subscribe(self.accel_signal, self.accel_data_fn)
         
         if self.sample_gyro:
-            gyro_signal = libmetawear.mbl_mw_gyro_bmi160_get_rotation_data_signal(self.client.board)
+            self.gyro_signal = libmetawear.mbl_mw_gyro_bmi160_get_rotation_data_signal(self.client.board)
             self.gyro_data_fn = Fn_DataPtr(self.gyro_data_handler)
-            libmetawear.mbl_mw_datasignal_subscribe(gyro_signal, self.gyro_data_fn)
+            libmetawear.mbl_mw_datasignal_subscribe(self.gyro_signal, self.gyro_data_fn)
     
     
     def init_logger_rss(self):
@@ -245,6 +248,8 @@ class MetawearDevice:
     
     def start_sampling(self):
         
+        print('turning on sampling from {}...'.format(self.name))
+        
         if self.sample_accel:
             self.client.accelerometer.start()
             self.client.accelerometer.toggle_sampling(True)
@@ -257,6 +262,8 @@ class MetawearDevice:
     
     
     def stop_sampling(self):
+        
+        print('turning off sampling from {}...'.format(self.name))
         
         if self.sample_accel:
             self.client.accelerometer.stop()
@@ -407,12 +414,42 @@ class MetawearDevice:
         else:
             print('No float data downloaded')
         """
+    
+    
+    def write_data(self, base_path):
+        """
+        """
+                
+        if not os.path.exists(base_path):
+            os.makedirs(base_path)
+                 
+        if self.accel_data:
+            fn = '{}-accel.csv'.format(self.name)
+            file_path = os.path.join(base_path, fn)
+            with open(file_path, 'wt') as csvfile:
+                accel_writer = csv.writer(csvfile, delimiter=',')
+                for sample in self.accel_data:
+                    accel_writer.writerow(sample)
+            self.accel_data = []
+        else:
+            print('No accelerometer data!')
+        
+        if self.gyro_data:
+            fn = '{}-gyro.csv'.format(self.name)
+            file_path = os.path.join(base_path, fn)
+            with open(file_path, 'wt') as csvfile:
+                gyro_writer = csv.writer(csvfile, delimiter=',')
+                for sample in self.gyro_data:
+                    gyro_writer.writerow(sample)
+            self.gyro_data = []
+        else:
+            print('No gyroscope data!')
         
     
     def plot_data(self):
         
         # Plot the downloaded data
-        if self.accel_data:
+        if self.accel_data and self.accel_times:
             times = np.array([x[0] for x in self.accel_data], dtype=float)
             times -= times[0]
             times /= 1000.0
@@ -429,24 +466,32 @@ class MetawearDevice:
             axes[2].set_ylabel('a_z')
             axes[2].set_xlabel('Time (seconds)')
             
-            recv_times = np.array(self.accel_times)
-            f_time, axes_time = plt.subplots(2, 2, figsize=(3,5))
+            fn = '/home/jdjones/figs/{}-accel-data.png'.format(self.address)
+            plt.savefig(fn)
+            plt.close()
+            
+            recv_times = np.array(self.accel_times) - self.accel_times[0]
+            f_time, axes_time = plt.subplots(2, 2) #, figsize=(3,5))
             axes_time[0][0].hist(np.diff(times), bins=50)
-            axes_time[0][0].set_title('Time period between samples (sent)')
+            axes_time[0][0].set_title('Time sent')
             axes_time[1][0].plot(times[1:], np.diff(times))
             axes_time[1][0].set_xlabel('Time (seconds)')
             axes_time[1][0].set_ylabel('Difference (seconds)')
             axes_time[0][1].hist(np.diff(recv_times), bins=50)
-            axes_time[0][1].set_title('Time period between samples (received)')
+            axes_time[0][1].set_title('Time received')
             axes_time[1][1].plot(recv_times[1:], np.diff(recv_times))
             axes_time[1][1].set_xlabel('Time (seconds)')
             axes_time[1][1].set_ylabel('Difference (seconds)')
-
+            plt.tight_layout()
+            
+            fn = '/home/jdjones/figs/{}-accel-times.png'.format(self.address)
+            plt.savefig(fn)
+            plt.close()
         else:
             print('No acceleration data recorded!')
             
         # Plot the downloaded data
-        if self.gyro_data:
+        if self.gyro_data and self.gyro_times:
             times = np.array([x[0] for x in self.gyro_data], dtype=float)
             times -= times[0]
             times /= 1000.0
@@ -463,22 +508,31 @@ class MetawearDevice:
             axes[2].set_ylabel('w_z')
             axes[2].set_xlabel('Time (seconds)')
             
-            recv_times = np.array(self.accel_times)
-            f_time, axes_time = plt.subplots(2, 2, figsize=(3,5))
+            fn = '/home/jdjones/figs/{}-angvel-data.png'.format(self.address)
+            plt.savefig(fn)
+            plt.close()
+            
+            recv_times = np.array(self.gyro_times) - self.gyro_times[0]
+            f_time, axes_time = plt.subplots(2, 2) #, figsize=(3,5))
             axes_time[0][0].hist(np.diff(times), bins=50)
-            axes_time[0][0].set_title('Time period between samples (sent)')
+            axes_time[0][0].set_title('Time sent')
             axes_time[1][0].plot(times[1:], np.diff(times))
             axes_time[1][0].set_xlabel('Time (seconds)')
             axes_time[1][0].set_ylabel('Difference (seconds)')
             axes_time[0][1].hist(np.diff(recv_times), bins=50)
-            axes_time[0][1].set_title('Time period between samples (received)')
+            axes_time[0][1].set_title('Time received')
             axes_time[1][1].plot(recv_times[1:], np.diff(recv_times))
             axes_time[1][1].set_xlabel('Time (seconds)')
             axes_time[1][1].set_ylabel('Difference (seconds)')
+            plt.tight_layout()
+            
+            fn = '/home/jdjones/figs/{}-angvel-times.png'.format(self.address)
+            plt.savefig(fn)
+            plt.close()
         else:
             print('No angular velocity data recorded!')
         
-        plt.show()
+        #plt.show()
     
     
     def set_ble_params(self, min_conn_interval, max_conn_interval, latency, timeout):
@@ -691,6 +745,23 @@ class MetawearDevice:
         print("Battery status: {}%".format(battery[1]))
 
 
+def mwStream(connected_devices, path, die):
+    """
+    """
+    
+    for dev in connected_devices.values():
+        dev.start_sampling()
+    
+    while not die.is_set():
+        time.sleep(0.1)
+    
+    for dev in connected_devices.values():
+        dev.stop_sampling()
+    
+    for dev in connected_devices.values():
+        dev.write_data(path)
+
+
 if __name__ == '__main__':
     
     run_time_mins = 0.5
@@ -700,37 +771,44 @@ if __name__ == '__main__':
     delta_threshold = 1.0   # difference between samples greater than this value
     interfaces = ['hci0', 'hci1']
     
-    addresses = ('D3:4A:2F:8C:57:5E',
-                 'F7:A1:FC:73:DD:23',
-                 'FC:63:6C:B3:4C:F6',
-                 'C8:B8:4F:23:CD:E5',
+    addresses = ('C2:1E:B1:29:BA:4F',
                  'E6:AB:B4:74:08:9A',
-                 'C2:1E:B1:29:BA:4F',
                  'C5:DD:E9:99:A5:56',
                  'DF:D4:5D:D9:68:4F',
-                 'F3:3A:AD:8A:B7:14',
-                 'C8:CB:F1:55:DC:BD',
+                 'C8:B8:4F:23:CD:E5',
+                 'F7:A1:FC:73:DD:23',
+                 'FC:63:6C:B3:4C:F6',
+                 'D3:4A:2F:8C:57:5E',
+                 'C7:7D:36:B1:5E:7D',
                  'D6:B3:DA:FD:2E:DE',
-                 'C7:7D:36:B1:5E:7D')
-    addresses = addresses[0:4]
+                 'C8:CB:F1:55:DC:BD',
+                 'F3:3A:AD:8A:B7:14')
+    addresses = addresses[0:2] + addresses[3:9]#addresses[0:8]
     
     # Connect to each device, configure settings, initialize loggers
     devices = []
     try:
         # Connect to devices
         for i, address in enumerate(addresses):
-            print('\nConnecting to device at {}'.format(address))
+        #i = 0
+        #while i < len(addresses):
+            address = addresses[i]
+            interface = interfaces[i % 2]
+            print('\nConnecting to device {} on {}'.format(address, interface))
             try:
                 # alternate between connecting to hci0 and hci1
-                mw = MetawearDevice(address, interface=interfaces[i % 2])
+                mw = MetawearDevice(address, interface=interface)
             except PyMetaWearConnectionTimeout:
                 msg_str = 'Failed to connect: connection timeout'
                 print(msg_str)
+                #time.sleep(30)
                 continue
             #mw.init_logger_time(sample_period)
             #mw.init_logger_threshold(delta_threshold)
             mw.init_streaming()
             devices.append(mw)
+            time.sleep(0.5)
+            #i += 1
         
         # Configure device parameters
         for device in devices:
@@ -775,9 +853,17 @@ if __name__ == '__main__':
             device.download_data(num_notifications)
         """
         
+        for device in devices:
+            device.stop_sampling()
+        
         # Print download stats and plot data
         for device in devices:
             device.print_stats()
+        
+        for device in devices:
+            device.write_data('/home/jdjones/repo/blocks/working/0-imu')
+        
+        for device in devices:
             device.plot_data()
     
     finally:
