@@ -50,7 +50,7 @@ class Application:
         self.getters = (self.getMetaData, self.getImuData, self.getTaskData,
                         self.getStreamData)
                     
-        self.bt_interfaces = ('hci0', 'hci1')
+        self.bt_interfaces = ('hci0', 'hci1', 'hci2', 'hci3')
         self.bt_interface_index = 0
         
         # Define some constants
@@ -519,40 +519,6 @@ class Application:
           Color of the current block
         """
         
-        """
-        # Get the 4-digit hex ID of the IMU from its nickname
-        imu_id = self.corpus.nickname2id[nickname]
-        
-        mac_prefix = ['00', '17', 'E9', 'D7']
-        imu_address = ':'.join(mac_prefix + [imu_id[0:2], imu_id[2:4]])
-        socket, name = wax9.connect(imu_address)
-        if name is None:
-            self.connectionFailureDialog()
-        else:
-            self.imu_id2socket[imu_id] = socket
-            self.block2imu_nickname[block] = nickname
-            self.imu2block[imu_id] = block
-            print('{}: {}'.format(block, imu_id))
-            
-            # Read off IMU settings for each device. If I skip this before
-            # sending the stream command, the devices stall. I think it's
-            # because of some kind of firmware or hardware instability, but I'm
-            # still not sure.
-            settings = wax9.getSettings(socket)
-            parsed_settings = wax9.parseSettings(settings)
-            # TODO: Correct settings if they aren't what we expect
-            self.imu_settings.append(parsed_settings)
-            
-            # Update 'connect' button
-            func = lambda b=str(block): self.resetConnection(b)
-            self.block2button[block].configure(text='Disconnect', command=func)
-            
-            sample_str = wax9.sample(socket)
-            data_str = sample_str.strip().split('\r\n')[1]
-            battery = int(data_str.split(',')[-4])  # Battery voltage in mV
-            self.connectionSuccessDialog(nickname, battery)
-        """
-        
         imu_address = self.corpus.nickname2address[nickname]
         try:
             bt_interface = self.bt_interfaces[self.bt_interface_index]
@@ -565,9 +531,9 @@ class Application:
         # cycle to next bluetooth interface
         self.bt_interface_index = (self.bt_interface_index + 1) % len(self.bt_interfaces)
         dev.init_streaming()
-        time.sleep(0.5)
+        dev.set_accel_params(sample_rate=50.0)
+        dev.set_gyro_params(sample_rate=50.0)
         dev.set_ble_params(7.5, 7.5, 0, 10)
-        time.sleep(0.5)
         
         imu_id = dev.name
         self.imu_id2dev[imu_id] = dev
@@ -771,14 +737,20 @@ class Application:
         self.die_set_by_user = True
         self.die.set()
         
+        # turn off inertial sampling
         for dev in self.active_devices.values():
             dev.stop_sampling()
-    
-        for dev in self.active_devices.values():
-            dev.write_data(self.raw_imu_path)
         
+        # turn off camera
         for p in self.processes:
             p.join()
+    
+        for dev in self.active_devices.values():
+            base_path = os.path.join(self.corpus.paths['figures'], str(self.trial_id))
+            dev.plot_data(base_path)
+        
+        for dev in self.active_devices.values():
+            dev.write_data(self.raw_imu_path)
     
     
     def getMetaData(self):
