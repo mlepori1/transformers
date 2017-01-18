@@ -382,6 +382,28 @@ class MetawearDevice:
             self.temp_float_data = []
     
     
+    def get_accel_sample(self):
+        """
+        Return the last accelerometer sample recieved from this device.
+        """
+        
+        if self.accel_data:
+            return self.accel_data[-1]
+        
+        return None
+    
+    
+    def get_gyro_sample(self):
+        """
+        Return the last gyroscope sample recieved from this device.
+        """
+        
+        if self.gyro_data:
+            return self.gyro_data[-1]
+        
+        return None
+    
+    
     def print_stats(self):
         
         print('\nDEVICE {}'.format(self.address))

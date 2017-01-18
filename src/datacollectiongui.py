@@ -296,7 +296,7 @@ class Application:
         self.video_label.grid(row=0, column=0, sticky='N')  
         
         # FIXME
-        self.imu_label = tk.Label(master, text='IMU activity [DEACTIVATED]')        
+        self.imu_label = tk.Label(master, text='IMU activity')        
         self.imu_label.grid(row=1, column=2, sticky='N') 
         
         # Draw placeholders for IMU monitors
@@ -304,16 +304,17 @@ class Application:
         imu_monitor_frame = tk.Frame(master)
         for i, imu_id in enumerate(self.imu_id2dev.keys()):
             # Label text
-            block_color = self.imu2block[imu_id].split()[0]
-            color_label = tk.Label(imu_monitor_frame, text=' \t ',
-                                   background=block_color)
+            color, shape = self.imu2block[imu_id].split()
+            shape_text = '            ' if shape == 'rect' else '    '
+            color_label = tk.Label(imu_monitor_frame, text=shape_text,
+                                   background=color)
             color_label.grid(row=i, column=0)
             id_label = tk.Label(imu_monitor_frame, text=' active: ')
             id_label.grid(row=i, column=1)
             # Activity indicator
             self.imu_id2activity_color[imu_id] = tk.Label(imu_monitor_frame,
                                                           text='    ',
-                                                          background='yellow')
+                                                          background='red')
             self.imu_id2activity_color[imu_id].grid(row=i, column=2)
         imu_monitor_frame.grid(row=1, column=2)
             
@@ -364,6 +365,22 @@ class Application:
         for p in self.processes:
             p.start()
     
+    
+    def float2HexColor(self, f, upper_thresh, lower_thresh):
+        """
+        """
+        
+        thresh_centered = upper_thresh - lower_thresh
+        f_centered = max(f, lower_thresh) - lower_thresh
+        f_clipped = min(f_centered, thresh_centered)
+        f_int = int(f_clipped / thresh_centered * 255)
+        
+        r = 255 - f_int
+        g = f_int
+        b = 0
+        
+        return '{:02x}{:02x}{:02x}'.format(r, g, b)
+    
  
     def refreshStreamInterface(self):
         """
@@ -375,6 +392,13 @@ class Application:
         if self.die.is_set() and not self.die_set_by_user:
             self.imuFailureDialog()
             return
+        
+        for imu_id, dev in self.imu_id2dev.items():
+            a = dev.get_accel_sample()
+            if a is not None:
+                a_norm = (a[1] ** 2 + a[2] ** 2 + a[3] ** 2) ** 0.5
+                a_color = self.float2HexColor(a_norm, 2.0, -2.0)
+                self.imu_id2activity_color[imu_id].configure(background=a_color)
         
         """
         if not self.imu_q.empty():
