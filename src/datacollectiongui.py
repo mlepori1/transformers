@@ -379,7 +379,7 @@ class Application:
         g = f_int
         b = 0
         
-        return '{:02x}{:02x}{:02x}'.format(r, g, b)
+        return '#{:02x}{:02x}{:02x}'.format(r, g, b)
     
  
     def refreshStreamInterface(self):
@@ -396,8 +396,8 @@ class Application:
         for imu_id, dev in self.imu_id2dev.items():
             a = dev.get_accel_sample()
             if a is not None:
-                a_norm = (a[1] ** 2 + a[2] ** 2 + a[3] ** 2) ** 0.5
-                a_color = self.float2HexColor(a_norm, 2.0, -2.0)
+                a_norm = (a[1] ** 2 + a[2] ** 2 + a[3] ** 2) ** 0.5 - 1.0
+                a_color = self.float2HexColor(a_norm, 3.5, 0.0)
                 self.imu_id2activity_color[imu_id].configure(background=a_color)
         
         """
@@ -479,15 +479,15 @@ class Application:
         nickname = self.block2imu_id_field[block].get()
         imu_id = self.corpus.nickname2id[nickname]
         
-        self.popup = tk.Toplevel(self.parent)
-        
         if imu_id in self.imu_id2dev:
+            self.popup = tk.Toplevel(self.parent)
             fmtstr = 'Device {} is already in use! Choose a different device.'
             l = tk.Label(self.popup, text=fmtstr.format(nickname))
             l.pack()
             ok = tk.Button(self.popup, text='OK', command=self.cancel)
             ok.pack()
         elif block in self.block2imu_nickname:
+            self.popup = tk.Toplevel(self.parent)
             nickname = self.block2imu_nickname[block]
             fmtstr = 'This block is already associated with device {}!'
             l = tk.Label(self.popup, text=fmtstr.format(nickname))
@@ -495,9 +495,6 @@ class Application:
             ok = tk.Button(self.popup, text='OK', command=self.cancel)
             ok.pack()
         else:
-            fmtstr = 'Connecting to  device {}...'
-            l = tk.Label(self.popup, text=fmtstr.format(nickname))
-            l.pack()
             self.attemptConnection(nickname, block)
     
     
@@ -548,8 +545,8 @@ class Application:
             bt_interface = self.bt_interfaces[self.bt_interface_index]
             print('\nConnecting to device {} on {}'.format(imu_address, bt_interface))
             dev = MetawearDevice(imu_address, interface=bt_interface)
-        except PyMetaWearConnectionTimeout:
-            self.connectionFailureDialog()
+        except (PyMetaWearConnectionTimeout, RuntimeError) as e:
+            self.badInputDialog(str(e))
             return
         
         # cycle to next bluetooth interface
@@ -579,7 +576,7 @@ class Application:
         failed.
         """
         
-        self.popup.destroy()
+        #self.popup.destroy()
         self.popup = tk.Toplevel(self.parent)
         
         fmtstr = 'Connection attempt failed! Cycle the device and try again.'
@@ -603,7 +600,7 @@ class Application:
           IMU battery voltage in mV [FIXME]
         """
         
-        self.popup.destroy()
+        #self.popup.destroy()
         self.popup = tk.Toplevel(self.parent)
         
         # Battery discharge curve has a sharp knee around 3300 mV, so take that

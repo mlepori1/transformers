@@ -27,7 +27,7 @@ class MetawearDevice:
     
     
     def __init__(self, address, sample_accel=True, sample_gyro=True,
-                 sample_switch=False, interface='hci0'):
+                 sample_switch=False, interface='hci0', timeout=30.0):
         
         self.download_finished = False
         self.unknown_entries = {}
@@ -37,7 +37,7 @@ class MetawearDevice:
         self.name = ''.join(self.address.split(':')[-2:])
         self.client = MetaWearClient(self.address, backend='pybluez',
                                      interface=self.interface, debug=True,
-                                     timeout=20.0)
+                                     timeout=timeout)
         
         self.temp_accel_data = []
         self.temp_accel_times = []
@@ -264,9 +264,11 @@ class MetawearDevice:
         
         self.start_time = time.time()
         
+        """
         while (self.sample_accel and not self.accel_data) or \
               (self.sample_gyro and not self.gyro_data):
             time.sleep(0.05)
+        """
     
     
     def stop_sampling(self):
