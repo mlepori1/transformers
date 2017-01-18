@@ -110,7 +110,7 @@ class MetawearDevice:
         
         self.client.accelerometer.set_settings(data_rate=sample_rate,
                                                data_range=accel_range)
-        time.sleep(1)
+        time.sleep(0.25)
     
     
     def set_gyro_params(self, sample_rate=25.0, gyro_range=125.0):
@@ -120,7 +120,7 @@ class MetawearDevice:
         
         self.client.gyroscope.set_settings(data_rate=sample_rate,
                                            data_range=gyro_range)
-        time.sleep(1)
+        time.sleep(0.25)
     
     
     def init_logger(self):
@@ -159,11 +159,13 @@ class MetawearDevice:
             self.accel_signal = libmetawear.mbl_mw_acc_get_acceleration_data_signal(self.client.board)
             self.accel_data_fn = Fn_DataPtr(self.accel_data_handler)
             libmetawear.mbl_mw_datasignal_subscribe(self.accel_signal, self.accel_data_fn)
+            time.sleep(0.25)
         
         if self.sample_gyro:
             self.gyro_signal = libmetawear.mbl_mw_gyro_bmi160_get_rotation_data_signal(self.client.board)
             self.gyro_data_fn = Fn_DataPtr(self.gyro_data_handler)
             libmetawear.mbl_mw_datasignal_subscribe(self.gyro_signal, self.gyro_data_fn)
+            time.sleep(0.25)
     
     
     def init_logger_rss(self):
@@ -253,12 +255,18 @@ class MetawearDevice:
         if self.sample_accel:
             self.client.accelerometer.start()
             self.client.accelerometer.toggle_sampling(True)
+            time.sleep(0.25)
         
         if self.sample_gyro:
             self.client.gyroscope.start()
             self.client.gyroscope.toggle_sampling(True)
+            time.sleep(0.25)
         
         self.start_time = time.time()
+        
+        while (self.sample_accel and not self.accel_data) or \
+              (self.sample_gyro and not self.gyro_data):
+            time.sleep(0.05)
     
     
     def stop_sampling(self):
@@ -268,10 +276,12 @@ class MetawearDevice:
         if self.sample_accel:
             self.client.accelerometer.stop()
             self.client.accelerometer.toggle_sampling(False)
+            time.sleep(0.25)
         
         if self.sample_gyro:
             self.client.gyroscope.stop()
             self.client.gyroscope.toggle_sampling(False)
+            time.sleep(0.25)
         
     
     def download_data(self, num_updates):
@@ -454,7 +464,7 @@ class MetawearDevice:
                     accel_writer.writerow(sample)
             self.accel_data = []
         else:
-            print('No accelerometer data!')
+            print('{}: No accelerometer data!'.format(self.name))
         
         if self.gyro_data:
             fn = '{}-gyro.csv'.format(self.name)
@@ -465,10 +475,13 @@ class MetawearDevice:
                     gyro_writer.writerow(sample)
             self.gyro_data = []
         else:
-            print('No gyroscope data!')
+            print('{}: No gyroscope data!'.format(self.name))
         
     
-    def plot_data(self):
+    def plot_data(self, base_path):
+        
+        if not os.path.exists(base_path):
+            os.makedirs(base_path)
         
         # Plot the downloaded data
         if self.accel_data and self.accel_times:
@@ -488,8 +501,9 @@ class MetawearDevice:
             axes[2].set_ylabel('a_z')
             axes[2].set_xlabel('Time (seconds)')
             
-            fn = '/home/jdjones/figs/{}-accel-data.png'.format(self.address)
-            plt.savefig(fn)
+            fn = '{}-accel-data.png'.format(self.name)
+            path = os.path.join(base_path, fn)
+            plt.savefig(path)
             plt.close()
             
             recv_times = np.array(self.accel_times) - self.accel_times[0]
@@ -506,11 +520,12 @@ class MetawearDevice:
             axes_time[1][1].set_ylabel('Difference (seconds)')
             plt.tight_layout()
             
-            fn = '/home/jdjones/figs/{}-accel-times.png'.format(self.address)
-            plt.savefig(fn)
+            fn = '{}-accel-times.png'.format(self.name)
+            path = os.path.join(base_path, fn)
+            plt.savefig(path)
             plt.close()
         else:
-            print('No acceleration data recorded!')
+            print('No acceleration data!')
             
         # Plot the downloaded data
         if self.gyro_data and self.gyro_times:
@@ -530,8 +545,9 @@ class MetawearDevice:
             axes[2].set_ylabel('w_z')
             axes[2].set_xlabel('Time (seconds)')
             
-            fn = '/home/jdjones/figs/{}-angvel-data.png'.format(self.address)
-            plt.savefig(fn)
+            fn = '{}-angvel-data.png'.format(self.name)
+            path = os.path.join(base_path, fn)
+            plt.savefig(path)
             plt.close()
             
             recv_times = np.array(self.gyro_times) - self.gyro_times[0]
@@ -548,11 +564,12 @@ class MetawearDevice:
             axes_time[1][1].set_ylabel('Difference (seconds)')
             plt.tight_layout()
             
-            fn = '/home/jdjones/figs/{}-angvel-times.png'.format(self.address)
-            plt.savefig(fn)
+            fn = '{}-angvel-times.png'.format(self.name)
+            path = os.path.join(base_path, fn)
+            plt.savefig(path)
             plt.close()
         else:
-            print('No angular velocity data recorded!')
+            print('No angular velocity data!')
         
         #plt.show()
     
@@ -564,6 +581,7 @@ class MetawearDevice:
                                                               max_conn_interval,
                                                               latency,
                                                               timeout)
+        time.sleep(0.25)
                 
     
     def progress_update_handler(self, entries_left, total_entries):
