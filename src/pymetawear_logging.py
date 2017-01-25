@@ -34,10 +34,11 @@ class MetawearDevice:
         
         self.interface = interface
         self.address = address
+        self.timeout = timeout
         self.name = ''.join(self.address.split(':')[-2:])
         self.client = MetaWearClient(self.address, backend='pybluez',
                                      interface=self.interface, debug=True,
-                                     timeout=timeout)
+                                     timeout=self.timeout)
         
         self.temp_accel_data = []
         self.temp_accel_times = []
@@ -93,14 +94,28 @@ class MetawearDevice:
         print('Disconnecting from {}...'.format(self.address))
         
         self.client.disconnect()
+        time.sleep(0.25)
+        
         """
         libmetawear.mbl_mw_metawearboard_tear_down(self.client.board)
-        time.sleep(1)
+        time.sleep(0.25)
         libmetawear.mbl_mw_metawearboard_free(self.client.board)
-        time.sleep(1)
+        time.sleep(0.25)
         self.client.backend.disconnect()
-        time.sleep(1)
+        time.sleep(0.25)
         """
+
+    def resetConnection(self):
+        """
+        """
+        
+        self.disconnect()
+        self.client = MetaWearClient(self.address, backend='pybluez',
+                                     interface=self.interface, debug=True,
+                                     timeout=self.timeout)
+        self.set_accel_params()
+        self.set_gyro_params()
+        self.init_streaming()        
     
     
     def set_accel_params(self, sample_rate=25.0, accel_range=2.0):
@@ -396,12 +411,29 @@ class MetawearDevice:
     
     def get_accel_sample(self):
         """
+        If
         Return the last accelerometer sample recieved from this device.
+        
+        Returns
+        -------
+        accel_sample : tuple(int, float, float, float)
+          The sample most recently received by the device
         """
         
-        if self.accel_data:
-            return self.accel_data[-1]
+        time_thresh = 1.0
         
+        if self.accel_data:
+            time_elapsed = time.time() - self.accel_times[-1]
+            #accel_sample_period = 1.0 / float(self.accel_sample_rate)
+            if time_elapsed <= time_thresh: #2 * accel_sample_period:
+                return self.accel_data[-1]
+            else:
+                self.resetConnection()
+                self.start_sampling()
+        else:
+            self.resetConnection()
+            self.start_sampling()
+            
         return None
     
     
