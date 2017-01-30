@@ -29,8 +29,8 @@ class Application:
     
     def __init__(self, parent):
         """
-        Parameters
-        ----------
+        Args:
+        -----
         parent:  tk window
           Parent tkinter object
         """
@@ -111,7 +111,9 @@ class Application:
         Draw main content and navigation frames onto the parent
         """
         
+        print('drawing content frame...')
         self.content_frame.place(relx=0.5, rely=0.5, anchor='center')
+        print('drawing navigation frame...')
         self.navigation_frame.place(relx=0.5, rely=0.9, anchor='center')
     
     
@@ -269,7 +271,7 @@ class Application:
         # Draw navigaton buttons
         master = self.navigation_frame
         forward = tk.Button(master, text="Collect data >>", command=self.forward,
-                           default=tk.ACTIVE)
+                            default=tk.ACTIVE)
         forward.grid(sticky=tk.E, row=0, column=1)
         back = tk.Button(master, text="<< Connect IMUs", command=self.back)
         back.grid(sticky=tk.W, row=0, column=0)
@@ -292,6 +294,7 @@ class Application:
         self.video_label = tk.Label(master, text='Video stream')        
         self.video_label.grid(row=0, column=0, sticky='N')  
         
+        # FIXME
         self.imu_label = tk.Label(master, text='IMU activity')        
         self.imu_label.grid(row=1, column=2, sticky='N') 
         
@@ -299,6 +302,7 @@ class Application:
         self.imu_id2activity_color = {}
         imu_monitor_frame = tk.Frame(master)
         for i, imu_id in enumerate(self.imu_id2dev.keys()):
+            
             # Label text
             color, shape = self.imu2block[imu_id].split()
             shape_text = '            ' if shape == 'rect' else '    '
@@ -307,11 +311,22 @@ class Application:
             color_label.grid(row=i, column=0)
             id_label = tk.Label(imu_monitor_frame, text=' active: ')
             id_label.grid(row=i, column=1)
+            
             # Activity indicator
             self.imu_id2activity_color[imu_id] = tk.Label(imu_monitor_frame,
                                                           text='    ',
-                                                          background='black')
+                                                          background='red')
             self.imu_id2activity_color[imu_id].grid(row=i, column=2)
+            
+            # disconnect / reconnect button
+            # Draw different buttons depending on whether the block is
+            # associated with a connected IMU or not
+            #self.block2imu_id_field[block] = tk.StringVar(master)
+            #nickname = self.block2imu_nickname[block]
+            #self.block2imu_id_field[block].set(nickname)
+            #button_text = 'Disconnect'
+            #func = lambda b=str(block): self.resetConnection(b)
+            
         imu_monitor_frame.grid(row=1, column=2)
             
 
@@ -331,17 +346,21 @@ class Application:
         """
         
         # Define paths used for file I/O when streaming data
+        #raw_imu_fn = '{}-imu.csv'.format(self.trial_id)
+        #raw_imu_path = os.path.join(self.corpus.paths['raw'], raw_imu_fn)
         self.raw_imu_path = os.path.join(self.corpus.paths['raw'], str(self.trial_id))
         frame_base_path = os.path.join(self.corpus.paths['video-frames'],
                                        str(self.trial_id))
         timestamp_fn = '{}-timestamps.csv'.format(self.trial_id)
         timestamp_path = os.path.join(self.corpus.paths['raw'], timestamp_fn)
         
-        # Active block --> IMU nickname --> IMU id --> IMU device
+        # Active block --> IMU nickname --> IMU id --> IMU socket
         # I know this is stupid but it's the best I can do for now
+        """
         active_nicknames = [self.block2imu_nickname[block] for block in self.active_blocks]
         active_ids = [self.corpus.nickname2id[nn] for nn in active_nicknames]
         self.active_devices = {ID: self.imu_id2dev[ID] for ID in active_ids}
+        """
         
         # Define processes that stream from IMUs and camera
         videostream_args = (frame_base_path, timestamp_path,
@@ -349,7 +368,7 @@ class Application:
         self.processes = (mp.Process(target=ps.stream, args=videostream_args),)
         
         # Turn on imu sampling
-        for dev in self.active_devices.values():
+        for dev in self.imu_id2dev.values():
             dev.start_sampling()
         
         # Turn on RGBD sampling
@@ -359,21 +378,6 @@ class Application:
     
     def float2HexColor(self, f, upper_thresh, lower_thresh):
         """
-        Convert a double-precision floating point number to a TK color string.
-
-        Parameters
-        ----------
-        f : double
-          Double-precision floating-point number that will be converted
-        upper_thresh : double
-          Upper limit on range of quantity
-        lower_thresh : double
-          Lower limit on range of quantity
-
-        Returns
-        -------
-        color_str : str
-          f encoded as a 24-byte hex string, format '#RRGGBB'
         """
         
         thresh_centered = upper_thresh - lower_thresh
@@ -395,16 +399,23 @@ class Application:
         """
         
         # Check if an IMU has died and notify the user if it has
-        if self.die.is_set() and not self.die_set_by_user:
-            self.imuFailureDialog()
+        if self.die.is_set():
+            if not self.die_set_by_user:
+                self.imuFailureDialog()
+            return
+        
+        # data streaming interface is at index 3
+        if not self.interface_index == 3:
             return
         
         for imu_id, dev in self.imu_id2dev.items():
             a = dev.get_accel_sample()
-            if a is not None:
+            if a is None:
+                a_color = 'black'
+            else:
                 a_norm = (a[1] ** 2 + a[2] ** 2 + a[3] ** 2) ** 0.5 - 1.0
                 a_color = self.float2HexColor(a_norm, 3.5, 0.0)
-                self.imu_id2activity_color[imu_id].configure(background=a_color)
+            self.imu_id2activity_color[imu_id].configure(background=a_color)
         
         # Draw a new frame if one has been sent by the video stream
         if not self.video_q.empty():
@@ -423,17 +434,18 @@ class Application:
         """
         
         if not self.die.is_set():
+            print('stopping streams...')
             self.stopStream()
         
         # Map the blocks used in this trial to the IDs of the IMUs inside them.
         # Map the blocks that weren't used to the string, 'UNUSED'.
         block_mapping = {imu_id: 'UNUSED' for imu_id in self.corpus.imu_ids}
-        for block in self.active_blocks:
-            imu_id = self.corpus.nickname2id[self.block2imu_nickname[block]]
+        for block, imu_id in self.block2imu_nickname.items():
             block_mapping[imu_id] = block
         
         # Update the metadata array and increment the trial index
         # FIXME
+        print('postprocessing data...')
         metadata = (self.participant_id, self.birth_month, self.birth_year,
                     self.gender, self.task)
         #imu_settings_array = np.hstack(tuple(self.imu_settings))
@@ -444,13 +456,16 @@ class Application:
         
         # Reset die so we don't immediately quit streaming data in the next
         # round
+        print('clearing die...')
         self.die.clear()
         
         # task selection interface is at position 2
+        print('setting up interface...')
         self.clearInterface()
         self.interface_index = 2
         interface = self.interfaces[self.interface_index]
         interface()
+        print('drawing interface...')
         self.drawInterface()
     
     
@@ -460,10 +475,10 @@ class Application:
         If it is, draw a popup window prompting the user to select a different
         device. If it isn't, try to connect to the device.
         
-        Parameters
-        ----------
-        block : str
-          Color of the block housing the IMU
+        Args:
+        -----
+        block:  str
+          Color of the rectangular block housing the IMU
         """
         
         if not self.popup is None:
@@ -495,9 +510,9 @@ class Application:
         """
         Close the socket for the IMU currently connected to the specified block
         
-        Parameters
-        ----------
-        block : str
+        Args:
+        -----
+        block:  str
           Color of the current block
         """
         
@@ -508,6 +523,7 @@ class Application:
         
         # Disconnect from socket
         print('Disconnecting from {}...'.format(imu_id))
+        #socket.close()
         dev.disconnect()
         
         # Update dictionaries
@@ -524,11 +540,11 @@ class Application:
         """
         Try to connect to the specified IMU.
         
-        Parameters
-        ----------
-        nickname : str
-          Simple label given to IMU (one character, e.g. '1')
-        block : str
+        Args:
+        -----
+        nickname:  str
+          Simple label given to IMU (one character, e.g. 'A')
+        block:  str
           Color of the current block
         """
         
@@ -568,6 +584,7 @@ class Application:
         failed.
         """
         
+        #self.popup.destroy()
         self.popup = tk.Toplevel(self.parent)
         
         fmtstr = 'Connection attempt failed! Cycle the device and try again.'
@@ -583,15 +600,26 @@ class Application:
         Draw a popup window informing the user that the connection attempt was
         successful.
         
-        Parameters
-        ----------
-        nickname : str
-          Simple label given to IMU (one character, e.g. '1')
-        battery : int
-          IMU charge relative to full, in percent
+        Args:
+        -----
+        nickname:  str
+          Simple label given to IMU (one character, e.g. 'A')
+        battery:  int
+          IMU battery voltage in mV [FIXME]
         """
         
+        #self.popup.destroy()
         self.popup = tk.Toplevel(self.parent)
+        
+        # Battery discharge curve has a sharp knee around 3300 mV, so take that
+        # as zero. Max charge is about 4200 mV.
+        # (see WAX9 developer's guide, p. 17)
+        #min_charge = 3300
+        #max_charge = 4200        
+        #charge_percent = float(battery - min_charge) / (max_charge - min_charge)
+        # Battery can't be more than 100% charged, but it could look that way
+        # because the max capacity is only approximate
+        #charge_percent = int(min(charge_percent, 1) * 100)
         
         fmtstr = '\nSuccessfully connected to device {}!\n\nBattery: {}%\n'
         l = tk.Label(self.popup, text=fmtstr.format(nickname, battery))
@@ -679,9 +707,9 @@ class Application:
         """
         Alert user of malformed input
         
-        Parameters 
-        ----------
-        error_string :  str
+        Args:
+        -----
+        error_string:  str
           Message that will be displayed in popup window
         """
         
@@ -705,15 +733,16 @@ class Application:
         if not self.die.is_set():
             self.stopStream()
         
+        #for name, socket in self.imu_id2socket.items():
         for name, dev in self.imu_id2dev.items():
             print('Disconnecting from {}...'.format(name))
             dev.disconnect()
+            #socket.close()
         
         # Map the blocks used in this trial to the IDs of the IMUs inside them.
         # Map the blocks that weren't used to the string, 'UNUSED'.
         block_mapping = {imu_id: 'UNUSED' for imu_id in self.corpus.imu_ids}
-        for block in self.active_blocks:
-            imu_id = self.corpus.nickname2id[self.block2imu_nickname[block]]
+        for block, imu_id in self.block2imu_nickname.items():
             block_mapping[imu_id] = block
         
         # FIXME
@@ -737,18 +766,20 @@ class Application:
         self.die.set()
         
         # turn off inertial sampling
-        for dev in self.active_devices.values():
+        for dev in self.imu_id2dev.values():
             dev.stop_sampling()
         
         # turn off camera
         for p in self.processes:
             p.join()
     
-        for dev in self.active_devices.values():
+        """
+        for dev in self.imu_id2dev.values():
             base_path = os.path.join(self.corpus.paths['figures'], str(self.trial_id))
             dev.plot_data(base_path)
+        """
         
-        for dev in self.active_devices.values():
+        for dev in self.imu_id2dev.values():
             dev.write_data(self.raw_imu_path)
     
     
@@ -756,8 +787,8 @@ class Application:
         """
         Read metadata from tkinter widgets.
         
-        Returns
-        -------
+        Returns:
+        --------
         error_string:  str
           Data validation error message. Empty string if user input passes
           validation.
@@ -784,10 +815,12 @@ class Application:
         """
                 
         # Make sure there is a connected IMU associated with every block
+        """
         for block in self.blocks:
             if not block in self.block2imu_nickname:
                 fmtstr = 'Please put an IMU in the {} block and click connect.'
                 return fmtstr.format(block)
+        """
         
         return ''
     
@@ -796,9 +829,9 @@ class Application:
         """
         Read the block construction task from tkinter widgets.
         
-        Returns
-        -------
-        error_string : str
+        Returns:
+        --------
+        error_string:  str
           Data validation error message. Empty string if user input passes
           validation.
         """
