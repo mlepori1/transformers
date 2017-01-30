@@ -9,6 +9,7 @@ AUTHOR
 
 from __future__ import print_function
 import tkinter as tk
+#from tkinter import messagebox, font
 import tkMessageBox
 import tkFont
 from PIL import Image, ImageTk
@@ -24,6 +25,7 @@ class Application:
         
         # Some text should be bold
         self.bold_font = tkFont.Font(size=10, weight=tkFont.BOLD)
+        #self.bold_font = font.Font(size=10, weight=font.BOLD)
         
         self.parent = parent
         self.popup = None
@@ -190,6 +192,7 @@ class Application:
         if self.corpus.labelFileExists(self.trial_id, self.annotator_id):
             msg_str = "Labels file exists! Overwrite?"
             if not tkMessageBox.askyesno("", msg_str):
+            #if not messagebox.askyesno("", msg_str):
                 return
         
         # Define I/O paths
@@ -443,13 +446,6 @@ class Application:
             self.target_frame = frame
             self.target_studs = block_studs
             self.target_stud_buttons = stud_buttons
-        
-    
-    def swap(self):
-        """
-        """
-        
-        # TODO
     
     
     def rotate(self, is_object, to_horizontal, name):
@@ -906,7 +902,8 @@ if __name__ == '__main__':
     
     def on_closing():
         msg_str = "Do you want to quit? (Progress will NOT be saved)"
-        if tkMessageBox.askyesno("Quit", msg_str):
+        #if tkMessageBox.askyesno("Quit", msg_str):
+        if messagebox.askyesno("Quit", msg_str):
             root.destroy()
 
     root.protocol("WM_DELETE_WINDOW", on_closing)

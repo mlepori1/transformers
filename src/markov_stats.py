@@ -11,8 +11,10 @@ HISTORY
 from duplocorpus import DuploCorpus
 from duplostructure import DuploStructure
 import numpy as np
+import matplotlib.pyplot as plt
 import graphviz as gv
 import os
+from shutil import copyfile
 
 
 actions = ('place above', 'place adjacent', 'disconnect', 'remove block',
@@ -50,8 +52,10 @@ def parseLabels(labels):
         start_idx = l['start']
         end_idx = l['end']
         
-        # FIXME
-        if start_idx != prev_start and not prev_action.startswith('rotate'):
+        # Group all contiguous events with the same start or end time as a
+        # single action
+        if start_idx != prev_start and end_idx != prev_end and \
+           not prev_action.startswith('rotate'):
             print('-----')
             graphs.append(graph)
             graph = graphs[-1].copy()
@@ -85,17 +89,11 @@ def parseLabels(labels):
             graph[key] = value
         elif action == 'disconnect':
             # Delete the specific object-target connection
-            #print('=====')
-            #print('{} | {}'.format(object_idx, target_idx))
             key = (object_idx, target_idx)
-            #print(graph)
-            #print('-----')
             del graph[key]
             reversed_key = key[::-1]
             if reversed_key in graph:
                 del graph[reversed_key]
-            #print(graph)
-            #print('=====')
         elif action == 'remove block':
             # Delete all connections involving the object block
             for key in list(graph.keys()):
@@ -170,6 +168,8 @@ def equivalent(graph1, graph2):
       [TODO]
     """
     
+    # FIXME: store attachment type in graph
+    
     # Graphs definitely can't match if they aren't the same size
     if not len(graph1) == len(graph2):
         return False
@@ -177,11 +177,19 @@ def equivalent(graph1, graph2):
     # Enforce rotational invariance by checking all 4 possible 90-degree rotations
     rotated_graph = {key: value for key, value in graph1.items()}
     for i in range(4):
-        # Check all keys. If they're all equal, the graphs match.
+        # If every key in graph 1 is also in graph 2, then 1 is a subgraph of 2
         for key in rotated_graph.keys():
             if not key in graph2:
                 break
             if not keysEquivalent(rotated_graph[key], graph2[key]):
+                break
+        # If every key in graph 2 is also in graph 1, then 2 is a subgraph of 1
+        # Since we only get here if 1 is also a subgraph of 2, then graphs 1
+        # and 2 must be equivalent.
+        for key in graph2.keys():
+            if not key in rotated_graph:
+                break
+            if not keysEquivalent(graph2[key], rotated_graph[key]):
                 break
         else:
             return True
@@ -219,12 +227,24 @@ def keysEquivalent(key1, key2):
     obj_studs_2 = obj_stud_str_2[1:].split(':')
     tgt_studs_2 = tgt_stud_str_2[1:].split(':')
     
+    # test if 1 is a subset of 2
     for s in obj_studs_1:
         if not s in obj_studs_2:
             return False
     
+    # test if 2 is a subset of 1
+    for s in obj_studs_2:
+        if not s in obj_studs_1:
+            return False
+    
+    # test if 1 is a subset of 2
     for s in tgt_studs_1:
         if not s in tgt_studs_2:
+            return False
+    
+    # test if 2 is a subset of 1
+    for s in tgt_studs_2:
+        if not s in tgt_studs_1:
             return False
     
     return True
@@ -329,83 +349,109 @@ def rotateGraph90cw(graph):
     return rotated_graph
 
 
-def drawTransitions(transition_probs, corpus, task):
+def drawTransitions(transition_counts, state_counts, fig_path):
     """
     Draw a graph representing all observed state transitions.
     
     Parameters
     ----------
-    transition_probs : [TODO]
+    transition_counts : dict, tuple(int) -> int
       [TODO]
-    corpus : [TODO]
+    state_counts : dict, int -> int
       [TODO]
-    task : int
+    fig_path : str
+      [TODO]
+    
+    Returns
+    -------
+    transition_probs : N-by-N np array
       [TODO]
     """
     
-    task_str = 'task-{}'.format(task)
-    fig_path = os.path.join(corpus.paths['figures'], 'results-prelim', task_str)
-    if not os.path.exists(fig_path):
-        os.makedirs(fig_path)
+    # TODO: draw graph with transition probs labeled
     
     # Create a directed graph representing the block construction and add
     # all blocks as nodes
-    transitions = gv.Digraph(name='transitions', format='png',
+    counts_graph = gv.Digraph(name='transition-counts', format='png',
+                              directory=fig_path)
+    probs_graph = gv.Digraph(name='transition-probs', format='png',
                              directory=fig_path)
     
+    transition_probs = np.zeros((len(state_counts), len(state_counts)))
     node_indices = []
-    for (object_index, target_index), prob in transition_probs.items():
-        if node_indices.count(object_index) == 0:
-            image_fn = 'state{}.png'.format(object_index)
-            image_path = os.path.join(fig_path, image_fn)
-            transitions.node(str(object_index), image=image_path)
-            node_indices.append(object_index)
-        if node_indices.count(target_index) == 0:
-            image_fn = 'state{}.png'.format(target_index)
-            image_path = os.path.join(fig_path, image_fn)
-            transitions.node(str(target_index), image=image_path)
-            node_indices.append(target_index)
-        transitions.edge(str(object_index), str(target_index),
-                         label=str(prob))
+    for (prev_state_id, state_id), count in transition_counts.items():
+        
+        prev_state_count = state_counts[prev_state_id]
+        prob = float(count) / float(prev_state_count)
+        transition_probs[prev_state_id, state_id] = prob
+        
+        if node_indices.count(prev_state_id) == 0:
+            image_fn = 'state{}.png'.format(prev_state_id)
+            image_path = os.path.join(fig_path, 'states', 'small', image_fn)
+            counts_graph.node(str(prev_state_id), image=image_path)
+            probs_graph.node(str(prev_state_id), image=image_path)
+            node_indices.append(prev_state_id)
+        if node_indices.count(state_id) == 0:
+            image_fn = 'state{}.png'.format(state_id)
+            image_path = os.path.join(fig_path, 'states', 'small', image_fn)
+            counts_graph.node(str(state_id), image=image_path)
+            probs_graph.node(str(state_id), image=image_path)
+            node_indices.append(state_id)
+        
+        counts_graph.edge(str(prev_state_id), str(state_id),
+                          label=str(count))
+        probs_graph.edge(str(prev_state_id), str(state_id),
+                         label='{:.2f}'.format(prob))
     
     # Save state image to file
-    fn = 'task-{}-transitions'.format(task)
-    transitions.render(filename=fn, directory=fig_path)
+    counts_graph.render(filename='transition-counts', directory=fig_path)
+    probs_graph.render(filename='transition-probs', directory=fig_path)
     
-    return transitions
+    # Remove graphviz config file
+    os.remove(os.path.join(fig_path, 'transition-counts'))
+    os.remove(os.path.join(fig_path, 'transition-probs'))
+    
+    return transition_probs
     
 
-def drawStates(state_ids, corpus, task):
+def drawStates(state_ids, fig_path):
     """
     """
     
-    task_str = 'task-{}'.format(task)
-    fig_path = os.path.join(corpus.paths['figures'], 'results-prelim', task_str)
-    if not os.path.exists(fig_path):
-        os.makedirs(fig_path)
+    state_fig_path = os.path.join(fig_path, 'states')
+    if not os.path.exists(state_fig_path):
+        os.makedirs(state_fig_path)
     
     for index, state in enumerate(state_ids):
         struct = DuploStructure(state)
         struct.computeCoords()
-        struct.draw(fig_path, index)
+        struct.draw(state_fig_path, index)
 
 
-def drawPaths(paths, state_ids, corpus, task, trials):
+def drawPaths(paths, state_types, base_path, trials):
     """
     """
     
-    task_str = 'task-{}'.format(task)
+    fig_path = os.path.join(base_path, 'paths')
     
     for path_index, path in enumerate(paths):
-        path_str = 'path-{}'.format(trials[path_index])
-        fig_path = os.path.join(corpus.paths['figures'], 'results-prelim', task_str, path_str)
-        if not os.path.exists(fig_path):
-            os.makedirs(fig_path)
+        path_str = 'path{}'.format(trials[path_index])
+        path_graph = gv.Digraph(name=path_str, format='png',
+                                directory=fig_path)
         
+        prev_order_idx = -1
         for order_index, state_index in enumerate(path):
-            struct = DuploStructure(state_ids[state_index])
-            struct.computeCoords()
-            struct.draw(fig_path, order_index)
+            image_fn = 'state{}.png'.format(state_index)
+            image_path = os.path.join(base_path, 'states', 'small', image_fn)
+            
+            path_graph.node(str(order_index), image=image_path)
+            if prev_order_idx >= 0:
+                path_graph.edge(str(prev_order_idx), str(order_index))
+            
+            prev_order_idx = order_index
+        
+        path_graph.render(filename=path_str, directory=fig_path)
+        os.remove(os.path.join(fig_path, path_str))
 
 
 if __name__ == '__main__':
@@ -425,60 +471,162 @@ if __name__ == '__main__':
     c = DuploCorpus()
     for selected_task in range(1,7):
 
-        state_ids = [{}]
+        state_types = [{}]
         paths = []
         transition_counts = {}
+        state_counts = {}
+        num_transitions = 0
+        num_states = 0
+        
+        # Create directory for figures
+        task_str = 'task-{}'.format(selected_task)
+        fig_path = os.path.join(c.paths['figures'], 'results-prelim', task_str)
+        if not os.path.exists(fig_path):
+            os.makedirs(fig_path)
         
         ids = zip(c.meta_data['trial id'], c.meta_data['task id'])
         trials = [trial for trial, task in ids if trial in selected_idxs and task == selected_task]
-        #trials = [trial for trial, task in ids if trial == 316 and task == selected_task]
+        #trials = [trial for trial, task in ids if trial == 254 and task == selected_task]
         
         for t in trials:
             print('==[ trial {} ]========'.format(t))
     
             labels = c.readLabels(t, selected_annotator)
-            #if 2 in labels['action']:
-            #    print('affected by bug: skipping trial')
-            #    paths.append([])
-            #    continue
-            
-            graph_seq = parseLabels(labels)
+            states = parseLabels(labels)
                         
             # Get the state ID for each of the parsed configurations
-            graph_ids = []
-            for graph in graph_seq:
-                for i, state in enumerate(state_ids):
-                    if equivalent(graph, state):
-                        graph_ids.append(i)
+            type_ids = []
+            for state in states:
+                for type_index, state_type in enumerate(state_types):
+                    if equivalent(state, state_type):
+                        type_ids.append(type_index)
                         break
                 else:
-                    state_ids.append(graph)
-                    graph_ids.append(len(state_ids) - 1)
+                    state_types.append(state)
+                    type_ids.append(len(state_types) - 1)
             
-            # Print configuration sequence info to console
-            for i, graph in enumerate(graph_seq[1:]):
-                key = (graph_ids[i], graph_ids[i+1])
-                if not key in transition_counts:
-                    transition_counts[key] = 1
-                else:
-                    transition_counts[key] += 1
-                #print('{} : {} -> {}'.format(i, *key))
-                #printGraph(graph)
+            # Count state and edge occurrences
+            state_counts[0] = state_counts.get(0, 0) + 1
+            prev_state_id = 0
+            for i, state in enumerate(states[1:]):
+                state_id = type_ids[i+1]
+                edge = (prev_state_id, state_id)
+                transition_counts[edge] = transition_counts.get(edge, 0) + 1
+                state_counts[state_id] = state_counts.get(state_id, 0) + 1
+                prev_state_id = state_id
+            num_states += len(states)
+            num_transitions += len(states) - 1
             
-            paths.append(graph_ids)
+            paths.append(type_ids)
         
-        drawStates(state_ids, c, selected_task)
-        drawTransitions(transition_counts, c, selected_task)
-        drawPaths(paths, state_ids, c, selected_task, trials)
+        # Draw observed states and transition diagrams
+        drawStates(state_types, fig_path)
+        drawPaths(paths, state_types, fig_path, trials)
+        transition_probs = drawTransitions(transition_counts, state_counts, fig_path)
         
+        # Calculate and plot path probabilities
+        path_probs = []
+        for path in paths:
+            prev_state_id = path[0]
+            assert(prev_state_id == 0)
+            path_prob = 1.0
+            for state_id in path[1:]:
+                path_prob *= transition_probs[prev_state_id, state_id]
+                prev_state_id = state_id
+            path_key = tuple(path)
+            path_probs.append(path_prob)
+        
+        num_paths = len(path_probs)
+        path_probs_arr = np.array(path_probs)
+        path_idxs = np.array(list(range(num_paths)))
+        
+        plt.figure(figsize=(12,6))
+        plt.bar(path_idxs, path_probs_arr, tick_label=np.array(trials),
+                align='center', color='skyblue')
+        plt.title('Likelihood of assembly paths under model')
+        plt.xlabel('Path index (p)')
+        plt.ylabel('Pr(p)')
+        plt.tight_layout()
+        fn = os.path.join(fig_path, 'path-probs.png')
+        plt.savefig(fn)
+        plt.close()
+        
+        # Sort states by probability and plot the result
+        # Reverse sort_idxs to sort in descending order instead of ascending
+        path_sort_idxs = np.argsort(path_probs_arr)[::-1]
+        sorted_trials = np.array(trials)[path_sort_idxs]
+        plt.figure(figsize=(12,6))
+        plt.bar(path_idxs, path_probs_arr[path_sort_idxs],
+                tick_label=sorted_trials, align='center', color='skyblue')
+        plt.title('Assembly paths ordered by likelihood')
+        plt.xlabel('Path index (p)')
+        plt.ylabel('Pr(p)')
+        plt.tight_layout()
+        fn = os.path.join(fig_path, 'path-probs-sorted.png')
+        plt.savefig(fn)
+        plt.close()
+        
+        ranked_paths_dir = os.path.join(fig_path, 'ranked-paths')
+        if not os.path.exists(ranked_paths_dir):
+            os.makedirs(ranked_paths_dir)
+        for rank, trial_id in enumerate(sorted_trials):
+            src_fn = 'path{}.png'.format(trial_id)
+            dst_fn = 'rank{}-path{}.png'.format(rank, trial_id)
+            source = os.path.join(fig_path, 'paths', src_fn)
+            destination = os.path.join(ranked_paths_dir, dst_fn)
+            copyfile(source, destination)
+        
+        # Calculate and plot state (unigram) probabilities
+        num_types = len(state_types)
+        state_probs = np.zeros(num_types)
+        for state, count in state_counts.items():
+            state_prob = float(count) / float(num_states)
+            state_probs[state] = state_prob
+        idxs = np.array(list(range(num_types)))
+        plt.figure(figsize=(12,6))
+        plt.bar(idxs, state_probs, tick_label=idxs, align='center', color='skyblue')
+        plt.title('Relative frequencies of assembly states')
+        plt.xlabel('state index')
+        plt.ylabel('frequency')
+        plt.tight_layout()
+        fn = os.path.join(fig_path, 'state-probs.png')
+        plt.savefig(fn)
+        plt.close()
+        
+        # Sort states by probability and plot the result
+        # Reverse sort_idxs to sort in descending order instead of ascending
+        sort_idxs = np.argsort(state_probs)[::-1]
+        plt.figure(figsize=(12,6))
+        plt.bar(idxs, state_probs[sort_idxs], tick_label=sort_idxs,
+                align='center', color='skyblue')
+        plt.title('Assembly states ordered by relative frequency')
+        plt.xlabel('state index')
+        plt.ylabel('frequency')
+        plt.tight_layout()
+        fn = os.path.join(fig_path, 'state-probs-sorted.png')
+        plt.savefig(fn)
+        plt.close()
+        
+        ranked_states_dir = os.path.join(fig_path, 'ranked-states')
+        if not os.path.exists(ranked_states_dir):
+            os.makedirs(ranked_states_dir)
+        for rank, state_id in enumerate(sort_idxs):
+            src_fn = 'state{}.png'.format(state_id)
+            dst_fn = 'rank{}-state{}.png'.format(rank, state_id)
+            source = os.path.join(fig_path, 'states', src_fn)
+            destination = os.path.join(ranked_states_dir, dst_fn)
+            copyfile(source, destination)
+                
+        """
         # write states
         states_fn = 'states.txt'
         task_str = 'task-{}'.format(selected_task)
         states_path = os.path.join(c.paths['figures'], 'results-prelim', task_str, states_fn)
         with open(states_path, 'wt') as text_file:
-            for i, graph in enumerate(state_ids):
+            for i, graph in enumerate(state_types):
                 text_file.write('{}\n'.format(i))
                 for key, value in graph.items():
                     names = tuple(blocks[k] for k in key)
                     fmtstr = '{}  {}  {}\n'
                     text_file.write(fmtstr.format(names, *value))
+        """
