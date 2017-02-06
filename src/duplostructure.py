@@ -160,8 +160,15 @@ class DuploStructure:
         """
         """
         
+        small_fig_dir = os.path.join(file_path, 'small')
+        if not os.path.exists(small_fig_dir):
+            os.makedirs(small_fig_dir)
+        
         plot_index = 0
         images = []
+        image_paths = []
+        small_images = []
+        small_image_paths = []
         for root_name in self.roots:
             
             if not root_name in self.duplos:
@@ -176,25 +183,43 @@ class DuploStructure:
                 
                 fn = 'state{}-component{}.png'.format(state_index, plot_index)
                 path = os.path.join(file_path, fn)
+                small_path = os.path.join(small_fig_dir, fn)
                 #plt.axis((-10, 10, -10, 10))
                 plt.gca().relim()
                 plt.gca().autoscale_view(True,True,True)
                 plt.tight_layout()
-                plt.savefig(path, dpi=10)
+                plt.savefig(small_path, dpi=10)
+                plt.savefig(path, dpi=100)
                 plt.close()
                 plot_index += 1
                 
+                image_paths.append(path)
                 images.append(mpimg.imread(path))
+                
+                small_image_paths.append(small_path)
+                small_images.append(mpimg.imread(small_path))
         
-        #plt.show()
+        image_fn = 'state{}.png'.format(state_index)
+        image_path = os.path.join(file_path, image_fn)
         if images:
-            image_fn = 'state{}.png'.format(state_index)
-            image_path = os.path.join(file_path, image_fn)
-            #import pdb; pdb.set_trace()
             image = np.hstack(tuple(images))
             mpimg.imsave(image_path, image)
         else:
-            print('WARNING: no figure for state {}'.format(state_index))
+            image = np.ones((400,600))
+            mpimg.imsave(image_path, image, cmap='gray', vmin=0.0, vmax=1.0)
+        # delete any intermediate images that were generated
+        for path in image_paths:
+            os.remove(path)
+        
+        small_image_path = os.path.join(small_fig_dir, image_fn)
+        if small_images:
+            image = np.hstack(tuple(small_images))
+            mpimg.imsave(small_image_path, image)
+        else:
+            image = np.ones((40,60))
+            mpimg.imsave(small_image_path, image, cmap='gray', vmin=0.0, vmax=1.0)
+        for path in small_image_paths:
+            os.remove(path)
         
         self.resetVisited()
     
