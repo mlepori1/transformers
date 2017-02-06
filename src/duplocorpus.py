@@ -40,7 +40,7 @@ class DuploCorpus:
                               'D6:B3:DA:FD:2E:DE',
                               'C8:CB:F1:55:DC:BD',
                               'F3:3A:AD:8A:B7:14')
-        self.imu_addresses = self.imu_addresses[0:4]
+        self.imu_addresses = self.imu_addresses
         self.imu_ids = tuple(''.join(a.split(':')[-2:]) for a in self.imu_addresses)
         self.imu_nicknames = tuple(str(i+1) for i in range(len(self.imu_ids)))
         self.nickname2address = {nn:a for nn, a in zip(self.imu_nicknames, self.imu_addresses)}
@@ -107,7 +107,7 @@ class DuploCorpus:
         self.paths['output'] = os.path.join(self.paths['root'], 'output')   
         self.paths['figures'] = os.path.join(self.paths['root'], 'figures')
         self.paths['working'] = os.path.join(self.paths['root'], 'working')
-        self.paths['data'] = os.path.join(self.paths['root'], 'data')
+        self.paths['data'] = os.path.join(self.paths['root'], 'child-data')
         self.paths['imu-samples'] = os.path.join(self.paths['data'], 'imu-samples')
         self.paths['imu-settings'] = os.path.join(self.paths['data'], 'imu-settings')
         self.paths['video-frames'] = os.path.join(self.paths['data'], 'video-frames')
