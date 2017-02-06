@@ -202,7 +202,7 @@ class Application:
         instructions.grid(sticky=tk.W, row=0, columnspan=3)
     
         # Draw IMU-block connection interface
-        imu_nicknames = tuple(sorted(self.corpus.nickname2id.keys()))
+        imu_nicknames = self.corpus.imu_nicknames
         for i, block in enumerate(self.blocks):
             
             color, shape = block.split()
@@ -301,10 +301,17 @@ class Application:
         # Draw placeholders for IMU monitors
         self.imu_id2activity_color = {}
         imu_monitor_frame = tk.Frame(master)
-        for i, imu_id in enumerate(self.imu_id2dev.keys()):
+        #for i, imu_id in enumerate(self.imu_id2dev.keys()):
+        for i, block in enumerate(self.blocks):
+            
+            if not block in self.block2imu_nickname:
+                continue
+            
+            nickname = self.block2imu_nickname[block]
+            imu_id = self.corpus.nickname2id[nickname]
             
             # Label text
-            color, shape = self.imu2block[imu_id].split()
+            color, shape = block.split()
             shape_text = '            ' if shape == 'rect' else '    '
             color_label = tk.Label(imu_monitor_frame, text=shape_text,
                                    background=color)
@@ -315,17 +322,22 @@ class Application:
             # Activity indicator
             self.imu_id2activity_color[imu_id] = tk.Label(imu_monitor_frame,
                                                           text='    ',
-                                                          background='red')
+                                                          background='yellow')
             self.imu_id2activity_color[imu_id].grid(row=i, column=2)
             
             # disconnect / reconnect button
             # Draw different buttons depending on whether the block is
             # associated with a connected IMU or not
-            #self.block2imu_id_field[block] = tk.StringVar(master)
-            #nickname = self.block2imu_nickname[block]
-            #self.block2imu_id_field[block].set(nickname)
-            #button_text = 'Disconnect'
-            #func = lambda b=str(block): self.resetConnection(b)
+            if block in self.block2imu_nickname:
+                nickname = self.block2imu_nickname[block]
+                button_text = 'Disconnect'
+                func = lambda b=str(block): self.resetConnection(b)
+            else:
+                button_text = 'Connect'
+                func = lambda b=str(block): self.connectionAttemptDialog(b)
+            button = tk.Button(imu_monitor_frame, text=button_text, command=func)
+            button.grid(sticky=tk.W, row=i, column=3)
+            self.block2button[block] = button
             
         imu_monitor_frame.grid(row=1, column=2)
             

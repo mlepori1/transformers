@@ -174,13 +174,13 @@ class MetawearDevice:
             self.accel_signal = libmetawear.mbl_mw_acc_get_acceleration_data_signal(self.client.board)
             self.accel_data_fn = Fn_DataPtr(self.accel_data_handler)
             libmetawear.mbl_mw_datasignal_subscribe(self.accel_signal, self.accel_data_fn)
-            time.sleep(0.25)
+            time.sleep(0.5)
         
         if self.sample_gyro:
             self.gyro_signal = libmetawear.mbl_mw_gyro_bmi160_get_rotation_data_signal(self.client.board)
             self.gyro_data_fn = Fn_DataPtr(self.gyro_data_handler)
             libmetawear.mbl_mw_datasignal_subscribe(self.gyro_signal, self.gyro_data_fn)
-            time.sleep(0.25)
+            time.sleep(0.5)
     
     
     def init_logger_rss(self):
@@ -270,12 +270,12 @@ class MetawearDevice:
         if self.sample_accel:
             self.client.accelerometer.start()
             self.client.accelerometer.toggle_sampling(True)
-            time.sleep(0.25)
+            time.sleep(0.5)
         
         if self.sample_gyro:
             self.client.gyroscope.start()
             self.client.gyroscope.toggle_sampling(True)
-            time.sleep(0.25)
+            time.sleep(0.5)
         
         self.start_time = time.time()
         
@@ -427,12 +427,12 @@ class MetawearDevice:
             #accel_sample_period = 1.0 / float(self.accel_sample_rate)
             if time_elapsed <= time_thresh: #2 * accel_sample_period:
                 return self.accel_data[-1]
-            else:
-                self.resetConnection()
-                self.start_sampling()
-        else:
-            self.resetConnection()
-            self.start_sampling()
+            #selse:
+                #self.resetConnection()
+                #self.start_sampling()
+        #else:
+            #self.resetConnection()
+            #self.start_sampling()
             
         return None
     

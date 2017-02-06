@@ -41,8 +41,9 @@ class DuploCorpus:
                               'C8:CB:F1:55:DC:BD',
                               'F3:3A:AD:8A:B7:14')
         self.imu_ids = tuple(''.join(a.split(':')[-2:]) for a in self.imu_addresses)
-        self.nickname2address = {str(i+1):a for i, a in enumerate(self.imu_addresses)}
-        self.nickname2id = {str(i+1):a for i, a in enumerate(self.imu_ids)}
+        self.imu_nicknames = tuple(str(i+1) for i in range(len(self.imu_ids)))
+        self.nickname2address = {nn:a for nn, a in zip(self.imu_nicknames, self.imu_addresses)}
+        self.nickname2id = {nn:i for nn, i in zip(self.imu_nicknames, self.imu_ids)}
         self.image_types = ('rgb', 'depth')
         
         self.initTypestructs()
