@@ -751,6 +751,7 @@ class DataCollatorForLanguageModeling(DataCollatorMixin):
 
         # The rest of the time (10% of the time) we keep the masked input tokens unchanged
         else:
+            print("CLF Masking")
             labels = inputs.clone()
             # Always mask the first token, which is the binary label
             probability_matrix = torch.full(labels.shape, 0.0)
