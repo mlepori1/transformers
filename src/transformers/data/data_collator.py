@@ -587,6 +587,9 @@ class DataCollatorForLanguageModeling(DataCollatorMixin):
             Whether or not to use masked language modeling. If set to :obj:`False`, the labels are the same as the
             inputs with the padding tokens ignored (by setting them to -100). Otherwise, the labels are -100 for
             non-masked tokens and the value to predict for the masked token.
+        clf (:obj:`bool`, optional):
+            Whether or not to only mask the first token of a each sequence in a batch. This could be useful when
+            concatenating labels to sequences in order to perform classification using the same setup as MLM
         mlm_probability (:obj:`float`, `optional`, defaults to 0.15):
             The probability with which to (randomly) mask tokens in the input, when :obj:`mlm` is set to :obj:`True`.
         pad_to_multiple_of (:obj:`int`, `optional`):
@@ -603,6 +606,7 @@ class DataCollatorForLanguageModeling(DataCollatorMixin):
     tokenizer: PreTrainedTokenizerBase
     mlm: bool = True
     mlm_probability: float = 0.15
+    clf: bool = False
     pad_to_multiple_of: Optional[int] = None
     tf_experimental_compile: bool = False
     return_tensors: str = "pt"
@@ -721,30 +725,44 @@ class DataCollatorForLanguageModeling(DataCollatorMixin):
         import torch
 
         labels = inputs.clone()
-        # We sample a few tokens in each sequence for MLM training (with probability `self.mlm_probability`)
-        probability_matrix = torch.full(labels.shape, self.mlm_probability)
-        if special_tokens_mask is None:
-            special_tokens_mask = [
-                self.tokenizer.get_special_tokens_mask(val, already_has_special_tokens=True) for val in labels.tolist()
-            ]
-            special_tokens_mask = torch.tensor(special_tokens_mask, dtype=torch.bool)
-        else:
-            special_tokens_mask = special_tokens_mask.bool()
+        if not self.clf:
+            # We sample a few tokens in each sequence for MLM training (with probability `self.mlm_probability`)
+            probability_matrix = torch.full(labels.shape, self.mlm_probability)
+            if special_tokens_mask is None:
+                special_tokens_mask = [
+                    self.tokenizer.get_special_tokens_mask(val, already_has_special_tokens=True) for val in labels.tolist()
+                ]
+                special_tokens_mask = torch.tensor(special_tokens_mask, dtype=torch.bool)
+            else:
+                special_tokens_mask = special_tokens_mask.bool()
 
-        probability_matrix.masked_fill_(special_tokens_mask, value=0.0)
-        masked_indices = torch.bernoulli(probability_matrix).bool()
-        labels[~masked_indices] = -100  # We only compute loss on masked tokens
+            probability_matrix.masked_fill_(special_tokens_mask, value=0.0)
+            masked_indices = torch.bernoulli(probability_matrix).bool()
+            labels[~masked_indices] = -100  # We only compute loss on masked tokens
 
-        # 80% of the time, we replace masked input tokens with tokenizer.mask_token ([MASK])
-        indices_replaced = torch.bernoulli(torch.full(labels.shape, 0.8)).bool() & masked_indices
-        inputs[indices_replaced] = self.tokenizer.convert_tokens_to_ids(self.tokenizer.mask_token)
+            # 80% of the time, we replace masked input tokens with tokenizer.mask_token ([MASK])
+            indices_replaced = torch.bernoulli(torch.full(labels.shape, 0.8)).bool() & masked_indices
+            inputs[indices_replaced] = self.tokenizer.convert_tokens_to_ids(self.tokenizer.mask_token)
 
-        # 10% of the time, we replace masked input tokens with random word
-        indices_random = torch.bernoulli(torch.full(labels.shape, 0.5)).bool() & masked_indices & ~indices_replaced
-        random_words = torch.randint(len(self.tokenizer), labels.shape, dtype=torch.long)
-        inputs[indices_random] = random_words[indices_random]
+            # 10% of the time, we replace masked input tokens with random word
+            indices_random = torch.bernoulli(torch.full(labels.shape, 0.5)).bool() & masked_indices & ~indices_replaced
+            random_words = torch.randint(len(self.tokenizer), labels.shape, dtype=torch.long)
+            inputs[indices_random] = random_words[indices_random]
 
         # The rest of the time (10% of the time) we keep the masked input tokens unchanged
+        else:
+            labels = inputs.clone()
+            # Always mask the first token, which is the binary label
+            probability_matrix = torch.full(labels.shape, 0.0)
+            for row in range(probability_matrix.shape[0]):
+                probability_matrix[row, 1] = 1.0
+            masked_indices = torch.bernoulli(probability_matrix).bool()
+            labels[~masked_indices] = -100  # We only compute loss on masked tokens
+
+            ### EDIT ###
+            # 100% of the time, we replace masked input tokens with tokenizer.mask_token ([MASK])
+            inputs[masked_indices] = self.tokenizer.convert_tokens_to_ids(self.tokenizer.mask_token)
+
         return inputs, labels
 
     def numpy_call(self, examples: List[Union[List[int], Any, Dict[str, Any]]]) -> Dict[str, Any]:
