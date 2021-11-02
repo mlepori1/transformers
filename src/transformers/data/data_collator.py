@@ -76,6 +76,7 @@ class DataCollatorForLanguageModeling:
     tokenizer: PreTrainedTokenizer
     mlm: bool = True
     mlm_probability: float = 0.15
+    clf: bool = False
 
     def __call__(self, examples: List[torch.Tensor]) -> Dict[str, torch.Tensor]:
         batch = self._tensorize_batch(examples)
@@ -104,33 +105,49 @@ class DataCollatorForLanguageModeling:
         """
         Prepare masked tokens inputs/labels for masked language modeling: 80% MASK, 10% random, 10% original.
         """
-
-        if self.tokenizer.mask_token is None:
-            raise ValueError(
-                "This tokenizer does not have a mask token which is necessary for masked language modeling. Remove the --mlm flag if you want to use this tokenizer."
-            )
+        import torch
 
         labels = inputs.clone()
-        # We sample a few tokens in each sequence for masked-LM training (with probability args.mlm_probability defaults to 0.15 in Bert/RoBERTa)
-        probability_matrix = torch.full(labels.shape, self.mlm_probability)
         special_tokens_mask = [
             self.tokenizer.get_special_tokens_mask(val, already_has_special_tokens=True) for val in labels.tolist()
         ]
-        probability_matrix.masked_fill_(torch.tensor(special_tokens_mask, dtype=torch.bool), value=0.0)
-        if self.tokenizer._pad_token is not None:
-            padding_mask = labels.eq(self.tokenizer.pad_token_id)
-            probability_matrix.masked_fill_(padding_mask, value=0.0)
-        masked_indices = torch.bernoulli(probability_matrix).bool()
-        labels[~masked_indices] = -100  # We only compute loss on masked tokens
+        if not self.clf:
+            # We sample a few tokens in each sequence for MLM training (with probability `self.mlm_probability`)
+            probability_matrix = torch.full(labels.shape, self.mlm_probability)
+            if special_tokens_mask is None:
+                special_tokens_mask = [
+                    self.tokenizer.get_special_tokens_mask(val, already_has_special_tokens=True) for val in labels.tolist()
+                ]
+                special_tokens_mask = torch.tensor(special_tokens_mask, dtype=torch.bool)
+            else:
+                special_tokens_mask = special_tokens_mask.bool()
 
-        # 80% of the time, we replace masked input tokens with tokenizer.mask_token ([MASK])
-        indices_replaced = torch.bernoulli(torch.full(labels.shape, 0.8)).bool() & masked_indices
-        inputs[indices_replaced] = self.tokenizer.convert_tokens_to_ids(self.tokenizer.mask_token)
+            probability_matrix.masked_fill_(special_tokens_mask, value=0.0)
+            masked_indices = torch.bernoulli(probability_matrix).bool()
+            labels[~masked_indices] = -100  # We only compute loss on masked tokens
 
-        # 10% of the time, we replace masked input tokens with random word
-        indices_random = torch.bernoulli(torch.full(labels.shape, 0.5)).bool() & masked_indices & ~indices_replaced
-        random_words = torch.randint(len(self.tokenizer), labels.shape, dtype=torch.long)
-        inputs[indices_random] = random_words[indices_random]
+            # 80% of the time, we replace masked input tokens with tokenizer.mask_token ([MASK])
+            indices_replaced = torch.bernoulli(torch.full(labels.shape, 0.8)).bool() & masked_indices
+            inputs[indices_replaced] = self.tokenizer.convert_tokens_to_ids(self.tokenizer.mask_token)
+
+            # 10% of the time, we replace masked input tokens with random word
+            indices_random = torch.bernoulli(torch.full(labels.shape, 0.5)).bool() & masked_indices & ~indices_replaced
+            random_words = torch.randint(len(self.tokenizer), labels.shape, dtype=torch.long)
+            inputs[indices_random] = random_words[indices_random]
 
         # The rest of the time (10% of the time) we keep the masked input tokens unchanged
+        else:
+            print("CLF Masking")
+            labels = inputs.clone()
+            # Always mask the first token, which is the binary label
+            probability_matrix = torch.full(labels.shape, 0.0)
+            for row in range(probability_matrix.shape[0]):
+                probability_matrix[row, 1] = 1.0
+            masked_indices = torch.bernoulli(probability_matrix).bool()
+            labels[~masked_indices] = -100  # We only compute loss on masked tokens
+
+            ### EDIT ###
+            # 100% of the time, we replace masked input tokens with tokenizer.mask_token ([MASK])
+            inputs[masked_indices] = self.tokenizer.convert_tokens_to_ids(self.tokenizer.mask_token)
+
         return inputs, labels
