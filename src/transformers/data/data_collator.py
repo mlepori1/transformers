@@ -751,13 +751,11 @@ class DataCollatorForLanguageModeling(DataCollatorMixin):
 
         # The rest of the time (10% of the time) we keep the masked input tokens unchanged
         else:
-            print("CLF Masking")
             labels = inputs.clone()
             # Always mask the first token, which is the binary label
-            probability_matrix = torch.full(labels.shape, 0.0)
-            for row in range(probability_matrix.shape[0]):
-                probability_matrix[row, 1] = 1.0
-            masked_indices = torch.bernoulli(probability_matrix).bool()
+            probability_matrix = torch.full(labels.shape, 0)
+            probability_matrix[:, 1] = torch.ones(len(probability_matrix))
+            masked_indices = probability_matrix == 1
             labels[~masked_indices] = -100  # We only compute loss on masked tokens
 
             ### EDIT ###
