@@ -607,6 +607,7 @@ class DataCollatorForLanguageModeling(DataCollatorMixin):
     mlm: bool = True
     mlm_probability: float = 0.15
     clf: bool = False
+    generative_mask_label: bool = True
     pad_to_multiple_of: Optional[int] = None
     tf_experimental_compile: bool = False
     return_tensors: str = "pt"
@@ -737,6 +738,8 @@ class DataCollatorForLanguageModeling(DataCollatorMixin):
                 special_tokens_mask = special_tokens_mask.bool()
 
             probability_matrix.masked_fill_(special_tokens_mask, value=0.0)
+            if not self.generative_mask_label:
+                probability_matrix[:, 1] = torch.zeros(len(probability_matrix))
             masked_indices = torch.bernoulli(probability_matrix).bool()
             labels[~masked_indices] = -100  # We only compute loss on masked tokens
 
@@ -1077,7 +1080,7 @@ class DataCollatorForWholeWordMask(DataCollatorForLanguageModeling):
         if self.tokenizer._pad_token is not None:
             padding_mask = labels == self.tokenizer.pad_token_id
             masked_indices[padding_mask] = 0
-
+ 
         labels[~masked_indices] = -100  # We only compute loss on masked tokens
 
         # 80% of the time, we replace masked input tokens with tokenizer.mask_token ([MASK])
