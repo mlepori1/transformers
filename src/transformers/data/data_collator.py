@@ -740,7 +740,7 @@ class DataCollatorForLanguageModeling(DataCollatorMixin):
 
             probability_matrix.masked_fill_(special_tokens_mask, value=0.0)
             if self.generative_mask_label:
-                probability_matrix[:, label_idx] = torch.ones(len(probability_matrix))
+                probability_matrix[:, self.label_idx] = torch.ones(len(probability_matrix))
             masked_indices = torch.bernoulli(probability_matrix).bool()
             labels[~masked_indices] = -100  # We only compute loss on masked tokens
 
@@ -759,7 +759,7 @@ class DataCollatorForLanguageModeling(DataCollatorMixin):
             labels = inputs.clone()
             # Always mask the first token, which is the binary label
             probability_matrix = torch.full(labels.shape, 0)
-            probability_matrix[:, label_idx] = torch.ones(len(probability_matrix))
+            probability_matrix[:, self.label_idx] = torch.ones(len(probability_matrix))
             masked_indices = probability_matrix == 1
             labels[~masked_indices] = -100  # We only compute loss on masked tokens
 
