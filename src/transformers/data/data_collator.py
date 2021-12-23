@@ -608,6 +608,7 @@ class DataCollatorForLanguageModeling(DataCollatorMixin):
     mlm_probability: float = 0.15
     clf: bool = False
     generative_mask_label: bool = False
+    label_idx: int = 1
     pad_to_multiple_of: Optional[int] = None
     tf_experimental_compile: bool = False
     return_tensors: str = "pt"
@@ -739,25 +740,26 @@ class DataCollatorForLanguageModeling(DataCollatorMixin):
 
             probability_matrix.masked_fill_(special_tokens_mask, value=0.0)
             if self.generative_mask_label:
-                probability_matrix[:, 1] = torch.ones(len(probability_matrix))
+                probability_matrix[:, label_idx] = torch.ones(len(probability_matrix))
             masked_indices = torch.bernoulli(probability_matrix).bool()
             labels[~masked_indices] = -100  # We only compute loss on masked tokens
 
-            # 80% of the time, we replace masked input tokens with tokenizer.mask_token ([MASK])
-            indices_replaced = torch.bernoulli(torch.full(labels.shape, 0.8)).bool() & masked_indices
+            # EDIT
+            # 100% of the time, we replace masked input tokens with tokenizer.mask_token ([MASK])
+            indices_replaced = masked_indices
             inputs[indices_replaced] = self.tokenizer.convert_tokens_to_ids(self.tokenizer.mask_token)
 
             # 10% of the time, we replace masked input tokens with random word
-            indices_random = torch.bernoulli(torch.full(labels.shape, 0.5)).bool() & masked_indices & ~indices_replaced
-            random_words = torch.randint(len(self.tokenizer), labels.shape, dtype=torch.long)
-            inputs[indices_random] = random_words[indices_random]
+            #indices_random = torch.bernoulli(torch.full(labels.shape, 0.5)).bool() & masked_indices & ~indices_replaced
+            #random_words = torch.randint(len(self.tokenizer), labels.shape, dtype=torch.long)
+            #inputs[indices_random] = random_words[indices_random]
 
         # The rest of the time (10% of the time) we keep the masked input tokens unchanged
         else:
             labels = inputs.clone()
             # Always mask the first token, which is the binary label
             probability_matrix = torch.full(labels.shape, 0)
-            probability_matrix[:, 1] = torch.ones(len(probability_matrix))
+            probability_matrix[:, label_idx] = torch.ones(len(probability_matrix))
             masked_indices = probability_matrix == 1
             labels[~masked_indices] = -100  # We only compute loss on masked tokens
 
