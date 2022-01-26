@@ -1082,7 +1082,7 @@ class DataCollatorForWholeWordMask(DataCollatorForLanguageModeling):
         if self.tokenizer._pad_token is not None:
             padding_mask = labels == self.tokenizer.pad_token_id
             masked_indices[padding_mask] = 0
- 
+
         labels[~masked_indices] = -100  # We only compute loss on masked tokens
 
         # 80% of the time, we replace masked input tokens with tokenizer.mask_token ([MASK])
@@ -1100,6 +1100,132 @@ class DataCollatorForWholeWordMask(DataCollatorForLanguageModeling):
         inputs[indices_random] = random_words[indices_random]
 
         # The rest of the time (10% of the time) we keep the masked input tokens unchanged
+        return inputs, labels
+
+
+@dataclass
+class DataCollatorForTemplatedLanguageModeling(DataCollatorMixin):
+    """
+    Data collator used for language modeling. Inputs are dynamically padded to the maximum length of a batch if they
+    are not all of the same length.
+
+    Args:
+        tokenizer (:class:`~transformers.PreTrainedTokenizer` or :class:`~transformers.PreTrainedTokenizerFast`):
+            The tokenizer used for encoding the data.
+        mode (:obj:`str`, `optional`, defaults to :obj:`mlm`):
+            Options: "mlm", "mlm_mask_label", "clf"
+        mlm_probability (:obj:`float`, `optional`, defaults to 0.15):
+            The probability with which to (randomly) mask tokens in the input, when :obj:`mlm` is set to :obj:`True`.
+        pad_to_multiple_of (:obj:`int`, `optional`):
+            If set will pad the sequence to a multiple of the provided value.
+
+    .. note::
+
+        For best performance, this data collator should be used with a dataset having items that are dictionaries or
+        BatchEncoding, with the :obj:`"special_tokens_mask"` key, as returned by a
+        :class:`~transformers.PreTrainedTokenizer` or a :class:`~transformers.PreTrainedTokenizerFast` with the
+        argument :obj:`return_special_tokens_mask=True`.
+    """
+
+    tokenizer: PreTrainedTokenizerBase
+    mlm: str = "mlm"
+    mlm_probability: float = 0.15
+    pad_to_multiple_of: Optional[int] = None
+    tf_experimental_compile: bool = False
+    return_tensors: str = "pt"
+
+    def __post_init__(self):
+        if self.tokenizer.mask_token is None:
+            raise ValueError(
+                "This tokenizer does not have a mask token which is necessary for masked language modeling. "
+                "You should pass `mlm=False` to train on causal language modeling instead."
+            )
+        if self.tf_experimental_compile:
+            import tensorflow as tf
+
+            self.tf_mask_tokens = tf.function(self.tf_mask_tokens, jit_compile=True)
+
+    def torch_call(self, examples: List[Union[List[int], Any, Dict[str, Any]]]) -> Dict[str, Any]:
+        # Handle dict or lists with proper padding and conversion to tensor.
+        if isinstance(examples[0], (dict, BatchEncoding)):
+            batch = self.tokenizer.pad(examples, return_tensors="pt", pad_to_multiple_of=self.pad_to_multiple_of)
+        else:
+            batch = {
+                "input_ids": _torch_collate_batch(examples, self.tokenizer, pad_to_multiple_of=self.pad_to_multiple_of)
+            }
+
+        # If special token mask has been preprocessed, pop it from the dict.
+        special_tokens_mask = batch.pop("special_tokens_mask", None)
+        batch["input_ids"], batch["labels"] = self.torch_mask_tokens(
+            batch["input_ids"], batch["prompt_mask"], batch["prompt_padding"], special_tokens_mask=special_tokens_mask
+        )
+        return batch
+
+    def torch_mask_tokens(self, inputs: Any, prompt_mask: Any, prompt_padding:Any, special_tokens_mask: Optional[Any] = None) -> Tuple[Any, Any]:
+        """
+        Prepare masked tokens inputs/labels for masked language modeling: 80% MASK, 10% random, 10% original.
+        """
+        import torch
+
+        labels = inputs.clone()
+        if self.mlm == "mlm":
+            # We sample a few tokens in each sequence for MLM training (with probability `self.mlm_probability`)
+            probability_matrix = torch.full(labels.shape, self.mlm_probability)
+            if special_tokens_mask is None:
+                special_tokens_mask = [
+                    self.tokenizer.get_special_tokens_mask(val, already_has_special_tokens=True) for val in labels.tolist()
+                ]
+                special_tokens_mask = torch.tensor(special_tokens_mask, dtype=torch.bool)
+            else:
+                special_tokens_mask = special_tokens_mask.bool()
+
+            probability_matrix.masked_fill_(special_tokens_mask, value=0.0)
+            masked_indices = torch.bernoulli(probability_matrix).bool()
+            labels[~masked_indices] = -100  # We only compute loss on masked tokens
+            labels[prompt_padding] = -100 # Ignore masked out padding on labels
+
+            # EDIT
+            # 100% of the time, we replace masked input tokens with tokenizer.mask_token ([MASK])
+            indices_replaced = masked_indices
+            inputs[indices_replaced] = self.tokenizer.convert_tokens_to_ids(self.tokenizer.mask_token)
+
+        elif self.mlm == "mlm_mask_label":
+            # We sample a few tokens in each sequence for MLM training (with probability `self.mlm_probability`)
+            # Always mask out the label
+            probability_matrix = torch.full(labels.shape, self.mlm_probability)
+            if special_tokens_mask is None:
+                special_tokens_mask = [
+                    self.tokenizer.get_special_tokens_mask(val, already_has_special_tokens=True) for val in labels.tolist()
+                ]
+                special_tokens_mask = torch.tensor(special_tokens_mask, dtype=torch.bool)
+            else:
+                special_tokens_mask = special_tokens_mask.bool()
+            probability_matrix.masked_fill_(special_tokens_mask, value=0.0)
+
+            probability_matrix.masked_fill_(prompt_mask, value=1.0) # Always mask out prompt
+            masked_indices = torch.bernoulli(probability_matrix).bool()
+            labels[~masked_indices] = -100  # We only compute loss on masked tokens
+            labels[prompt_padding] = -100 # Ignore masked out padding on labels
+
+            # EDIT
+            # 100% of the time, we replace masked input tokens with tokenizer.mask_token ([MASK])
+            indices_replaced = masked_indices
+            inputs[indices_replaced] = self.tokenizer.convert_tokens_to_ids(self.tokenizer.mask_token)
+
+        else:
+            # Always mask out the label, nothing else
+            labels = inputs.clone()
+            # Always mask the first token, which is the binary label
+            probability_matrix = torch.full(labels.shape, 0)
+            probability_matrix.masked_fill_(prompt_mask, value=1.0) # Always mask out prompt
+            masked_indices = probability_matrix == 1
+            labels[~masked_indices] = -100  # We only compute loss on masked tokens
+            labels[prompt_padding] = -100 # Ignore masked out padding on labels
+
+            ### EDIT ###
+            # 100% of the time, we replace masked input tokens with tokenizer.mask_token ([MASK])
+            inputs[masked_indices] = self.tokenizer.convert_tokens_to_ids(self.tokenizer.mask_token)
+
         return inputs, labels
 
 
