@@ -575,7 +575,7 @@ class DataCollatorForSeq2Seq:
 
 
 @dataclass
-class DataCollatorForLanguageModeling(DataCollatorMixin):
+class DataCollatorForMLMLanguageModeling(DataCollatorMixin):
     """
     Data collator used for language modeling. Inputs are dynamically padded to the maximum length of a batch if they
     are not all of the same length.
@@ -834,7 +834,7 @@ class DataCollatorForLanguageModeling(DataCollatorMixin):
 
 
 @dataclass
-class DataCollatorForWholeWordMask(DataCollatorForLanguageModeling):
+class DataCollatorForWholeWordMask(DataCollatorForMLMLanguageModeling):
     """
     Data collator used for language modeling that masks entire words.
 
@@ -1104,7 +1104,7 @@ class DataCollatorForWholeWordMask(DataCollatorForLanguageModeling):
 
 
 @dataclass
-class DataCollatorForTemplatedLanguageModeling(DataCollatorMixin):
+class DataCollatorForLanguageModeling(DataCollatorMixin):
     """
     Data collator used for language modeling. Inputs are dynamically padded to the maximum length of a batch if they
     are not all of the same length.
@@ -1131,7 +1131,6 @@ class DataCollatorForTemplatedLanguageModeling(DataCollatorMixin):
     mlm: str = "mlm"
     mlm_probability: float = 0.15
     pad_to_multiple_of: Optional[int] = None
-    tf_experimental_compile: bool = False
     return_tensors: str = "pt"
 
     def __post_init__(self):
@@ -1140,10 +1139,6 @@ class DataCollatorForTemplatedLanguageModeling(DataCollatorMixin):
                 "This tokenizer does not have a mask token which is necessary for masked language modeling. "
                 "You should pass `mlm=False` to train on causal language modeling instead."
             )
-        if self.tf_experimental_compile:
-            import tensorflow as tf
-
-            self.tf_mask_tokens = tf.function(self.tf_mask_tokens, jit_compile=True)
 
     def torch_call(self, examples: List[Union[List[int], Any, Dict[str, Any]]]) -> Dict[str, Any]:
         # Handle dict or lists with proper padding and conversion to tensor.
@@ -1230,7 +1225,7 @@ class DataCollatorForTemplatedLanguageModeling(DataCollatorMixin):
 
 
 @dataclass
-class DataCollatorForSOP(DataCollatorForLanguageModeling):
+class DataCollatorForSOP(DataCollatorForMLMLanguageModeling):
     """
     Data collator used for sentence order prediction task.
 
