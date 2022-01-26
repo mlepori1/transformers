@@ -575,7 +575,7 @@ class DataCollatorForSeq2Seq:
 
 
 @dataclass
-class DataCollatorForRegularLanguageModeling(DataCollatorMixin):
+class DataCollatorForLanguageModeling(DataCollatorMixin):
     """
     Data collator used for language modeling. Inputs are dynamically padded to the maximum length of a batch if they
     are not all of the same length.
@@ -834,7 +834,7 @@ class DataCollatorForRegularLanguageModeling(DataCollatorMixin):
 
 
 @dataclass
-class DataCollatorForWholeWordMask(DataCollatorForRegularLanguageModeling):
+class DataCollatorForWholeWordMask(DataCollatorForLanguageModeling):
     """
     Data collator used for language modeling that masks entire words.
 
@@ -1104,7 +1104,7 @@ class DataCollatorForWholeWordMask(DataCollatorForRegularLanguageModeling):
 
 
 @dataclass
-class DataCollatorForLanguageModeling(DataCollatorMixin):
+class DataCollatorForTemplatedLanguageModeling(DataCollatorMixin):
     """
     Data collator used for language modeling. Inputs are dynamically padded to the maximum length of a batch if they
     are not all of the same length.
@@ -1230,7 +1230,7 @@ class DataCollatorForLanguageModeling(DataCollatorMixin):
 
 
 @dataclass
-class DataCollatorForSOP(DataCollatorForRegularLanguageModeling):
+class DataCollatorForSOP(DataCollatorForLanguageModeling):
     """
     Data collator used for sentence order prediction task.
 

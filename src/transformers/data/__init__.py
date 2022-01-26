@@ -18,6 +18,7 @@
 
 from .data_collator import (
     DataCollatorForLanguageModeling,
+    DataCollatorForTemplatedLanguageModeling,
     DataCollatorForPermutationLanguageModeling,
     DataCollatorForSeq2Seq,
     DataCollatorForSOP,
