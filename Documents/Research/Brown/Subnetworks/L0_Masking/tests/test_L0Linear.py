@@ -3,7 +3,7 @@ from ..L0_Linear import L0UnstructuredLinear
 import torch
 import torch.nn as nn
 import numpy as np
-from .utils import train_L0_Linear, L0_Loss
+from .utils import train_L0_Linear, L0_Loss, train_L0_probe
 
 def test_training_vs_test_mask():
     l0_layer = L0UnstructuredLinear(in_features=5, out_features=10)
@@ -66,7 +66,7 @@ def test_l0_training():
     max_active_params = L0_Loss()._get_model_prunable_params(model)
     assert(active_params < max_active_params)
 
-def test_low_lambda_training():
+def test_diff_lambda_training():
     model, _ = train_L0_Linear(lambda_numerator=.1)
     model.train(False)
     low_lambda_active_params = L0_Loss()._get_model_l0(model)
@@ -77,4 +77,11 @@ def test_low_lambda_training():
     assert(high_lambda_active_params < low_lambda_active_params)
 
 def test_pretrain_prune():
-    pass
+    mlp_model, unpruned_acc, l0_mlp, pruned_acc = train_L0_probe()
+    l0_mlp.train(False)
+    max_params = L0_Loss()._get_model_prunable_params(l0_mlp)
+    active_params = L0_Loss()._get_model_l0(l0_mlp)
+    print(f'Params: {active_params} / {max_params}')
+    assert(max_params > active_params)
+    assert(pruned_acc > unpruned_acc - .05)
+    assert(torch.equal(mlp_model.layer_0.weight,l0_mlp.layer_0.weight.T))

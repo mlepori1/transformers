@@ -23,15 +23,13 @@ class HiLoDataset(Dataset):
 class L0MLP(nn.Module):
     def __init__(self):
         super(L0MLP, self).__init__()
-        self.model = nn.Sequential(
-            L0UnstructuredLinear(10, 20),
-            nn.ReLU(),
-            L0UnstructuredLinear(20, 2),
-            nn.Sigmoid()
-        )
+        self.layer_0 = L0UnstructuredLinear(10, 20)
+        self.relu = nn.ReLU()
+        self.layer_1 = nn.Linear(20, 2)
+        self.sig = nn.Sigmoid()
 
     def forward(self, input):
-        return self.model(input)
+        return self.sig(self.layer_1(self.relu(self.layer_0(input))))
 
     def train(self, train_bool):
         for layer in self.modules():
@@ -43,16 +41,14 @@ class L0MLP(nn.Module):
 #Linear network to prune after training
 class MLP(nn.Module):
     def __init__(self):
-        super(L0MLP, self).__init__()
-        self.model = nn.Sequential(
-            nn.Linear(10, 20),
-            nn.ReLU(),
-            nn.Linear(20, 2),
-            nn.Sigmoid()
-        )
+        super(MLP, self).__init__()
+        self.layer_0 = nn.Linear(10, 20)
+        self.relu = nn.ReLU()
+        self.layer_1 = nn.Linear(20, 2)
+        self.sig = nn.Sigmoid()
 
     def forward(self, input):
-        return self.model(input)
+        return self.sig(self.layer_1(self.relu(self.layer_0(input))))
 
     def train(self, train_bool):
         for layer in self.modules():
@@ -60,8 +56,6 @@ class MLP(nn.Module):
                 layer.train(train_bool)
             except:
                 continue
-
-
 
 class L0_Loss():
     def __init__(self, lamb=1.):
@@ -123,30 +117,30 @@ def train_L0_Linear(lambda_numerator=1.):
 
 
 def train_L0_probe():
-    model = MLP()
+    mlp_model = MLP()
     train_set = HiLoDataset()
     test_set = HiLoDataset()
     trainloader = DataLoader(train_set, shuffle=True, batch_size=2)
     testloader = DataLoader(test_set, batch_size=2)
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters())
+    optimizer = optim.Adam(mlp_model.parameters())
 
     for _ in range(3):
         for data in trainloader:
             ipts, labels = data
             optimizer.zero_grad()
-            outputs = model(ipts)
-            loss = criterion(outputs, labels, model)
+            outputs = mlp_model(ipts)
+            loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
 
     total = 0.
     correct = 0.
-    model.train(False)
+    mlp_model.train(False)
     with torch.no_grad():
         for data in testloader:
             ipts, labels = data
-            outputs = model(ipts)
+            outputs = mlp_model(ipts)
             predicted = torch.argmax(outputs, dim=1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
@@ -154,6 +148,36 @@ def train_L0_probe():
     unpruned_acc = correct/total
     print(f"Unpruned Accuracy: {unpruned_acc}")
 
+    l0_mlp = L0MLP()
+    l0_mlp.layer_0 = l0_mlp.layer_0.from_module(mlp_model.layer_0, keep_weights=True)
 
+    l0_mlp.layer_0.weight.requires_grad = False
+    l0_mlp.layer_0.bias.requires_grad = False
 
-    return model, acc
+    criterion = L0_Loss(1./len(train_set))
+    optimizer = optim.Adam(l0_mlp.parameters())
+
+    for _ in range(5):
+        for data in trainloader:
+            ipts, labels = data
+            optimizer.zero_grad()
+            outputs = l0_mlp(ipts)
+            loss = criterion(outputs, labels, mlp_model)
+            loss.backward()
+            optimizer.step()
+
+    total = 0.
+    correct = 0.
+    l0_mlp.train(False)
+    with torch.no_grad():
+        for data in testloader:
+            ipts, labels = data
+            outputs = l0_mlp(ipts)
+            predicted = torch.argmax(outputs, dim=1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+
+    pruned_acc = correct/total
+    print(f"Pruned Accuracy: {pruned_acc}")
+
+    return mlp_model, unpruned_acc, l0_mlp, pruned_acc
